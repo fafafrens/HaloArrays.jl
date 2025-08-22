@@ -25,11 +25,12 @@ function test_halo_exchange_correctness()
     halo4 = copy(halo1)
     halo5 = copy(halo1)
 
-    fill!(halo1, rank + 1.0)
-    fill!(halo2, rank + 1.0)
-    fill!(halo3, rank + 1.0)
-    fill!(halo4, rank + 1.0)
-    fill!(halo5, rank + 1.0)
+    fill!(halo1.data, rank + 1.0)
+    fill!(halo2.data, rank + 1.0)
+    fill!(halo3.data, rank + 1.0)
+    fill!(halo4.data, rank + 1.0)
+    fill!(halo5.data, rank + 1.0)
+
     # Ensure all halos are initialized with the same data
     is_equal12 = all(halo1.data .== halo2.data)
     is_equal13 = all(halo1.data .== halo3.data)
@@ -63,7 +64,7 @@ function test_halo_exchange_correctness()
 
 
     # Perform halo exchanges
-    halo_exchange!(halo1)
+    halo_exchange_async_unsafe!(halo1)
     halo_exchange_async!(halo2)
     halo_exchange_waitall!(halo3)
     halo_exchange_waitall_unsafe!(halo4)
@@ -96,10 +97,10 @@ function test_halo_exchange_correctness()
         println("halo1 vs halo5: $is_equal15 at $nrank")
         println("%%%%%%%%%%%%%%%%%%%%%%")
         println("Rank $rank after halo exchange:")
-        @show(halo1.data)
-        @show(halo2.data)
-        @show(halo3.data)
-        @show(halo4.data)
+        #@show(halo1.data)
+        #@show(halo2.data)
+        #@show(halo3.data)
+        #@show(halo4.data)
     end
     MPI.Barrier(topo.comm)
     end

@@ -1,4 +1,20 @@
 # -- CartesianTopology struct and constructor --
+"""
+    CartesianTopology{N}
+
+Represents an MPI Cartesian topology of dimension `N`.
+
+Fields:
+- `nprocs::Int` : number of processes in the reference communicator.
+- `dims::NTuple{N,Int}` : grid partition (result of MPI.Dims_create).
+- `global_rank::Int` : rank in the original communicator.
+- `cart_coords::NTuple{N,Int}` : Cartesian coordinates of this process in `cart_comm`.
+- `neighbors::NTuple{N,NTuple{2,Int}}` : for each dimension, `(src, dest)` from MPI.Cart_shift.
+- `comm::MPI.Comm` : reference communicator (e.g. MPI.COMM_WORLD).
+- `cart_comm::MPI.Comm` : Cartesian communicator created by MPI.Cart_create.
+- `periodic_boundary_condition::NTuple{N,Bool}` : periodicity flags per dimension.
+- `active::Bool` : true if the topology is active on this rank (false => `cart_comm == MPI.COMM_NULL`).
+"""
 struct CartesianTopology{N}
     nprocs::Int
     dims::NTuple{N,Int}
@@ -14,7 +30,17 @@ struct CartesianTopology{N}
     active::Bool
 end
 
-function CartesianTopology(comm::MPI.Comm, dims::NTuple{N,Int}=ntuple(i->0, Val(N));periodic=ntuple(i->true, Val(N)),active::Bool=true) where {N}
+"""
+    CartesianTopology(comm::MPI.Comm, dims::NTuple{N,Int}; periodic=ntuple(i->true, Val(N)), active::Bool=true)
+
+Construct a `CartesianTopology` for `comm`.
+
+- If `comm == MPI.COMM_NULL` or `active == false` returns an inactive object
+  (`cart_comm == MPI.COMM_NULL`, `cart_coords` set to -1, etc.).
+- `dims` may contain zeros; `MPI.Dims_create` will fill them.
+- `periodic` indicates per-dimension periodicity.
+"""
+function CartesianTopology(comm::MPI.Comm, dims::NTuple{N,Int};periodic=ntuple(i->true, Val(N)),active::Bool=true) where {N}
     
     if comm == MPI.COMM_NULL || !active
         nprocs = 0
@@ -42,11 +68,28 @@ function CartesianTopology(comm::MPI.Comm, dims::NTuple{N,Int}=ntuple(i->0, Val(
     CartesianTopology{N}(nprocs, dims, global_rank, cart_coords, neighbors, comm, cart_comm,periodic,true)
 end
 
+function CartesianTopology(comm::MPI.Comm,n_dimension;periodic=ntuple(i->true, n_dimension),active::Bool=true) 
+CartesianTopology(comm, ntuple(i->0, n_dimension); periodic=periodic, active=active)
+end
 
+
+"""
+    isactive(cart::CartesianTopology)
+
+Return `true` if the topology is active on this process.
+"""
 function isactive(cart::CartesianTopology)
     return cart.active
 end
 
+"""
+    coords_to_color_multi(coords, dims, dims_to_remove) -> Int
+
+Compute an integer `color` for `MPI.Comm_split` by compressing the coordinates
+that are NOT removed. `dims_to_remove` is an iterable of 1-based dimension indices.
+
+All ranks that share the same coordinates on the kept dimensions get the same color.
+"""
 function coords_to_color_multi(coords::NTuple{N,Int}, dims::NTuple{N,Int}, dims_to_remove) where {N}
 
     tuple_dims_to_remove = Tuple(dims_to_remove)
@@ -63,7 +106,14 @@ function coords_to_color_multi(coords::NTuple{N,Int}, dims::NTuple{N,Int}, dims_
     return color
 end
 
+"""
+    subcomm_for_slices(cart::CartesianTopology{N}, dims_to_reduce) -> (sub_comm, coords, subrank)
 
+Create a sub-communicator grouping ranks equal on all dimensions except those in `dims_to_reduce`.
+
+Returns `(sub_comm, coords, subrank)` where `sub_comm` may be `MPI.COMM_NULL`
+and `subrank` is `-1` if so.
+"""
 function subcomm_for_slices(cart::CartesianTopology{N}, dims_to_reduce) where {N}
     rank = cart.global_rank
     coords = cart.cart_coords
@@ -81,6 +131,15 @@ function subcomm_for_slices(cart::CartesianTopology{N}, dims_to_reduce) where {N
     return (sub_comm, coords, subrank)
 end
 
+"""
+    root_topology_multi(cart::CartesianTopology{N}, dims_to_reduce; root_coord::Int = 0)
+
+Construct a reduced-dimension `CartesianTopology` removing dimensions in `dims_to_reduce`.
+Only processes with `coords[dim] == root_coord` for every removed dim build an active topology;
+others receive an inactive `CartesianTopology` (`cart_comm == MPI.COMM_NULL`).
+
+Returns a `CartesianTopology{M}` with `M = N - length(dims_to_reduce)`.
+"""
 function root_topology_multi(cart::CartesianTopology{N}, dims_to_reduce; root_coord::Int = 0) where {N}
     coords = cart.cart_coords
     tuple_dims_to_reduce = Tuple(dims_to_reduce)
@@ -95,6 +154,6 @@ function root_topology_multi(cart::CartesianTopology{N}, dims_to_reduce; root_co
     if !is_root || root_comm == MPI.COMM_NULL
         return CartesianTopology(root_comm, new_dims; periodic=new_periods, active=false)
     else
-        return CartesianTopology(root_comm, new_dims; periodic=new_periods)
+        return CartesianTopology(root_comm, new_dims; periodic=new_periods, active=true)
     end
 end

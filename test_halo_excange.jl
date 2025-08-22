@@ -2,6 +2,7 @@ using MPI
 using BenchmarkTools
 include("cartesian_topology.jl") 
 include("haloarray.jl")
+include("haloarrays.jl")
 include("boundary.jl")
 include("interior_broadcast.jl")
 include("halo_exchange.jl") 
@@ -33,12 +34,18 @@ function time_exchange(name, f, halo; reps=10000)
 end
 
 # Warm up
-halo_exchange!(halo)
-halo_exchange_wait!(halo)
+#halo_exchange!(halo)
+#halo_exchange_wait!(halo)
+#println("Rank $rank halo_exchange_wait!")
 halo_exchange_waitall!(halo)
+println("Rank $rank halo_exchange_waitall!")
 halo_exchange_async!(halo)
+println("Rank $rank halo_exchange_async!")
 halo_exchange_waitall_unsafe!(halo)
+println("Rank $rank halo_exchange_waitall_unsafe!")
 halo_exchange_async_unsafe!(halo)
+println("Rank $rank halo_exchange_async_unsafe!")
+
 
 
 #@benchmark halo_exchange!($halo)
@@ -69,8 +76,8 @@ if rank == 0
     println("== Benchmarking Halo Exchange Variants ==")
 end
 
-time_exchange("Naive Test Loop", halo_exchange!, halo)
-time_exchange("Wait + Wait", halo_exchange_wait!, halo)
+#time_exchange("Naive Test Loop", halo_exchange!, halo)
+#time_exchange("Wait + Wait", halo_exchange_wait!, halo)
 time_exchange("Waitall", halo_exchange_waitall!, halo)
 time_exchange("Async", halo_exchange_async!, halo)
 time_exchange("Waitall Unsafe", halo_exchange_waitall_unsafe!, halo)

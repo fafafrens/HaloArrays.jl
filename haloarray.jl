@@ -89,6 +89,7 @@ Base.axes(x::HaloArray) = axes(interior_view(x))
 function  HaloArray(data::AbstractArray{T,N},halo::Int, topology::CartesianTopology{N},
     boundary_condition) where {T,N}
     
+    inner_size = ntuple(i -> size(data, i) - 2 * halo, N)
 
     recv_bufs = map(1:N) do D
         map([1,2]) do S
@@ -124,7 +125,7 @@ function  HaloArray(data::AbstractArray{T,N},halo::Int, topology::CartesianTopol
     # Create the HaloArray with all necessary fields
 
     comm_state=HaloCommState(N)
-    HaloArray{T, N, typeof(data),halo,size,typeof(recv_bufs),typeof(send_bufs),typeof(boundary_condition)}(data, topology,comm_state,
+    HaloArray{T, N, typeof(data),halo,inner_size,typeof(recv_bufs),typeof(send_bufs),typeof(boundary_condition)}(data, topology,comm_state,
     recv_bufs, send_bufs, boundary_condition)
 end
 
@@ -169,7 +170,7 @@ function HaloArray(::Type{T}, sizes::NTuple{N,Int}, halo::Int, topology::Cartesi
     # Create the HaloArray with all necessary fields
 
     comm_state=HaloCommState(N)
-    HaloArray{T, N, typeof(data),halo,size,typeof(recv_bufs),typeof(send_bufs),typeof(boundary_condition)}(data, topology,comm_state,
+    HaloArray{T, N, typeof(data),halo,sizes,typeof(recv_bufs),typeof(send_bufs),typeof(boundary_condition)}(data, topology,comm_state,
     recv_bufs, send_bufs, boundary_condition)
 end
 
@@ -212,9 +213,9 @@ end
 
 
 
-function Base.similar(halo::HaloArray{T, N, A, H,S, B, C}, element_type::Type{typo}=eltype(halo) ,
+function Base.similar(halo::HaloArray{T, N, A, H,S, B, C, BCondition}, element_type=eltype(halo) ,
     dims::NTuple{M,Int64}=interior_size(halo)
-    ) where {T, N, A, H,S, B, C,typo,M}
+    ) where {T, N, A, H,S, B, C, BCondition,M}
     # Create a new HaloArray with given interior dims, preserving halo_width and topology
     HaloArray(element_type, dims ,H, halo.topology,halo.boundary_condition)
 end
@@ -450,12 +451,12 @@ function Base.copy(src::HaloArray)
     return new_halo
 end
 
-function Base.fill!(halo::HaloArray{T, N, A, Halo, Size, B, C},num) where {T, N, A, Halo, Size, B, C}
+function Base.fill!(halo::HaloArray,num)
     Base.fill!(parent(halo), num)
     return halo
 end
 
-function fill_interior(halo::HaloArray{T, N, A, Halo, Size, B, C},num) where {T, N, A, Halo, Size, B, C}
+function fill_interior(halo::HaloArray,num) 
     fill!(interior_view(halo), num)
     return halo
 end

@@ -11,8 +11,8 @@ function test_halo_exchange_2d_correctness()
     comm = MPI.COMM_WORLD
     rank = MPI.Comm_rank(comm)
     size_n = MPI.Comm_size(comm)
-
-    topo = CartesianTopology(comm, (2,2),periodic=(true, true ))  # 2D
+    N = 2
+    topo = CartesianTopology(comm, (0,0),periodic=(true, true ))  # 2D
     if rank == 0
     println("Topology neighbors per rank:")
     end
