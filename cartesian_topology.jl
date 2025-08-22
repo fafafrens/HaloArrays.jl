@@ -47,8 +47,11 @@ function isactive(cart::CartesianTopology)
     return cart.active
 end
 
-function coords_to_color_multi(coords::NTuple{N,Int}, dims::NTuple{N,Int}, dims_to_remove::AbstractVector{Int}) where {N}
-    rem = (i for i in 1:N if !(i in dims_to_remove))
+function coords_to_color_multi(coords::NTuple{N,Int}, dims::NTuple{N,Int}, dims_to_remove) where {N}
+
+    tuple_dims_to_remove = Tuple(dims_to_remove)
+
+    rem = (i for i in 1:N if !(i in tuple_dims_to_remove))
     coords_list = (coords[i] for i in rem)
     dims_list   = (dims[i]   for i in rem)
     color = 0
@@ -64,11 +67,12 @@ end
 function subcomm_for_slices(cart::CartesianTopology{N}, dims_to_reduce::AbstractVector{Int}) where {N}
     rank = cart.global_rank
     coords = cart.cart_coords
-    color = coords_to_color_multi(coords, cart.dims, dims_to_reduce)
+    tuple_dims_to_remove = Tuple(dims_to_remove)
+    color = coords_to_color_multi(coords, cart.dims, tuple_dims_to_remove)
     # key: ordina i ranks dentro la slice combinando le coords sulle dimensioni rimosse
     key = 0
     mul = 1
-    for i in dims_to_reduce
+    for i in tuple_dims_to_remove
         key += coords[i] * mul
         mul *= cart.dims[i]
     end
@@ -77,13 +81,14 @@ function subcomm_for_slices(cart::CartesianTopology{N}, dims_to_reduce::Abstract
     return (sub_comm, coords, subrank)
 end
 
-function root_topology_multi(cart::CartesianTopology{N}, dims_to_reduce::AbstractVector{Int}; root_coord::Int = 0) where {N}
+function root_topology_multi(cart::CartesianTopology{N}, dims_to_reduce; root_coord::Int = 0) where {N}
     coords = cart.cart_coords
-    is_root = all(i -> coords[i] == root_coord, dims_to_reduce)
+    tuple_dims_to_remove = Tuple(dims_to_reduce)
+    is_root = all(i -> coords[i] == root_coord, tuple_dims_to_remove)
     color = is_root ? 0 : nothing
     root_comm = MPI.Comm_split(cart.cart_comm, color, cart.global_rank)
 
-    rem = [i for i in 1:N if !(i in dims_to_reduce)]
+    rem = (i for i in 1:N if !(i in tuple_dims_to_remove))
     new_dims = Tuple(cart.dims[i] for i in rem)
     new_periods = Tuple(cart.periodic_boundary_condition[i] for i in rem)
 
