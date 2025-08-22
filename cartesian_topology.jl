@@ -48,9 +48,9 @@ function isactive(cart::CartesianTopology)
 end
 
 function coords_to_color_multi(coords::NTuple{N,Int}, dims::NTuple{N,Int}, dims_to_remove::AbstractVector{Int}) where {N}
-    rem = [i for i in 1:N if !(i in dims_to_remove)]
-    coords_list = [coords[i] for i in rem]
-    dims_list   = [dims[i]   for i in rem]
+    rem = (i for i in 1:N if !(i in dims_to_remove))
+    coords_list = (coords[i] for i in rem)
+    dims_list   = (dims[i]   for i in rem)
     color = 0
     mul = 1
     for (c,d) in zip(coords_list, dims_list)
@@ -59,6 +59,7 @@ function coords_to_color_multi(coords::NTuple{N,Int}, dims::NTuple{N,Int}, dims_
     end
     return color
 end
+
 
 function subcomm_for_slices(cart::CartesianTopology{N}, dims_to_reduce::AbstractVector{Int}) where {N}
     rank = cart.global_rank
