@@ -88,8 +88,7 @@ Base.axes(x::HaloArray) = axes(interior_view(x))
 
 function  HaloArray(data::AbstractArray{T,N},halo::Int, topology::CartesianTopology{N},
     boundary_condition) where {T,N}
-    full_size = Base.size(data)
-    size = full_size .-2 .*halo
+    
 
     recv_bufs = map(1:N) do D
         map([1,2]) do S
@@ -130,9 +129,9 @@ function  HaloArray(data::AbstractArray{T,N},halo::Int, topology::CartesianTopol
 end
 
 
-function HaloArray(::Type{T}, size::NTuple{N,Int}, halo::Int, topology::CartesianTopology{N},
+function HaloArray(::Type{T}, sizes::NTuple{N,Int}, halo::Int, topology::CartesianTopology{N},
     boundary_condition) where {T,N}
-    fullsize = ntuple(i -> size[i] + 2 * halo, N)
+    fullsize = ntuple(i -> sizes[i] + 2 * halo, N)
     data = zeros(T, fullsize...)
     # Create views for send and receive buffers
     #@show get_recv_view(Side(1), Dim(1), data, halo)
