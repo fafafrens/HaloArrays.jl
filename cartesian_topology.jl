@@ -14,7 +14,7 @@ struct CartesianTopology{N}
     active::Bool
 end
 
-function CartesianTopology(comm::MPI.Comm, dims::NTuple{N,Int}=ntuple(i->0, Val(N));periodic=ntuple(i->true, Val(N)),active::Bool=true) where {N,Int}
+function CartesianTopology(comm::MPI.Comm, dims::NTuple{N,Int}=ntuple(i->0, Val(N));periodic=ntuple(i->true, Val(N)),active::Bool=true) where {N}
     
     if comm == MPI.COMM_NULL || !active
         nprocs = 0
@@ -64,15 +64,15 @@ function coords_to_color_multi(coords::NTuple{N,Int}, dims::NTuple{N,Int}, dims_
 end
 
 
-function subcomm_for_slices(cart::CartesianTopology{N}, dims_to_reduce::AbstractVector{Int}) where {N}
+function subcomm_for_slices(cart::CartesianTopology{N}, dims_to_reduce) where {N}
     rank = cart.global_rank
     coords = cart.cart_coords
-    tuple_dims_to_remove = Tuple(dims_to_remove)
-    color = coords_to_color_multi(coords, cart.dims, tuple_dims_to_remove)
+    tuple_dims_to_reduce = Tuple(dims_to_reduce)
+    color = coords_to_color_multi(coords, cart.dims, tuple_dims_to_reduce)
     # key: ordina i ranks dentro la slice combinando le coords sulle dimensioni rimosse
     key = 0
     mul = 1
-    for i in tuple_dims_to_remove
+    for i in tuple_dims_to_reduce
         key += coords[i] * mul
         mul *= cart.dims[i]
     end
@@ -83,12 +83,12 @@ end
 
 function root_topology_multi(cart::CartesianTopology{N}, dims_to_reduce; root_coord::Int = 0) where {N}
     coords = cart.cart_coords
-    tuple_dims_to_remove = Tuple(dims_to_reduce)
-    is_root = all(i -> coords[i] == root_coord, tuple_dims_to_remove)
+    tuple_dims_to_reduce = Tuple(dims_to_reduce)
+    is_root = all(i -> coords[i] == root_coord, tuple_dims_to_reduce)
     color = is_root ? 0 : nothing
     root_comm = MPI.Comm_split(cart.cart_comm, color, cart.global_rank)
 
-    rem = (i for i in 1:N if !(i in tuple_dims_to_remove))
+    rem = (i for i in 1:N if !(i in tuple_dims_to_reduce))
     new_dims = Tuple(cart.dims[i] for i in rem)
     new_periods = Tuple(cart.periodic_boundary_condition[i] for i in rem)
 
