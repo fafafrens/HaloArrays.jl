@@ -1,5 +1,3 @@
-
-
 using StaticArrays
 
 function boundary_condition!(halo::HaloArray{T,N,A,Halo,Size,B,C,BCondition}, s::Side{side},dim::Dim{d}) where {
@@ -144,67 +142,46 @@ end
 
 
 
-function to_bc(symbol::Symbol)
-    if symbol == :reflecting
-        return Reflecting()
-    elseif symbol == :antireflecting
-        return Antireflecting()
-    elseif symbol == :repeating
-        return Repeating()
-    elseif symbol == :periodic
-        return Periodic()
-    else
-        throw(ArgumentError("""Unknown boundary condition symbol: $symbol you can implement your own boundary condition with the following interface:
+# Global mapping symbol -> BC type/instance (modificabile tramite register_bc)
+const BC_SYMBOL_MAP = Dict{Symbol, Union{DataType, AbstractBoundaryCondition}}(
+    :reflecting     => Reflecting,
+    :antireflecting => Antireflecting,
+    :repeating      => Repeating,
+    :periodic       => Periodic
+)
 
-        boundary_condition!(halo::HaloArray, d::Dim{dim}, s::Side{1}, mode::YourBoundaryConditionType)   
-        boundary_condition!(halo::HaloArray, d::Dim{dim}, s::Side{2}, mode::YourBoundaryConditionType)
-        
-        where YourBoundaryConditionType is a subtype of AbstractBoundaryCondition.
-        """ ))
+"""
+    register_bc(sym::Symbol, ctor_or_instance)
+
+Registra una nuova mappatura per `to_bc(:sym)`. `ctor_or_instance` può essere:
+- un Type <: AbstractBoundaryCondition (viene istanziato quando usato),
+- oppure una istanza di AbstractBoundaryCondition.
+Esempio: register_bc(:mybc, MyBC) o register_bc(:mybc, MyBC()).
+"""
+function register_bc(sym::Symbol, ctor_or_instance)
+    if !(ctor_or_instance isa DataType || ctor_or_instance isa AbstractBoundaryCondition)
+        throw(ArgumentError("ctor_or_instance must be a Type <: AbstractBoundaryCondition or an instance"))
     end
+    BC_SYMBOL_MAP[sym] = ctor_or_instance
+    return nothing
 end
-to_bc(bc::AbstractBoundaryCondition) = bc
 
-
-function normalize_boundary_condition(bc, N::Int)
-    # Helper to normalize one dimension's BC input to (left, right)
-    normalize_one_dim(bc_dim) = 
-        bc_dim isa AbstractBoundaryCondition ? (bc_dim, bc_dim) :
-        bc_dim isa Tuple && length(bc_dim) == 2 ? bc_dim :
-        throw(ArgumentError("Boundary condition per dimension must be either a single AbstractBoundaryCondition or a tuple of two"))
-
-    if bc isa AbstractBoundaryCondition
-        # Single BC for all dims, both sides
-        return ntuple(_ -> (bc, bc), N)
-    elseif bc isa Tuple
-        if length(bc) == N
-            # Tuple with one entry per dimension
-            # Each entry can be a single BC or (left,right) tuple
-            return ntuple(i -> normalize_one_dim(bc[i]), N)
-        else
-            throw(ArgumentError("Boundary condition tuple length $(length(bc)) does not match expected dimension $N"))
-        end
+# Unified converter: Symbol | Type | instance -> concrete BC instance
+function to_bc(x)
+    if x isa Symbol
+        entry = get(BC_SYMBOL_MAP, x, nothing)
+        entry === nothing && throw(ArgumentError("Unknown boundary condition symbol: $x. Register it with register_bc(:$x, MyBC)."))
+        return entry isa DataType ? entry() : entry
+    elseif x isa DataType && x <: AbstractBoundaryCondition
+        return x()
+    elseif x isa AbstractBoundaryCondition
+        return x
     else
-        throw(ArgumentError("Invalid boundary_condition specification: $bc"))
+        throw(ArgumentError("Invalid boundary_condition: $x"))
     end
 end
 
-# Helper: convert symbol or concrete BC to concrete BC
-#function to_bc(x)
-#    if x isa AbstractBoundaryCondition
-#        return x
-#    elseif x isa Symbol
-#        bc = get(BC_SYMBOL_MAP, x, nothing)
-#        if bc === nothing
-#            throw(ArgumentError("Unknown boundary condition symbol: $x"))
-#        end
-#        return bc
-#    else
-#        throw(ArgumentError("Invalid boundary condition: $x"))
-#    end
-#end
-
-# Normalize one dimension BC spec to (left, right)
+# Normalize one-dimension BC spec to (left, right)
 function normalize_one_dim(bc_dim)
     if bc_dim isa Tuple && length(bc_dim) == 2
         return (to_bc(bc_dim[1]), to_bc(bc_dim[2]))
@@ -213,6 +190,7 @@ function normalize_one_dim(bc_dim)
     end
 end
 
+# Normalize full spec to NTuple{N,NTuple{2,AbstractBoundaryCondition}}
 function normalize_boundary_condition(bc, N::Int)
     if bc isa Tuple
         if length(bc) == N
@@ -221,21 +199,19 @@ function normalize_boundary_condition(bc, N::Int)
             throw(ArgumentError("Boundary condition tuple length $(length(bc)) does not match expected dimension $N"))
         end
     else
-        # single BC or symbol for all dims
+        # single BC (Symbol/Type/instance) for all dims
         bc_concrete = to_bc(bc)
         return ntuple(_ -> (bc_concrete, bc_concrete), N)
     end
 end
 
-
 # ------------------------------------------------------------------------------
 # Periodicity check
 # ------------------------------------------------------------------------------
 
-function isperiodic(bc::AbstractBoundaryCondition) 
-    return bc isa Periodic 
+function isperiodic(bc::AbstractBoundaryCondition)
+    return bc isa Periodic
 end
-
 
 function infer_periodicity(boundary_condition::NTuple{N,NTuple{2,AbstractBoundaryCondition}}) where {N}
     ntuple(i -> isperiodic(boundary_condition[i][1]) && isperiodic(boundary_condition[i][2]), Val(N))

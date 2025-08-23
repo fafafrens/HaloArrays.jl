@@ -6,8 +6,9 @@ include("haloarrays.jl")
 include("interior_broadcast.jl")
 include("halo_exchange.jl")
 
+MPI.Init()
+
 function test_halo_exchange_3d_correctness()
-    MPI.Init()
     comm = MPI.COMM_WORLD
     rank = MPI.Comm_rank(comm)
     size_n = MPI.Comm_size(comm)
@@ -65,27 +66,30 @@ function test_halo_exchange_3d_correctness()
     back_rank   = topo.neighbors[3][1]
     front_rank  = topo.neighbors[3][2]
 
-    # Expected halos (same logic as 2D, extended to 3D)
+    # Expected halos (corrette dimensioni e ordine per h=1)
+    # left/right: face di dimensione (local_ny, local_nz) proveniente da i = local_nx / i = 1 del vicino
     expected_left = [
-        left_rank * 100_000 + k + (j-1)*local_nz + (i-1)*local_ny*local_nz
-        for i in 1:local_nx, j in 1:local_ny, k in 1:local_nz
+        left_rank * 100_000 + k + (j-1)*local_nz + (local_nx-1)*local_ny*local_nz
+        for j in 1:local_ny, k in 1:local_nz
     ]
 
     expected_right = [
-        right_rank * 100_000 + k + (j-1)*local_nz + (i-1)*local_ny*local_nz
-        for i in 1:local_nx, j in 1:local_ny, k in 1:local_nz
+        right_rank * 100_000 + k + (j-1)*local_nz + (0)*local_ny*local_nz
+        for j in 1:local_ny, k in 1:local_nz
     ]
 
+    # down/up: face di dimensione (local_nx, local_nz) proveniente da j = local_ny / j = 1 del vicino
     expected_down = [
-        down_rank * 100_000 + k + (j-1)*local_nz + (local_nx-1)*local_ny*local_nz
-        for j in 1:local_ny, k in 1:local_nz
+        down_rank * 100_000 + k + (local_ny-1)*local_nz + (i-1)*local_ny*local_nz
+        for i in 1:local_nx, k in 1:local_nz
     ]
 
     expected_up = [
-        up_rank * 100_000 + k + (j-1)*local_nz
-        for j in 1:local_ny, k in 1:local_nz
+        up_rank * 100_000 + k + (0)*local_nz + (i-1)*local_ny*local_nz
+        for i in 1:local_nx, k in 1:local_nz
     ]
 
+    # back/front: face di dimensione (local_nx, local_ny) proveniente da k = local_nz / k = 1 del vicino
     expected_back = [
         back_rank * 100_000 + local_nz + (j-1)*local_nz + (i-1)*local_ny*local_nz
         for i in 1:local_nx, j in 1:local_ny
@@ -96,11 +100,16 @@ function test_halo_exchange_3d_correctness()
         for i in 1:local_nx, j in 1:local_ny
     ]
 
-    # Actual halos
-    actual_left   = vec(A.data[halo+1:halo+local_nx, halo, halo+1:halo+local_nz])
-    actual_right  = vec(A.data[halo+1:halo+local_nx, halo+local_ny+1, halo+1:halo+local_nz])
-    actual_down   = vec(A.data[halo, halo+1:halo+local_ny, halo+1:halo+local_nz])
-    actual_up     = vec(A.data[halo+local_nx+1, halo+1:halo+local_ny, halo+1:halo+local_nz])
+    # Actual halos (fixed: dim1=x, dim2=y, dim3=z)
+    # left/right are faces at i = halo / i = halo+local_nx+1
+    actual_left   = vec(A.data[halo,                 halo+1:halo+local_ny, halo+1:halo+local_nz])
+    actual_right  = vec(A.data[halo+local_nx+1,     halo+1:halo+local_ny, halo+1:halo+local_nz])
+
+    # down/up are faces at j = halo / j = halo+local_ny+1
+    actual_down   = vec(A.data[halo+1:halo+local_nx, halo,                 halo+1:halo+local_nz])
+    actual_up     = vec(A.data[halo+1:halo+local_nx, halo+local_ny+1,     halo+1:halo+local_nz])
+
+    # front/back are faces at k = halo / k = halo+local_nz+1
     actual_back   = vec(A.data[halo+1:halo+local_nx, halo+1:halo+local_ny, halo])
     actual_front  = vec(A.data[halo+1:halo+local_nx, halo+1:halo+local_ny, halo+local_nz+1])
 
@@ -132,7 +141,9 @@ function test_halo_exchange_3d_correctness()
     end
 
     MPI.Barrier(comm)
-    MPI.Finalize()
 end
 
 test_halo_exchange_3d_correctness()
+
+MPI.Barrier(MPI.COMM_WORLD)
+MPI.Finalize()

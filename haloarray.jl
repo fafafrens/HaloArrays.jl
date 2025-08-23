@@ -105,22 +105,7 @@ function  HaloArray(data::AbstractArray{T,N},halo::Int, topology::CartesianTopol
     end
 
     #we check that the boundary condition is consistent with the topology
-    for d in 1:N
-        if topology.periodic_boundary_condition[d] && boundary_condition[d][1] != Periodic()
-            error("Periodic topology in dimension $d but boundary condition is not periodic")
-        end
-        if topology.periodic_boundary_condition[d] && boundary_condition[d][2] != Periodic()
-            error("Periodic topology in dimension $d but boundary condition is not periodic")
-        end
-        if boundary_condition[d][1] == Periodic() && !topology.periodic_boundary_condition[d]
-            error("Periodic boundary condition in dimension $d but topology is not periodic")
-        end
-
-        if boundary_condition[d][2] == Periodic() && !topology.periodic_boundary_condition[d]
-            error("Periodic boundary condition in dimension $d but topology is not periodic")
-        end
-
-    end
+    validate_boundary_condition(topology, boundary_condition)
 
     # Create the HaloArray with all necessary fields
 
@@ -150,22 +135,7 @@ function HaloArray(::Type{T}, sizes::NTuple{N,Int}, halo::Int, topology::Cartesi
     end
 
     #we check that the boundary condition is consistent with the topology
-    for d in 1:N
-        if topology.periodic_boundary_condition[d] && boundary_condition[d][1] != Periodic()
-            error("Periodic topology in dimension $d but boundary condition is not periodic")
-        end
-        if topology.periodic_boundary_condition[d] && boundary_condition[d][2] != Periodic()
-            error("Periodic topology in dimension $d but boundary condition is not periodic")
-        end
-        if boundary_condition[d][1] == Periodic() && !topology.periodic_boundary_condition[d]
-            error("Periodic boundary condition in dimension $d but topology is not periodic")
-        end
-
-        if boundary_condition[d][2] == Periodic() && !topology.periodic_boundary_condition[d]
-            error("Periodic boundary condition in dimension $d but topology is not periodic")
-        end
-
-    end
+    validate_boundary_condition(topology, boundary_condition)
 
     # Create the HaloArray with all necessary fields
 
@@ -569,4 +539,27 @@ function global_size(halo::HaloArray)
     dims = halo.topology.dims             # Tuple with number of processes per dimension
     
     return ntuple(i -> local_interior[i] * dims[i], Val(N))
+end
+
+# Helper: validate boundary_condition vs topology (semplificata)
+function validate_boundary_condition(topology::CartesianTopology{N}, boundary_condition) where {N}
+    for d in 1:N
+        left, right = boundary_condition[d]
+
+        # type check
+        if !(left isa AbstractBoundaryCondition) || !(right isa AbstractBoundaryCondition)
+            error("boundary_condition[$d] must be a tuple of AbstractBoundaryCondition (got $(left), $(right))")
+        end
+
+        topo_is_periodic = topology.periodic_boundary_condition[d]
+        both_periodic = (left isa Periodic) && (right isa Periodic)
+        any_periodic = (left isa Periodic) || (right isa Periodic)
+
+        if topo_is_periodic && !both_periodic
+            error("Topology is periodic in dimension $d but boundary_condition[$d] is not (both sides must be Periodic).")
+        elseif !topo_is_periodic && any_periodic
+            error("Boundary condition in dimension $d uses Periodic but topology is not periodic.")
+        end
+    end
+    return true
 end
