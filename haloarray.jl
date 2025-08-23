@@ -26,12 +26,12 @@ struct HaloCommState{N}
 end
 
 
-struct HaloArray{T,N,A,Halo,B,C,BCondition}  # removed `Size` type parameter
+struct HaloArray{T,N,A,Halo,B,BCondition}  # removed `Size` type parameter
     data::A
     topology::CartesianTopology{N}
     comm_state::HaloCommState{N}
     receive_bufs::B
-    send_bufs::C
+    send_bufs::B
     boundary_condition::BCondition
 end
 
@@ -73,11 +73,11 @@ end
 end
 
 Base.length(halo::HaloArray) = length(halo.data)
-@inline Base.size(halo::HaloArray{T,N}) where {T,N} = interior_size(halo)
-@inline Base.size(halo::HaloArray{T,N},i::Int) where {T,N} = interior_size(halo)[i]
-@inline Base.eltype(ha::HaloArray{T, N}) where {T, N} = T
+@inline Base.size(halo::HaloArray) = interior_size(halo)
+@inline Base.size(halo::HaloArray, i::Int) = interior_size(halo)[i]
+@inline Base.eltype(ha::HaloArray{T,N,A,Halo,B,BCondition}) where {T,N,A,Halo,B,BCondition} = T
 
-@inline function interior_size(halo::HaloArray{T,N}) where {T,N}
+@inline function interior_size(halo::HaloArray{T,N,A,Halo,B,BCondition}) where {T,N,A,Halo,B,BCondition}
     h = halo_width(halo)
     ntuple(i -> size(halo.data, i) - 2 * h, Val(N))
 end
@@ -85,8 +85,8 @@ end
 @inline full_size(halo::HaloArray) = size(halo.data)
 @inline full_size(halo::HaloArray, i::Int) = size(halo.data,i)
 
-@inline halo_width(halo::HaloArray{T,N,A,H,B,C,BC}) where {T,N,A,H,B,C,BC} = H
-@inline Base.ndims(halo::HaloArray{T,N}) where {T,N} = N
+@inline halo_width(halo::HaloArray{T,N,A,Halo,B,BCondition}) where {T,N,A,Halo,B,BCondition} = Halo
+@inline Base.ndims(halo::HaloArray{T,N,A,Halo,B,BCondition}) where {T,N,A,Halo,B,BCondition} = N
 @inline Base.parent(halo::HaloArray) = halo.data
 Base.axes(x::HaloArray) = axes(interior_view(x))
 
@@ -94,59 +94,56 @@ Base.axes(x::HaloArray) = axes(interior_view(x))
 
 function  HaloArray(data::AbstractArray{T,N},halo::Int, topology::CartesianTopology{N},
     boundary_condition) where {T,N}
-    
-    inner_size = ntuple(i -> size(data, i) - 2 * halo, Val(N))
 
-    recv_bufs = map(1:N) do D
-        map([1,2]) do S
-            similar(get_recv_view(Side(S), Dim(D), data, halo))
-        end
-    end
-
-    send_bufs = map(1:N) do D
-        map([1,2]) do S
-            similar(get_send_view(Side(S), Dim(D), data, halo))
-        end
-    end
-
-    #we check that the boundary condition is consistent with the topology
-    validate_boundary_condition(topology, boundary_condition)
-
-    # Create the HaloArray with all necessary fields
-
-    comm_state=HaloCommState(N)
-    HaloArray{T, N, typeof(data), halo, typeof(recv_bufs), typeof(send_bufs), typeof(boundary_condition)}(data, topology,comm_state,
-    recv_bufs, send_bufs, boundary_condition)
-end
+    # type-stable NTuple{N,NTuple{2,Array}} buffers
+    recv_bufs = make_recv_buffers(data, halo)
+    send_bufs = make_send_buffers(data, halo)
+ 
+     #we check that the boundary condition is consistent with the topology
+     validate_boundary_condition(topology, boundary_condition)
+ 
+     # Create the HaloArray with all necessary fields
+ 
+     comm_state=HaloCommState(N)
+-    HaloArray{T, N, typeof(data), halo, typeof(recv_bufs), typeof(send_bufs), typeof(boundary_condition)}(data, topology,comm_state,
+-    recv_bufs, send_bufs, boundary_condition)
++    HaloArray{T, N, typeof(data), halo, typeof(recv_bufs), typeof(boundary_condition)}(
++        data, topology, comm_state, recv_bufs, send_bufs, boundary_condition)
+ end
 
 
 # Factory minima: costruisce HaloArray da un array esistente, normalizza BC e crea buffer
 function build_haloarray_from_data(data::AbstractArray{T,N}, halo::Int, topology::CartesianTopology{N}, boundary_condition_raw) where {T,N}
-    inner_size = ntuple(i -> size(data, i) - 2 * halo, Val(N))
-
-    # Normalizza la rappresentazione della BC (assume normalize_boundary_condition disponibile)
-    bc = normalize_boundary_condition(boundary_condition_raw, N)
-
-    recv_bufs = map(1:N) do D
-        map([1,2]) do S
-            similar(get_recv_view(Side(S), Dim(D), data, halo))
-        end
-    end
-
-    send_bufs = map(1:N) do D
-        map([1,2]) do S
-            similar(get_send_view(Side(S), Dim(D), data, halo))
-        end
-    end
-
-    # verifica che la BC sia coerente con la topology
-    validate_boundary_condition(topology, bc)
-
-    comm_state = HaloCommState(N)
-    HaloArray{T, N, typeof(data), halo, typeof(recv_bufs), typeof(send_bufs), typeof(bc)}(
-        data, topology, comm_state, recv_bufs, send_bufs, bc
-    )
-end
+ 
+     # Normalizza la rappresentazione della BC (assume normalize_boundary_condition disponibile)
+     bc = normalize_boundary_condition(boundary_condition_raw, N)
+ 
+-    recv_bufs = map(1:N) do D
+-        map([1,2]) do S
+-            similar(get_recv_view(Side(S), Dim(D), data, halo))
+-        end
+-    end
+-
+-    send_bufs = map(1:N) do D
+-        map([1,2]) do S
+-            similar(get_send_view(Side(S), Dim(D), data, halo))
+-        end
+-    end
++    # type-stable NTuple buffers
++    recv_bufs = make_recv_buffers(data, halo)
++    send_bufs = make_send_buffers(data, halo)
+ 
+     # verifica che la BC sia coerente con la topology
+     validate_boundary_condition(topology, bc)
+ 
+     comm_state = HaloCommState(N)
+-    HaloArray{T, N, typeof(data), halo, typeof(recv_bufs), typeof(send_bufs), typeof(bc)}(
+-        data, topology, comm_state, recv_bufs, send_bufs, bc
+-    )
++    HaloArray{T, N, typeof(data), halo, typeof(recv_bufs), typeof(bc)}(
++        data, topology, comm_state, recv_bufs, send_bufs, bc
++    )
+ end
 
 # Costruttore principale da array già pieno (mantiene il parent fornito)
 function HaloArray(data::AbstractArray{T,N}, halo::Int, topology::CartesianTopology{N}, boundary_condition) where {T,N}
@@ -231,59 +228,54 @@ end
 
 
 #this are the function specialized for HaloArray
-@inline function get_send_view(::Side{1}, ::Dim{D}, array::HaloArray{T,N,A,Halo,B,C,BCondition}) where {D, T,N,A,Halo,B,C,BCondition}
+@inline function get_send_view(::Side{1}, ::Dim{D}, array::HaloArray{T,N,A,Halo,B,BCondition}) where {D, T,N,A,Halo,B,BCondition}
     send_range = (halo_width(array) + 1):(2 * halo_width(array))
     indices = ntuple(I -> I == D ? send_range : (halo_width(array)+1):(full_size(array,I)-halo_width(array)), Val(N))
     view(parent(array), indices...)
 end
 
-@inline function get_send_view(::Side{2}, ::Dim{D}, array::HaloArray{T,N,A,Halo,B,C,BCondition}) where {D, T,N,A,Halo,B,C,BCondition}
+@inline function get_send_view(::Side{2}, ::Dim{D}, array::HaloArray{T,N,A,Halo,B,BCondition}) where {D, T,N,A,Halo,B,BCondition}
     send_range = (full_size(array, D) - 2 * halo_width(array) + 1):(full_size(array, D) - halo_width(array))
     indices = ntuple(I -> I == D ? send_range : (halo_width(array)+1):(full_size(array,I)-halo_width(array)), Val(N))
     view(parent(array), indices...)
 end
 
-@inline function get_recv_view(::Side{1}, ::Dim{D}, array::HaloArray{T,N,A,Halo,B,C,BCondition}) where {D, T,N,A,Halo,B,C,BCondition}
+@inline function get_recv_view(::Side{1}, ::Dim{D}, array::HaloArray{T,N,A,Halo,B,BCondition}) where {D, T,N,A,Halo,B,BCondition}
     recv_range = 1:halo_width(array)
     indices = ntuple(I -> I == D ? recv_range : (halo_width(array)+1):(full_size(array,I)-halo_width(array)), Val(N))
     view(parent(array), indices...)
 end
 
-@inline function get_recv_view(::Side{2}, ::Dim{D}, array::HaloArray{T,N,A,Halo,B,C,BCondition}) where {D, T, N, A, Halo, B, C, BCondition}
+@inline function get_recv_view(::Side{2}, ::Dim{D}, array::HaloArray{T,N,A,Halo,B,BCondition}) where {D, T, N, A, Halo, B, BCondition}
     recv_range = (full_size(array, D) - halo_width(array) + 1):(full_size(array, D))
     indices = ntuple(I -> I == D ? recv_range : (halo_width(array)+1):(full_size(array,I)-halo_width(array)), Val(N))
     view(parent(array), indices...)
 end
 
 #this are the function specialized for HaloArray and the dimension as Int for perfomance resons
-@inline function get_send_view(::Side{1}, D::Int, array::HaloArray{T,N,A,Halo,B,C,BCondition}) where { T, N,A,Halo,B,C,BCondition}
+@inline function get_send_view(::Side{1}, D::Int, array::HaloArray{T,N,A,Halo,B,BCondition}) where { T, N,A,Halo,B,BCondition}
     send_range = (halo_width(array) + 1):(2 * halo_width(array))
     indices = ntuple(I -> I == D ? send_range : (halo_width(array)+1):(full_size(array,I)-halo_width(array)), Val(N))
     view(parent(array), indices...)
 end
 
-@inline function get_send_view(::Side{2}, D::Int, array::HaloArray{T,N,A,Halo,B,C,BCondition}) where { T, N,A,Halo,B,C,BCondition}
+@inline function get_send_view(::Side{2}, D::Int, array::HaloArray{T,N,A,Halo,B,BCondition}) where { T, N,A,Halo,B,BCondition}
     send_range = (full_size(array, D) - 2 * halo_width(array) + 1):(full_size(array, D) - halo_width(array))
     indices = ntuple(I -> I == D ? send_range : (halo_width(array)+1):(full_size(array,I)-halo_width(array)), Val(N))
     view(parent(array), indices...)
 end
 
-@inline function get_recv_view(::Side{1}, D::Int, array::HaloArray{T,N,A,Halo,B,C,BCondition}) where { T,N,A,Halo,B,C,BCondition}
+@inline function get_recv_view(::Side{1}, D::Int, array::HaloArray{T,N,A,Halo,B,BCondition}) where { T,N,A,Halo,B,BCondition}
     recv_range = 1:halo_width(array)
     indices = ntuple(I -> I == D ? recv_range : (halo_width(array)+1):(full_size(array,I)-halo_width(array)), Val(N))
     view(parent(array), indices...)
 end
 
-@inline function get_recv_view(::Side{2}, D::Int, array::HaloArray{T,N,A,Halo,B,C,BCondition}) where { T, N,A,Halo,B,C,BCondition}
+@inline function get_recv_view(::Side{2}, D::Int, array::HaloArray{T,N,A,Halo,B,BCondition}) where { T, N,A,Halo,B,BCondition}
     recv_range = (full_size(array, D) - halo_width(array) + 1):(full_size(array, D))
     indices = ntuple(I -> I == D ? recv_range : (halo_width(array)+1):(full_size(array,I)-halo_width(array)), Val(N))
     view(parent(array), indices...)
 end
-
-
-
-
-
 
 
 # --- Helper to get interior or full data for broadcast ---
@@ -319,7 +311,7 @@ end
 
 Convert a local interior index (excluding halo) to global index (1-based).
 """
-function local_to_global_index(halo::HaloArray{T,N,A,Halo,B,C,BCondition}, local_idx::NTuple{N,Int}) where {T,N,A,Halo,B,C,BCondition}
+function local_to_global_index(halo::HaloArray{T,N,A,Halo,B,BCondition}, local_idx::NTuple{N,Int}) where {T,N,A,Halo,B,BCondition}
     coords = halo.topology.cart_coords
     size_local = interior_size(halo)
     global_idx = ntuple(i -> coords[i] * size_local[i] + local_idx[i]-halo_width(halo), Val(N))
@@ -388,7 +380,7 @@ end
     return ntuple(i -> ntuple(j -> ifelse(i == j, 1, 0), Val(N)), Val(N))
 end
 
-@inline function versors(::HaloArray{T,N,A,Halo,B,C,BCondition}) where {T,N,A,Halo,B,C,BCondition}
+@inline function versors(::HaloArray{T,N,A,Halo,B,BCondition}) where {T,N,A,Halo,B,BCondition}
     return versors(Val(N))
 end
 
@@ -463,7 +455,7 @@ function Base.map(f,src::Vararg{HaloArray,N}) where {N}
 end
 
 
-function Base.foreach(f, halo::HaloArray{T,N,A,Halo,B,C,BCondition}) where {T, N,A,Halo,B,C,BCondition}
+function Base.foreach(f, halo::HaloArray{T,N,A,Halo,B,BCondition}) where {T, N,A,Halo,B,BCondition}
     interior = interior_view(halo)
     foreach(f, interior)
 
@@ -482,7 +474,6 @@ function fill_from_global_indices!(f,halo::HaloArray)
 
     return halo
 end
-
 
 function fill_from_local_indices!(f,halo::HaloArray)
     interior = interior_view(halo)
@@ -543,4 +534,13 @@ function validate_boundary_condition(topology::CartesianTopology{N}, boundary_co
         end
     end
     return true
+end
+
+# Helper: crea NTuple{N,NTuple{2,ArrayLike}} di receive/send buffer (type-stable)
+function make_recv_buffers(data::AbstractArray{T,N}, halo::Int) where {T,N}
+    ntuple(D -> ntuple(S -> similar(get_recv_view(Side(S), Dim(D), data, halo)), Val(2)), Val(N))
+end
+
+function make_send_buffers(data::AbstractArray{T,N}, halo::Int) where {T,N}
+    ntuple(D -> ntuple(S -> similar(get_send_view(Side(S), Dim(D), data, halo)), Val(2)), Val(N))
 end
