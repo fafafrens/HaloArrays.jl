@@ -1,7 +1,7 @@
 using StaticArrays
 
-function boundary_condition!(halo::HaloArray{T,N,A,Halo,Size,B,C,BCondition}, s::Side{side},dim::Dim{d}) where {
-    T,N,A,Halo,Size,B,C,BCondition,side, d}
+function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,C,BCondition}, s::Side{side},dim::Dim{d}) where {
+    T,N,A,Halo,B,C,BCondition,side, d}
     
     mode = halo.boundary_condition[d][side]
     # Check if this is a boundary
@@ -19,7 +19,7 @@ function boundary_condition!(halo::HaloArray{T,N,A,Halo,Size,B,C,BCondition}, s:
 end
 
 
-function boundary_condition!(halo::HaloArray{T,N,A,Halo,Size,B,C,BCondition},s::Side{1},d::Dim{dim}, mode::Reflecting) where {T,N,A,Halo,Size,B,C,BCondition,dim}
+function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,C,BCondition},s::Side{1},d::Dim{dim}, mode::Reflecting) where {T,N,A,Halo,B,C,BCondition,dim}
     h = halo_width(halo)
     full = parent(halo)
     interior_region = interior_view(halo)
@@ -36,7 +36,7 @@ function boundary_condition!(halo::HaloArray{T,N,A,Halo,Size,B,C,BCondition},s::
     return nothing
 end
 
-function boundary_condition!(halo::HaloArray{T,N,A,Halo,Size,B,C,BCondition},s::Side{2}, d::Dim{dim}, mode::Reflecting) where {T,N,A,Halo,Size,B,C,BCondition,dim}
+function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,C,BCondition},s::Side{2}, d::Dim{dim}, mode::Reflecting) where {T,N,A,Halo,B,C,BCondition}
     h = halo_width(halo)
     full = parent(halo)
     interior_region = interior_view(halo)
@@ -53,7 +53,7 @@ end
 
 
 
-function boundary_condition!(halo::HaloArray{T,N,A,Halo,Size,B,C,BCondition}, s::Side{1},d::Dim{dim}, mode::Antireflecting) where {T,N,A,Halo,Size,B,C,BCondition,dim}
+function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,C,BCondition}, s::Side{1},d::Dim{dim}, mode::Antireflecting) where {T,N,A,Halo,B,C,BCondition,dim}
     h = halo_width(halo)
     full = parent(halo)
     interior_region = interior_view(halo)
@@ -67,7 +67,7 @@ function boundary_condition!(halo::HaloArray{T,N,A,Halo,Size,B,C,BCondition}, s:
     return nothing
 end
 
-function boundary_condition!(halo::HaloArray{T,N,A,Halo,Size,B,C,BCondition},s::Side{2}, d::Dim{dim}, mode::Antireflecting) where {T,N,A,Halo,Size,B,C,BCondition,dim}
+function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,C,BCondition},s::Side{2}, d::Dim{dim}, mode::Antireflecting) where {T,N,A,Halo,B,C,BCondition,dim}
     h = halo_width(halo)
     full = parent(halo)
     interior_region = interior_view(halo)
@@ -84,7 +84,7 @@ end
 
 
 
-function boundary_condition!(halo::HaloArray{T,N,A,Halo,Size,B,C,BCondition},s::Side{1}, d::Dim{dim}, mode::Repeating) where {T,N,A,Halo,Size,B,C,BCondition,dim}
+function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,C,BCondition},s::Side{1}, d::Dim{dim}, mode::Repeating) where {T,N,A,Halo,B,C,BCondition,dim}
     h = halo_width(halo)
     full = parent(halo)
     interior_region = interior_view(halo)
@@ -98,7 +98,7 @@ function boundary_condition!(halo::HaloArray{T,N,A,Halo,Size,B,C,BCondition},s::
     return nothing
 end
 
-function boundary_condition!(halo::HaloArray{T,N,A,Halo,Size,B,C,BCondition},s::Side{2}, d::Dim{dim}, mode::Repeating) where {T,N,A,Halo,Size,B,C,BCondition,dim}
+function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,C,BCondition},s::Side{2}, d::Dim{dim}, mode::Repeating) where {T,N,A,Halo,B,C,BCondition,dim}
     h = halo_width(halo)
     full = parent(halo)
     interior_region = interior_view(halo)
@@ -112,19 +112,19 @@ function boundary_condition!(halo::HaloArray{T,N,A,Halo,Size,B,C,BCondition},s::
     return nothing
 end
 
-function boundary_condition!(halo::HaloArray{T,N,A,Halo,Size,B,C,BCondition}, s::Side{1},d::Dim{dim}, mode::Periodic) where {T,N,A,Halo,Size,B,C,BCondition,dim}
+function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,C,BCondition}, s::Side{1},d::Dim{dim}, mode::Periodic) where {T,N,A,Halo,B,C,BCondition,dim}
     return nothing
 end
 
-function boundary_condition!(halo::HaloArray{T,N,A,Halo,Size,B,C,BCondition}, s::Side{2},d::Dim{dim}, mode::Periodic) where {T,N,A,Halo,Size,B,C,BCondition,dim}
+function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,C,BCondition}, s::Side{2},d::Dim{dim}, mode::Periodic) where {T,N,A,Halo,B,C,BCondition,dim}
     return nothing
 end
 
 
 
-function boundary_condition!(halo::HaloArray{T,N,A,Halo,Size,B,C,BCondition}) where {
-    T,N,A,Halo,Size,B,C,BCondition}
-    
+function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,C,BCondition}) where {
+    T,N,A,Halo,B,C,BCondition}
+
     ntuple(Val(N)) do D
         ntuple(Val(2)) do S
             boundary_condition!(halo, Side(S), Dim(D))

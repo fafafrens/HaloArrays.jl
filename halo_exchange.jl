@@ -78,7 +78,7 @@ function halo_exchange_wait!(halo::HaloArray,side::Side{S}, dim::Dim{D}) where {
     return 1
 end
 
-function halo_exchange_wait!(halo::HaloArray{T, N, A,H,S, B,C,BCondition}) where {T,N,A,H,S,B,C,BCondition}
+function halo_exchange_wait!(halo::HaloArray{T,N,A,Halo,B,C,BCondition}) where {T,N,A,Halo,B,C,BCondition}
     ntuple(Val(N)) do D
         ntuple(Val(2)) do s
             # Call the halo exchange wait for each side and dimension
@@ -89,7 +89,7 @@ function halo_exchange_wait!(halo::HaloArray{T, N, A,H,S, B,C,BCondition}) where
 end
 
 
-function halo_exchange_waitall!(halo::HaloArray{T, N, A,H,S, B,C,BCondition}) where {T,N,A,H,S,B,C,BCondition}
+    function halo_exchange_waitall!(halo::HaloArray{T, N, A,H,S, B,C,BCondition}) where {T,N,A,H,S,B,C,BCondition}
 
     h= halo_width(halo)
     comm = halo.topology.cart_comm
@@ -141,7 +141,7 @@ function halo_exchange_waitall!(halo::HaloArray{T, N, A,H,S, B,C,BCondition}) wh
 end
 
 
-function halo_exchange_waitall_unsafe!(halo::HaloArray{T, N, A,H,S, B,C,BCondition}) where {T,N,A,H,S,B,C,BCondition}
+function halo_exchange_waitall_unsafe!(halo::HaloArray{T,N,A,Halo,B,C,BCondition}) where {T,N,A,Halo,B,C,BCondition}
 
     h= halo_width(halo)
     comm = halo.topology.cart_comm
@@ -242,7 +242,7 @@ function halo_exchange_async!(halo::HaloArray, side::Side{S}, D::Int) where {S}
 
 end
 
-function start_halo_exchange_async!(halo::HaloArray{T, N, A,H,S, B,C,BCondition}) where {T,N,A,H,S,B,C,BCondition}
+function start_halo_exchange_async!(halo::HaloArray{T,N,A,Halo,B,C,BCondition}) where {T,N,A,Halo,B,C,BCondition}
     for D in 1:N
         halo_exchange_async!(halo, Side{1}(),D)
         halo_exchange_async!(halo, Side{2}(), D)
@@ -290,7 +290,7 @@ function halo_exchange_async_wait!(halo::HaloArray, side::Side{S}, D::Int) where
 
 end
 
-function end_halo_exchange_wait!(halo::HaloArray{T, N, A,H,S, B,C,BCondition}) where {T,N,A,H,S,B,C,BCondition}
+function end_halo_exchange_wait!(halo::HaloArray{T, N, A,Halo,B,C,BCondition}) where {T,N,A,Halo,B,C,BCondition}
     for D in 1:N
         halo_exchange_async_wait!(halo, Side{1}(),D)
         halo_exchange_async_wait!(halo, Side{2}(),D)
@@ -298,7 +298,7 @@ function end_halo_exchange_wait!(halo::HaloArray{T, N, A,H,S, B,C,BCondition}) w
     return nothing
 end
 
-function halo_exchange_async!(halo::HaloArray{T, N, A,H,S, B,C,BCondition}) where {T,N,A,H,S,B,C,BCondition}
+function halo_exchange_async!(halo::HaloArray{T, N, A,Halo,B,C,BCondition}) where {T,N,A,Halo,B,C,BCondition}
     start_halo_exchange_async!(halo)
     ###Here you can put additional
     end_halo_exchange_wait!(halo)
@@ -330,7 +330,7 @@ function halo_exchange_async_unsafe!(halo::HaloArray, side::Side{S}, D::Int) whe
 
 end
 
-function start_halo_exchange_async_unsafe!(halo::HaloArray{T, N, A,H,S, B,C,BCondition}) where {T,N,A,H,S,B,C,BCondition}
+function start_halo_exchange_async_unsafe!(halo::HaloArray{T, N, A,Halo,B,C,BCondition}) where {T,N,A,Halo,B,C,BCondition}
     for D in 1:N
         halo_exchange_async_unsafe!(halo, Side{1}(),D)
         halo_exchange_async_unsafe!(halo, Side{2}(), D)
@@ -361,7 +361,7 @@ function halo_exchange_async_wait_unsafe!(halo::HaloArray, side::Side{S}, D::Int
 
 end
 
-function end_halo_exchange_async_wait_unsafe!(halo::HaloArray{T, N, A,H,S, B,C,BCondition}) where {T,N,A,H,S,B,C,BCondition}
+function end_halo_exchange_async_wait_unsafe!(halo::HaloArray{T, N, A,Halo,B,C,BCondition}) where {T,N,A,Halo,B,C,BCondition}
     for D in 1:N
         halo_exchange_async_wait_unsafe!(halo, Side{1}(),D)
         halo_exchange_async_wait_unsafe!(halo, Side{2}(),D)
@@ -369,7 +369,7 @@ function end_halo_exchange_async_wait_unsafe!(halo::HaloArray{T, N, A,H,S, B,C,B
     return nothing
 end
 
-function halo_exchange_async_unsafe!(halo::HaloArray{T, N, A,H,S, B,C,BCondition}) where {T,N,A,H,S,B,C,BCondition}
+function halo_exchange_async_unsafe!(halo::HaloArray{T,N,A,Halo,B,C,BCondition}) where {T,N,A,Halo,B,C,BCondition}
     start_halo_exchange_async_unsafe!(halo)
     ###Here you can put additional
     end_halo_exchange_async_wait_unsafe!(halo)
