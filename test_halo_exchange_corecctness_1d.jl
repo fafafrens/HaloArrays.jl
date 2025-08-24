@@ -2,6 +2,7 @@ using MPI, BenchmarkTools, Test
 include("cartesian_topology.jl") 
 include("haloarray.jl")
 include("haloarrays.jl")
+include("boundary.jl")        # <<-- boundary prima
 include("interior_broadcast.jl")
 include("halo_exchange.jl") 
 

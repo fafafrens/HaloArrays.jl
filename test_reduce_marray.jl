@@ -1,13 +1,13 @@
 using Test
 using MPI
 using LinearAlgebra
-include("cartesian_topology.jl")
-include("haloarray.jl")         # Your HaloArray implementation
-include("halo_exchange.jl")     # Your halo exchange routines
-include("boundary.jl")     
+include("cartesian_topology.jl") 
+include("haloarray.jl")
 include("haloarrays.jl")
-include("reduction.jl")  # Import MultiHaloArray and related functions
-include("broad_new.jl")
+include("boundary.jl")        # <<-- boundary prima
+include("interior_broadcast.jl")
+include("halo_exchange.jl")    
+include("reduction.jl") 
 include("interior_broadcast_marray.jl")  # Import MultiHaloArray broadcasting
 
 @testset "MultiHaloArray Reduction Tests" begin

@@ -36,7 +36,7 @@ function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,BCondition},s::Side{1}
     return nothing
 end
 
-function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,BCondition},s::Side{2}, d::Dim{dim}, mode::Reflecting) where {T,N,A,Halo,B,BCondition}
+function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,BCondition},s::Side{2}, d::Dim{dim}, mode::Reflecting) where {T,N,A,Halo,B,BCondition,dim}
     h = halo_width(halo)
     full = parent(halo)
     interior_region = interior_view(halo)

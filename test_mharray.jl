@@ -3,11 +3,11 @@ using MPI
 using Test
 include("cartesian_topology.jl") 
 include("haloarray.jl")
-include("boundary.jl")
-include("broad_new.jl")
-include("halo_exchange.jl") 
 include("haloarrays.jl")
+include("boundary.jl")        # <<-- boundary prima
+include("interior_broadcast.jl")
 include("interior_broadcast_marray.jl")
+include("halo_exchange.jl") 
 # -- MAIN SCRIPT --
 
 

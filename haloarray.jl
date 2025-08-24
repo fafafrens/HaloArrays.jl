@@ -148,6 +148,7 @@ end
 function HaloArray(::Type{T}, local_inner_size::NTuple{N,Int}, halo::Int, topology::CartesianTopology{N}; boundary_condition=(ntuple(_ -> (Repeating(), Repeating()), Val(N)))) where {T,N}
     fullsize = ntuple(i -> local_inner_size[i] + 2 * halo, Val(N))
     data = zeros(T, fullsize...)
+    # Delegate normalization to build_haloarray_from_data (single normalization point)
     return build_haloarray_from_data(data, halo, topology, boundary_condition)
 end
 
@@ -163,18 +164,23 @@ function HaloArray(::Type{T}, local_inner_size::NTuple{N,Int}, halo::Int, bounda
     return HaloArray(T, local_inner_size, halo, topology; boundary_condition=boundary_condition)
 end
 
-# Wrapper: acepta BC più generica, normalizza prima di costruire
-function HaloArray(::Type{T}, lsize::NTuple{N,Int}, halo::Int, topology::CartesianTopology{N}; boundary_condition=(ntuple(_ -> (Repeating(), Repeating()), Val(N)))) where {T,N}
-    HaloArray(T, lsize, halo, topology, normalize_boundary_condition(boundary_condition, N))
+
+# Accept legacy positional boundary_condition argument (fifth positional arg)
+function HaloArray(::Type{T}, local_inner_size::NTuple{N,Int}, halo::Int, topology::CartesianTopology{N}, boundary_condition) where {T,N}
+    # normalize boundary condition (accept Symbols/Types/instances)
+    bc_norm = normalize_boundary_condition(boundary_condition, N)
+    return HaloArray(T, local_inner_size, halo, topology; boundary_condition=bc_norm)
 end
 
 function HaloArray(::Type{T}, local_inner_size::NTuple{N,Int}, halo::Int; boundary_condition=(ntuple(_ -> (Repeating(), Repeating()), Val(N)))) where {T,N}
+    # Create a HaloArray without explicit topology (auto-choose topology). The auto-topology
+    # variant needs a normalized BC to infer periodicity, so normalize here and delegate.
     HaloArray(T, local_inner_size, halo, normalize_boundary_condition(boundary_condition, N))
 end
 
 function HaloArray(local_inner_size::NTuple{N,Int}, halo::Int; boundary_condition=(ntuple(_ -> (Repeating(), Repeating()), Val(N)))) where {N}
     HaloArray(Float64, local_inner_size, halo, normalize_boundary_condition(boundary_condition, N))
-end 
+end
 
 
 
@@ -539,10 +545,10 @@ function make_send_buffers(data::AbstractArray{T,N}, halo::Int) where {T,N}
     ntuple(D -> ntuple(S -> similar(get_send_view(Side(S), Dim(D), data, halo)), Val(2)), Val(N))
 end
 
-function make_empty_recv_buffers(data::A , halo::Int) where {A<:AbstractArray{T,N},T,N}
+function make_empty_recv_buffers(data::A , halo::Int) where {T,N,A<:AbstractArray{T,N}}
     ntuple(D -> ntuple(S -> A[], Val(2)), Val(N))
 end
 
-function make_empty_send_buffers(data::A , halo::Int) where {A<:AbstractArray{T,N},T,N}
+function make_empty_send_buffers(data::A , halo::Int) where {T,N,A<:AbstractArray{T,N}}
     ntuple(D -> ntuple(S ->  A[], Val(2)), Val(N))
 end
