@@ -128,31 +128,15 @@ function build_haloarray_from_data(data::AbstractArray{T,N}, halo::Int, topology
      # Normalizza la rappresentazione della BC (assume normalize_boundary_condition disponibile)
      bc = normalize_boundary_condition(boundary_condition_raw, N)
  
--    recv_bufs = map(1:N) do D
--        map([1,2]) do S
--            similar(get_recv_view(Side(S), Dim(D), data, halo))
--        end
--    end
--
--    send_bufs = map(1:N) do D
--        map([1,2]) do S
--            similar(get_send_view(Side(S), Dim(D), data, halo))
--        end
--    end
-+    # type-stable NTuple buffers
-+    recv_bufs = make_recv_buffers(data, halo)
-+    send_bufs = make_send_buffers(data, halo)
+    # type-stable NTuple buffers
+    recv_bufs = make_recv_buffers(data, halo)
+   send_bufs = make_send_buffers(data, halo)
  
      # verifica che la BC sia coerente con la topology
      validate_boundary_condition(topology, bc)
  
      comm_state = HaloCommState(N)
--    HaloArray{T, N, typeof(data), halo, typeof(recv_bufs), typeof(send_bufs), typeof(bc)}(
--        data, topology, comm_state, recv_bufs, send_bufs, bc
--    )
-+    HaloArray{T, N, typeof(data), halo, typeof(recv_bufs), typeof(bc)}(
-+        data, topology, comm_state, recv_bufs, send_bufs, bc
-+    )
+    HaloArray{T, N, typeof(data), halo, typeof(recv_bufs), typeof(bc)}(data, topology, comm_state, recv_bufs, send_bufs, bc)
  end
 
 # Costruttore principale da array già pieno (mantiene il parent fornito)
