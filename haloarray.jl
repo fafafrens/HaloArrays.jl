@@ -26,7 +26,7 @@ struct HaloCommState{N}
 end
 
 
-struct HaloArray{T,N,A,Halo,B,BCondition}  # removed `Size` type parameter
+mutable struct HaloArray{T,N,A,Halo,B,BCondition}  # removed `Size` type parameter
     data::A
     topology::CartesianTopology{N}
     comm_state::HaloCommState{N}
@@ -35,6 +35,16 @@ struct HaloArray{T,N,A,Halo,B,BCondition}  # removed `Size` type parameter
     boundary_condition::BCondition
 end
 
+
+function HaloArray{T,N,arraytype,Halo}(::UndefInitializer,boundary_condition) where {T,N,arraytype<:AbstractArray{T,N},Halo}
+    data=arraytype[]
+    topology = inactive_cartesian_topology(Val(N))
+    comm_state = HaloCommState(N)
+    receive_bufs = make_empty_recv_buffers(data,Halo)
+    send_bufs = make_empty_send_buffers(data,Halo)
+    bc = normalize_boundary_condition(boundary_condition, N)
+    return HaloArray{T,N,typeof(data),Halo,typeof(receive_bufs),typeof(bc)}(data, topology, comm_state, receive_bufs, send_bufs, bc)
+end
 
 
 function HaloCommState(N::Int)
@@ -543,4 +553,12 @@ end
 
 function make_send_buffers(data::AbstractArray{T,N}, halo::Int) where {T,N}
     ntuple(D -> ntuple(S -> similar(get_send_view(Side(S), Dim(D), data, halo)), Val(2)), Val(N))
+end
+
+function make_empty_recv_buffers(data::A , halo::Int) where {A<:AbstractArray{T,N},T,N}
+    ntuple(D -> ntuple(S -> A[], Val(2)), Val(N))
+end
+
+function make_empty_send_buffers(data::A , halo::Int) where {A<:AbstractArray{T,N},T,N}
+    ntuple(D -> ntuple(S ->  A[], Val(2)), Val(N))
 end

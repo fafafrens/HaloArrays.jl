@@ -30,6 +30,21 @@ struct CartesianTopology{N}
     active::Bool
 end
 
+function inactive_cartesian_topology(dims::NTuple{N,Int}) where {N}
+   # usa i costanti MPI per valori "null"
+   nprocs = 0
+   global_rank = MPI.PROC_NULL
+   cart_coords = ntuple(i -> MPI.PROC_NULL, Val(N))
+   neighbors = ntuple(i -> (MPI.PROC_NULL, MPI.PROC_NULL), Val(N))
+   periodic = ntuple(i -> false, Val(N))
+    
+   return CartesianTopology{N}(nprocs, dims, global_rank, cart_coords, neighbors, MPI.COMM_NULL, MPI.COMM_NULL, periodic, false)
+end
+
+inactive_cartesian_topology(n_dimension::Int) = inactive_cartesian_topology(ntuple(i->0, n_dimension))
+
+inactive_cartesian_topology(::Val{N}) where N = inactive_cartesian_topology(ntuple(i->0, Val(N)))
+
 """
     CartesianTopology(comm::MPI.Comm, dims::NTuple{N,Int}; periodic=ntuple(i->true, Val(N)), active::Bool=true)
 
@@ -41,15 +56,10 @@ Construct a `CartesianTopology` for `comm`.
 - `periodic` indicates per-dimension periodicity.
 """
 function CartesianTopology(comm::MPI.Comm, dims::NTuple{N,Int};periodic=ntuple(i->true, Val(N)),active::Bool=true) where {N}
-    
-    if comm == MPI.COMM_NULL || !active
-        nprocs = 0
-        global_rank = -1
-        cart_comm = MPI.COMM_NULL
-        cart_coords = ntuple(i->-1, Val(N))
-        neighbors = ntuple(i->(-1,-1), Val(N))
-        return CartesianTopology{N}(nprocs, dims, global_rank, cart_coords, neighbors, MPI.COMM_NULL, MPI.COMM_NULL, periodic, false)
-    end
+     
+     if comm == MPI.COMM_NULL || !active
+        return inactive_cartesian_topology(dims)
+     end
 
     nprocs = MPI.Comm_size(comm)
     dims = MPI.Dims_create(nprocs, dims) |> Tuple
@@ -115,21 +125,21 @@ Returns `(sub_comm, coords, subrank)` where `sub_comm` may be `MPI.COMM_NULL`
 and `subrank` is `-1` if so.
 """
 function subcomm_for_slices(cart::CartesianTopology{N}, dims_to_reduce) where {N}
-    rank = cart.global_rank
-    coords = cart.cart_coords
-    tuple_dims_to_reduce = Tuple(dims_to_reduce)
-    color = coords_to_color_multi(coords, cart.dims, tuple_dims_to_reduce)
-    # key: ordina i ranks dentro la slice combinando le coords sulle dimensioni rimosse
-    key = 0
-    mul = 1
-    for i in tuple_dims_to_reduce
+     rank = cart.global_rank
+     coords = cart.cart_coords
+     tuple_dims_to_reduce = Tuple(dims_to_reduce)
+     color = coords_to_color_multi(coords, cart.dims, tuple_dims_to_reduce)
+     # key: ordina i ranks dentro la slice combinando le coords sulle dimensioni rimosse
+     key = 0
+     mul = 1
+     for i in tuple_dims_to_reduce
         key += coords[i] * mul
         mul *= cart.dims[i]
     end
     sub_comm = MPI.Comm_split(cart.cart_comm, color, key)
-    subrank = (sub_comm == MPI.COMM_NULL) ? -1 : MPI.Comm_rank(sub_comm)
-    return (sub_comm, coords, subrank)
-end
+    subrank = (sub_comm == MPI.COMM_NULL) ? MPI.PROC_NULL : MPI.Comm_rank(sub_comm)
+     return (sub_comm, coords, subrank)
+ end
 
 """
     root_topology_multi(cart::CartesianTopology{N}, dims_to_reduce; root_coord::Int = 0)
