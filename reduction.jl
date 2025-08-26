@@ -88,3 +88,63 @@ function Base.any(f::F, mha::MultiHaloArray) where {F}
     end
     return any(field_results)
 end
+
+
+"""
+    mapreduce_haloarray_dims(f,op,ha::HaloArray, dims; root_coord=0)
+
+Reduce `ha` over the dimensions in `dims_to_remove` (1-based). Assumes the local interior
+size along each dimension is 1 (i.e. each process owns exactly one interior cell),
+so the per-slice reduction produces a single scalar placed on the corresponding root
+process of the reduced topology.
+
+Returns a MaybeHaloArray wrapping the new lower-dimensional HaloArray (active only on
+the chosen root coordinates).
+"""
+function mapreduce_haloarray_dims(f,op,ha::HaloArray{T,N,A,Halo,B,BCondition}, dims) where {T,N,A,Halo,B,BCondition}
+    topo = ha.topology
+    root_coord=0
+    dims_to_remove = Tuple(dims)
+    # split communicator grouping processes that share coords on the kept dims
+    (sub_comm, coords, subrank) = subcomm_for_slices(topo, dims_to_remove)
+
+    mpi_op=MPI.Op(op, T; iscommutative=true)
+
+    dimension_to_reduce = Tuple(dims_to_remove)
+    local_value = dropdims(mapreduce(f,op,ha.data,dims=dimension_to_reduce),dims=dimension_to_reduce)
+    # perform reduction (sum) inside the sub-communicator; result only valid on subrank==0
+
+
+    sum_on_root = MPI.Reduce(local_value, mpi_op, sub_comm, root=root_coord)
+
+    # build the root (reduced) topology
+    root_topo = root_topology_multi(topo, dims_to_remove; root_coord=root_coord)
+    rem = Tuple(i for i in 1:N if !(i in dims_to_remove))
+    new_boundary=Tuple(ha.boundary_condition[i] for i in 1:N if !(i in dims_to_remove))
+    
+    M = length(rem)
+
+    # construct new HaloArray for reduced topology (halo width preserved)
+    new_ha = HaloArray{T, M, typeof(local_value) , Halo}(undef, new_boundary)
+
+    # if this process is the root of its sub-comm, place reduced scalar into the interior cell
+    if isactive(root_topo)
+        sizes = size(sum_on_root)
+
+        new_ranges = ntuple(i -> halo_width(new_ha) + 1:sizes[i], Val(max(1,M)))
+
+        new_ha.data = sum_on_root
+        new_ha.topology = root_topo
+        new_ha.receive_bufs = make_recv_buffers(new_ha.data, Halo)
+        new_ha.send_bufs = make_send_buffers(new_ha.data, Halo)
+    end
+
+    # free sub_comm if allocated
+    if sub_comm != MPI.COMM_NULL
+        MPI.free(sub_comm)
+    end
+
+    return MaybeHaloArray(new_ha)
+end
+
+

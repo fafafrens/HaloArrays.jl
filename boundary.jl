@@ -133,7 +133,7 @@ function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,BCondition}) where {
     return nothing
 end
 
-function boundary_condition!(mha::MultiHaloArray{T,N,A,Len}) where {T,N,A,Len}
+function boundary_condition!(mha::MultiHaloArray{T,N,A}) where {T,N,A}
     # Dispatch to each field's boundary condition
     foreach_field!(boundary_condition!,mha)
     return nothing

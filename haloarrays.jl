@@ -1,5 +1,5 @@
 # MultiHaloArray using NamedTuple to store fields
-struct MultiHaloArray{T, N, A , Len } #<: AbstractArray{T, N}
+struct MultiHaloArray{T, N, A } #<: AbstractArray{T, N}
     arrays::A  # NamedTuple of HaloArrays
 end
 
@@ -35,7 +35,7 @@ function MultiHaloArray(arrs::NamedTuple)
     
     ntup =NamedTuple{field_names}(newarr)
     Len=length(field_values)
-    return MultiHaloArray{TTypes, N_ref , typeof(ntup),Len}(ntup)
+    return MultiHaloArray{TTypes, N_ref , typeof(ntup)}(ntup)
 end
 
 
@@ -57,16 +57,16 @@ Base.getindex(mha::MultiHaloArray, name::Symbol) = mha.arrays[name]
 
 
 # Metadata helpers
-Base.eltype(mha::MultiHaloArray{T, N, A,Len}) where {T,N,A,Len} = T
-Base.ndims(mha::MultiHaloArray{T, N, A,Len}) where {T,N,A,Len} = N 
+Base.eltype(mha::MultiHaloArray{T, N, A) where {T,N,A,Len} = T
+Base.ndims(mha::MultiHaloArray{T, N, A}) where {T,N,A,Len} = N 
 
 
 
 # Size includes field axis
-@inline Base.size(mha::MultiHaloArray) = (length(mha.arrays), size(first(mha.arrays))...)
+@inline Base.size(mha::MultiHaloArray) = (size(mha.arrays)..., size(first(mha.arrays))...)
 @inline Base.size(mha::MultiHaloArray, i::Int) = size(mha)[i]
 
-n_field(halos::MultiHaloArray{T,N,A,Len}) where {T,N,A,Len} = Len
+n_field(halos::MultiHaloArray{T,N,A}) where {T,N,A} = length(halos.arrays)
 
 #Base.length(halo::HaloArray) = length(halo.data)
 
@@ -81,24 +81,23 @@ n_field(halos::MultiHaloArray{T,N,A,Len}) where {T,N,A,Len} = Len
 
 to_tuple(mha::MultiHaloArray) = (mha.arrays...,)
 
-function Base.similar(mha::MultiHaloArray{AA, N, A,Len}, ::Type{T},dims::NTuple{M,Inf64}) where {AA,N, A, Len,T,M}
+function Base.similar(mha::MultiHaloArray{AA, N, A}, ::Type{T},dims::NTuple{M,Inf64}) where {AA,N, A,T,M}
 
     arrs = map(a -> similar(a, T, dims), values(mha.arrays))
     names = keys(mha.arrays)
     nt = NamedTuple{names}(arrs)
-    return MultiHaloArray{T, N, typeof(nt),length(nt)}(nt)
+    return MultiHaloArray{T, N, typeof(nt)}(nt)
 end
 
-
-function Base.similar(mha::MultiHaloArray{AA, N, A,Len}, ::Type{T}) where {AA,N, A, Len,T}
+function Base.similar(mha::MultiHaloArray{AA, N, A}, ::Type{T}) where {AA,N, A, T}
     arrs = map(a -> similar(a, T), values(mha.arrays))
     names = keys(mha.arrays)
     nt = NamedTuple{names}(arrs)
-    return MultiHaloArray{T, N, typeof(nt),length(nt)}(nt)
+    return MultiHaloArray{T, N, typeof(nt)}(nt)
 end
 
 
-function Base.similar(mha::MultiHaloArray{AA, N, A,Len}) where {AA,N, A,Len}
+function Base.similar(mha::MultiHaloArray{AA, N, A}) where {AA,N, A}
     arrs = map(a -> similar(a), values(mha.arrays))
     names = keys(mha.arrays)
     nt = NamedTuple{names}(arrs)

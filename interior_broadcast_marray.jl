@@ -1,33 +1,33 @@
 using Base.Broadcast: Broadcasted, broadcastable, BroadcastStyle, AbstractArrayStyle, DefaultArrayStyle
 
 # Broadcast style marker for MultiHaloArray
-struct MultiHaloArrayStyle{Ndim,N} <: AbstractArrayStyle{Ndim} end
+struct MultiHaloArrayStyle{Ndim} <: AbstractArrayStyle{Ndim} end
 
-MultiHaloArrayStyle{Ndim,N}(::Val{Ndim},::Val{N}) where {Ndim,N} = MultiHaloArrayStyle{Ndim,N}()
+MultiHaloArrayStyle{Ndim}(::Val{Ndim}) where {Ndim} = MultiHaloArrayStyle{Ndim}()
 
 # The order is important here. We want to override Base.Broadcast.DefaultArrayStyle to return another Base.Broadcast.DefaultArrayStyle.
 Broadcast.BroadcastStyle(a::MultiHaloArrayStyle, ::Base.Broadcast.DefaultArrayStyle{0}) = a
-Broadcast.BroadcastStyle(::Type{<:MultiHaloArray{T,Ndim,A,N}}) where {T,Ndim,A,N} =
-    MultiHaloArrayStyle{Ndim,N}()
+Broadcast.BroadcastStyle(::Type{<:MultiHaloArray{T,Ndim,A}}) where {T,Ndim,A} =
+    MultiHaloArrayStyle{Ndim}()
 
-    function Broadcast.BroadcastStyle(::MultiHaloArrayStyle{Ndim,N},
-        a::Base.Broadcast.DefaultArrayStyle{M}) where { Ndim,N ,M}
+    function Broadcast.BroadcastStyle(::MultiHaloArrayStyle{Ndim},
+        a::Base.Broadcast.DefaultArrayStyle{M}) where { Ndim ,M}
     Base.Broadcast.DefaultArrayStyle(Val(max(M, Ndim)))
 end
-function Broadcast.BroadcastStyle(::MultiHaloArrayStyle{Ndim,N},
-        a::Base.Broadcast.AbstractArrayStyle{M}) where {Ndim,N,M}
+function Broadcast.BroadcastStyle(::MultiHaloArrayStyle{Ndim},
+        a::Base.Broadcast.AbstractArrayStyle{M}) where {Ndim,M}
         typeof(a)(Val(max(M,Ndim)))
 end
 
-function Broadcast.BroadcastStyle(::HaloArrayStyle{M},::MultiHaloArrayStyle{Ndim,N}
-        ) where {Ndim,N,M}
+function Broadcast.BroadcastStyle(::HaloArrayStyle{M},::MultiHaloArrayStyle{Ndim}
+        ) where {Ndim,M}
         HaloArrayStyle(Val(max(M, Ndim)))
 end
 
 
-function Broadcast.BroadcastStyle(::MultiHaloArrayStyle{Ndim,N},
-        ::MultiHaloArrayStyle{Mdim,N}) where {Mdim, Ndim,N}
-    MultiHaloArrayStyle(Val(max(Mdim, Ndim)),Val(N))
+function Broadcast.BroadcastStyle(::MultiHaloArrayStyle{Ndim},
+        ::MultiHaloArrayStyle{Mdim}) where {Mdim, Ndim}
+    MultiHaloArrayStyle(Val(max(Mdim, Ndim)))
 end
 
 # make vectorofarrays broadcastable so they aren't collected
@@ -69,33 +69,33 @@ unpack_args_mha(::Any, args::Tuple{}) = ()
 
 
 
-@inline function Base.copyto!(dest::MultiHaloArray,bc::Broadcast.Broadcasted{<:MultiHaloArrayStyle{Ndim,N}}) where {Ndim,N}
+@inline function Base.copyto!(dest::MultiHaloArray,bc::Broadcast.Broadcasted{<:MultiHaloArrayStyle{Ndim}}) where {Ndim}
         bc = Broadcast.flatten(bc)
         out=values(dest.arrays)
-for (d, i) in zip(out, 1:N)
+for (d, i) in zip(out, eachindex(out))
     copyto!(d, unpack_mha(bc, i))
 end
         dest
 end
 
-@inline function Base.copy(bc::Broadcasted{<:MultiHaloArrayStyle{Ndim,N}}) where {Ndim,N}
+@inline function Base.copy(bc::Broadcasted{<:MultiHaloArrayStyle{Ndim}}) where {Ndim}
     bc_args = Broadcast.flatten(bc)
     
 
     dest = similar(bc)
     out=values(dest.arrays)
 
-for (d, i) in zip(out, 1:N)
+for (d, i) in zip(out, eachindex(out))
     copyto!(d, unpack_mha(bc, i))
 end
    
     return dest
 end
 
-function Broadcast.materialize!(dest::MultiHaloArray{T, N, A, Len}, bc::Broadcasted) where {T, N, A, Len}
+function Broadcast.materialize!(dest::MultiHaloArray{T, N, A}, bc::Broadcasted) where {T, N, A}
     bc_flat = Broadcast.flatten(bc)
     out=values(dest.arrays)
-    for (d, i) in zip(out, 1:Len)
+    for (d, i) in zip(out, eachindex(out))
         Broadcast.materialize!(d, unpack_mha(bc_flat, i))
     end
     return dest
@@ -112,5 +112,7 @@ function Base.similar(bc::Broadcasted{<:MultiHaloArrayStyle})
     mha = find_mha(bc)::MultiHaloArray
     return similar(mha)
 end
+
+
 
 
