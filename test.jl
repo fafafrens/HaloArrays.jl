@@ -22,7 +22,6 @@ include("interior_broadcast_marray.jl")
 include("reduction.jl")
 include("halo_exchange.jl")
 include("boundary.jl")
-include("reduce_dim.jl")
 include("gather.jl")
 include("save_hdf5.jl")
 

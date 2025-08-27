@@ -57,13 +57,12 @@ Base.getindex(mha::MultiHaloArray, name::Symbol) = mha.arrays[name]
 
 
 # Metadata helpers
-Base.eltype(mha::MultiHaloArray{T, N, A) where {T,N,A,Len} = T
-Base.ndims(mha::MultiHaloArray{T, N, A}) where {T,N,A,Len} = N 
-
-
+Base.eltype(mha::MultiHaloArray{T, N, A}) where {T,N,A} = T
+Base.ndims(mha::MultiHaloArray{T, N, A}) where {T,N,A} = N
 
 # Size includes field axis
-@inline Base.size(mha::MultiHaloArray) = (size(mha.arrays)..., size(first(mha.arrays))...)
+@inline Base.size(mha::MultiHaloArray) = (length(mha.arrays), size(first(mha.arrays))...)
+
 @inline Base.size(mha::MultiHaloArray, i::Int) = size(mha)[i]
 
 n_field(halos::MultiHaloArray{T,N,A}) where {T,N,A} = length(halos.arrays)
