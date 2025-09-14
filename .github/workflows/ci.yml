@@ -46,8 +46,10 @@ jobs:
       - uses: julia-actions/setup-julia@v2
         with:
           version: '1.11'
-      - name: Install OpenMPI
-        run: sudo apt-get update && sudo apt-get install -y libopenmpi-dev openmpi-bin
+      - name: Install test extras
+        run: julia --project=. -e 'using Pkg; Pkg.add(["BenchmarkTools","OrdinaryDiffEq"])'
+      - name: Configure MPI provider
+        run: julia --project=. -e 'using MPIPreferences; MPIPreferences.use_jll_binary("MPICH_jll")'
       - name: Instantiate
         run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
       - name: Precompile (ensure deps are ready)
@@ -56,4 +58,13 @@ jobs:
         env:
           HALOARRAYS_RUN_UNIT_TESTS: "false"
           HALOARRAYS_RUN_MPI_TESTS: "true"
-        run: mpiexec --oversubscribe -n ${{ matrix.np }} julia --project=. -e 'include(joinpath(pwd(),"test","runtests.jl"))'
+          NP: ${{ matrix.np }}
+        run: |
+          julia --project=. -e '
+          using Pkg
+          using MPI
+          n = parse(Int, ENV["NP"])
+          cmd = `$(MPI.mpiexec()) -n $n $(Base.julia_cmd()) --project=. -e "include(joinpath(pwd(),\"test\",\"runtests.jl\"))"`
+          println(cmd)
+          run(cmd)
+          '
