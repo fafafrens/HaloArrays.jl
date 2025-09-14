@@ -46,10 +46,12 @@ jobs:
       - uses: julia-actions/setup-julia@v2
         with:
           version: '1.11'
-      - name: Install test extras
-        run: julia --project=. -e 'using Pkg; Pkg.add(["BenchmarkTools","OrdinaryDiffEq"])'
+      - name: Install test extras and MPIPreferences
+        run: julia --project=. -e 'using Pkg; Pkg.add(["BenchmarkTools","OrdinaryDiffEq","MPIPreferences"])'
       - name: Configure MPI provider
         run: julia --project=. -e 'using MPIPreferences; MPIPreferences.use_jll_binary("MPICH_jll")'
+      - name: Instantiate (after setting MPI preference)
+        run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
       - name: Instantiate
         run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
       - name: Precompile (ensure deps are ready)
