@@ -1,24 +1,13 @@
 using MPI
 using HDF5
-
-include("cartesian_topology.jl")
-include("haloarray.jl")
-include("haloarrays.jl")
-include("interior_broadcast.jl")
-include("interior_broadcast_marray.jl")
-include("reduction.jl")
-include("halo_exchange.jl")
-include("boundary.jl")
-include("reduce_dim.jl")
-include("gather.jl")
-include("save_hdf5.jl")
+using HaloArrays
 
 
 function heat_1d_step!( u_old::HaloArray, α, dt, dx)
     
     data_old=u_old.data
 
-    @inbounds for I in CartesianIndices(interior_range(u_old))
+@inbounds for I in CartesianIndices(HaloArrays.interior_range(u_old))
         # Because of halos, interior indices shifted by h
         idx=first(Tuple(I))
 
@@ -54,7 +43,7 @@ function run_heat_1d_periodic(N_local, α, CFL, L, nt)
 
     # Initialize Gaussian pulse across global domain
 
-    fill_from_global_indices!(u) do i
+HaloArrays.fill_from_global_indices!(u) do i
     x = i[1]
     return   exp(-(x - Nglobal/2)^2/10^2)+1
     end

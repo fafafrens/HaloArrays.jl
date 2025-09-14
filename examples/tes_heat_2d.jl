@@ -1,28 +1,16 @@
 using MPI
 using HDF5
-
-
-include("cartesian_topology.jl")
-include("haloarray.jl")
-include("haloarrays.jl")
-include("interior_broadcast.jl")
-include("interior_broadcast_marray.jl")
-include("reduction.jl")
-include("halo_exchange.jl")
-include("boundary.jl")
-include("reduce_dim.jl")
-include("gather.jl")
-include("save_hdf5.jl")
+using HaloArrays
 
 
 function heat_2d_step!( u_old::HaloArray, α, dt, dx)
     
     data_old=u_old.data
 
-    @inbounds for I in CartesianIndices(interior_range(u_old))
+@inbounds for I in CartesianIndices(HaloArrays.interior_range(u_old))
         # Because of halos, interior indices shifted by h
             
-        e_i=versors(u_old)
+e_i=HaloArrays.versors(u_old)
         laplacian = zero(eltype(data_old))
 
         @inbounds for dim in 1:(ndims(u_old))
@@ -81,7 +69,7 @@ MPI.Barrier(comm)
 
     # Initialize Gaussian pulse across global domain
 
-    fill_from_global_indices!(u) do i
+HaloArrays.fill_from_global_indices!(u) do i
     x = i[1]
     y = i[2]
     return  10 * exp(-(x - (Nglobal[1]/2))^2/5^2 - (y - (Nglobal[2]/2))^2/10^2) + 1
