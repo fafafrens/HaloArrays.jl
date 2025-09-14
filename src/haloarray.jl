@@ -111,22 +111,6 @@ Base.axes(x::HaloArray) = axes(interior_view(x))
 isactive(a::HaloArray) = isactive(a.topology)
 
 
-function  HaloArray(data::AbstractArray{T,N},halo::Int, topology::CartesianTopology{N},
-    boundary_condition) where {T,N}
-
-    # type-stable NTuple{N,NTuple{2,Array}} buffers
-    recv_bufs = make_recv_buffers(data, halo)
-    send_bufs = make_send_buffers(data, halo)
- 
-     #we check that the boundary condition is consistent with the topology
-     validate_boundary_condition(topology, boundary_condition)
- 
-     # Create the HaloArray with all necessary fields
- 
-     comm_state=HaloCommState(N)
-    return HaloArray{T, N, typeof(data), halo, typeof(recv_bufs), typeof(boundary_condition)}(
-        data, topology, comm_state, recv_bufs, send_bufs, boundary_condition)
- end
 
 
 # Factory minima: costruisce HaloArray da un array esistente, normalizza BC e crea buffer

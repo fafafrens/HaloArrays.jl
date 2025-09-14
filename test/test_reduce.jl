@@ -47,4 +47,4 @@ end
 
 test_reduction()
 
-MPI.Finalize()
+MPI.Barrier(comm)

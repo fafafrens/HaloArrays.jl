@@ -54,4 +54,3 @@ end
         @info "Skipping MPI tests (run under mpiexec with HALOARRAYS_RUN_MPI_TESTS=true)"
     end
 end
-end

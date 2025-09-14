@@ -78,4 +78,4 @@ time_exchange("Async", halo_exchange_async!, halo)
 time_exchange("Waitall Unsafe", halo_exchange_waitall_unsafe!, halo)
 time_exchange("Async Unsafe", halo_exchange_async_unsafe!, halo)
 
-MPI.Finalize()
+MPI.Barrier(comm)

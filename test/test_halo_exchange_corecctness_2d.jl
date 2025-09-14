@@ -106,7 +106,7 @@ MPI.Barrier(comm)
     end
 
     MPI.Barrier(comm)
-    MPI.Finalize()
+    MPI.Barrier(comm)
 end
 
 test_halo_exchange_2d_correctness()

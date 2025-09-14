@@ -52,8 +52,6 @@ end
 @inline function unpack_ha(bc::Broadcasted{<:HaloArrayStyle}) 
     Broadcasted(bc.f, unpack_args_ha(bc.args))
 end
-unpack_ha(x) = x 
-unpack_ha(x::HaloArray) = interior_view(x)
 
 
 @inline function unpack_args_ha( args::Tuple)

@@ -137,4 +137,4 @@ MPI.Init()
 end
 
 
-MPI.Finalize()
+MPI.Barrier(comm)

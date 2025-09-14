@@ -164,4 +164,4 @@ test_gather_haloarray_2D()
 test_gather_haloarray_3D()
 
 MPI.Barrier(MPI.COMM_WORLD)
-MPI.Finalize()
+MPI.Barrier(MPI.COMM_WORLD)

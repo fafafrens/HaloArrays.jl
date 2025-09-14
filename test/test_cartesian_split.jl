@@ -67,4 +67,4 @@ if rank == 0
     end
 end
 
-MPI.Finalize()
+MPI.Barrier(comm)

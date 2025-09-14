@@ -146,4 +146,4 @@ end
 test_halo_exchange_3d_correctness()
 
 MPI.Barrier(MPI.COMM_WORLD)
-MPI.Finalize()
+MPI.Barrier(comm)

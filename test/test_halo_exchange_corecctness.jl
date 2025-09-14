@@ -123,7 +123,7 @@ function test_halo_exchange_correctness()
     end
 
     MPI.Barrier(comm)
-    MPI.Finalize()
+    MPI.Barrier(comm)
 end
 
 test_halo_exchange_correctness()

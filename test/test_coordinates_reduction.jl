@@ -103,4 +103,4 @@ for r in 0:nprocs-1
 end
 
 MPI.Barrier(comm)
-MPI.Finalize()
+MPI.Barrier(comm)

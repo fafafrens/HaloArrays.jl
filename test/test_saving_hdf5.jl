@@ -67,11 +67,10 @@ function test_fixedsize_hdf5()
     # Example: 2D grid (2x2 processes) assumed
     if nprocs != 4
         if rank == 0
-            println("Please run with 4 MPI processes for this test")
+            @info "Skipping fixed-size HDF5 test: requires 4 processes" nprocs
         end
         MPI.Barrier(comm)
-        MPI.Finalize()
-        return  
+        return
     end
 
     # Create a HaloArray with local data and topology
@@ -120,5 +119,5 @@ end
 test_fixedsize_hdf5()
 test_append()
 
-MPI.Finalize()
+MPI.Barrier(COMM)
 # Run the test

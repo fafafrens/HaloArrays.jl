@@ -56,5 +56,5 @@ MPI.Barrier(comm)
 @test any(x -> x < 0, mha)
 
 MPI.Barrier(comm)
-MPI.Finalize()
+MPI.Barrier(comm)
 end # End of testset

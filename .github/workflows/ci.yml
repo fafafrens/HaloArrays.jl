@@ -13,6 +13,7 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         julia-version: ['1.10', '1.11']
+  
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -35,7 +36,10 @@ jobs:
         run: julia --project=. -e 'using Pkg; Pkg.test()'
 
   mpitests:
-    if: false  # Enable when you have mpiexec in CI or provide container with MPI
+    strategy:
+      fail-fast: false
+      matrix:
+        np: [2, 4]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,4 +54,4 @@ jobs:
         env:
           HALOARRAYS_RUN_UNIT_TESTS: "false"
           HALOARRAYS_RUN_MPI_TESTS: "true"
-        run: mpiexec -n 4 julia --project=. -e 'using Pkg; Pkg.test()'
+        run: mpiexec -n ${{ matrix.np }} julia --project=. -e 'using Pkg; Pkg.test()'

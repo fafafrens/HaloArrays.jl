@@ -61,7 +61,7 @@ right_halo = A.data[end - halo + 1 : end]
 
 println("✅ Rank $rank: halo exchange correctness verified.")
 MPI.Barrier(comm)
-MPI.Finalize()
+MPI.Barrier(comm)
 end
 
 test_halo_exchange_1d_correctness()

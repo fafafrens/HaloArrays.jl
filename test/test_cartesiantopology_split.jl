@@ -116,4 +116,4 @@ if rank == 0
 end
 
 MPI.Barrier(comm)
-MPI.Finalize()
+MPI.Barrier(comm)
