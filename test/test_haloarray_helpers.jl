@@ -38,7 +38,7 @@ h = HaloArrays.HaloArray{Float64,2,Array{Float64,2},1}(undef, bc)
 
         @test eltype(h) === Float64
         @test ndims(h) == 2
-        @test halo_width(h) == 1
+@test HaloArrays.halo_width(h) == 1
 
         # topology inattiva: cart_comm dovrebbe essere MPI.COMM_NULL
         @test isdefined(h, :topology)
@@ -46,7 +46,7 @@ h = HaloArrays.HaloArray{Float64,2,Array{Float64,2},1}(undef, bc)
 
         # boundary_condition normalizzata
         @test length(h.boundary_condition) == 2
-        @test h.boundary_condition[1][1] isa Repeating && h.boundary_condition[1][2] isa Repeating
+@test h.boundary_condition[1][1] isa HaloArrays.Repeating && h.boundary_condition[1][2] isa HaloArrays.Repeating
 
         # receive/send buffers struttura: NTuple{N,NTuple{2,_}}
         @test length(h.receive_bufs) == ndims(h)
