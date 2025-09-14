@@ -169,7 +169,7 @@ end
 # Unified converter: Symbol | Type | instance -> concrete BC instance
 function to_bc(x)
     if x isa Symbol
-        entry = get(BC_SYMBOL_MAP, x, nothing)
+        entry = Base.get(BC_SYMBOL_MAP, x, nothing)
         entry === nothing && throw(ArgumentError("Unknown boundary condition symbol: $x. Register it with register_bc(:$x, MyBC)."))
         return entry isa DataType ? entry() : entry
     elseif x isa DataType && x <: AbstractBoundaryCondition
