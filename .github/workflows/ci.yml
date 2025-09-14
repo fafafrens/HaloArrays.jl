@@ -50,8 +50,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libopenmpi-dev openmpi-bin
       - name: Instantiate
         run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
+      - name: Precompile (ensure deps are ready)
+        run: julia --project=. -e 'using Pkg; Pkg.precompile(); using HaloArrays'
       - name: Run MPI tests
         env:
           HALOARRAYS_RUN_UNIT_TESTS: "false"
           HALOARRAYS_RUN_MPI_TESTS: "true"
-        run: mpiexec --oversubscribe -n ${{ matrix.np }} julia --project=. -e 'using Pkg; Pkg.test()'
+        run: mpiexec --oversubscribe -n ${{ matrix.np }} julia --project=. -e 'include(joinpath(pwd(),"test","runtests.jl"))'
