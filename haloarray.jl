@@ -95,8 +95,15 @@ end
 @inline full_size(halo::HaloArray) = size(halo.data)
 @inline full_size(halo::HaloArray, i::Int) = size(halo.data,i)
 
+
+@inline halo_width(::Type{HaloArray{T,N,A,Halo,B,BCondition}}) where {T,N,A,Halo,B,BCondition} = Halo
+
 @inline halo_width(halo::HaloArray{T,N,A,Halo,B,BCondition}) where {T,N,A,Halo,B,BCondition} = Halo
+
 @inline Base.ndims(halo::HaloArray{T,N,A,Halo,B,BCondition}) where {T,N,A,Halo,B,BCondition} = N
+
+@inline Base.ndims(::Type{HaloArray{T,N,A,Halo,B,BCondition}}) where {T,N,A,Halo,B,BCondition} = N
+
 @inline Base.parent(halo::HaloArray) = halo.data
 Base.axes(x::HaloArray) = axes(interior_view(x))
 
@@ -126,16 +133,16 @@ function  HaloArray(data::AbstractArray{T,N},halo::Int, topology::CartesianTopol
 function build_haloarray_from_data(data::AbstractArray{T,N}, halo::Int, topology::CartesianTopology{N}, boundary_condition_raw) where {T,N}
  
      # Normalizza la rappresentazione della BC (assume normalize_boundary_condition disponibile)
-     bc = normalize_boundary_condition(boundary_condition_raw, N)
+    bc = normalize_boundary_condition(boundary_condition_raw, N)
  
     # type-stable NTuple buffers
     recv_bufs = make_recv_buffers(data, halo)
    send_bufs = make_send_buffers(data, halo)
  
      # verifica che la BC sia coerente con la topology
-     validate_boundary_condition(topology, bc)
+    validate_boundary_condition(topology, bc)
  
-     comm_state = HaloCommState(N)
+    comm_state = HaloCommState(N)
     HaloArray{T, N, typeof(data), halo, typeof(recv_bufs), typeof(bc)}(data, topology, comm_state, recv_bufs, send_bufs, bc)
  end
 
@@ -184,11 +191,16 @@ end
 
 
 
-function Base.similar(halo::HaloArray, element_type=eltype(halo) ,
+function Base.similar(halo::HaloArray{T, N, A, Halo, B, BCondition}, element_type=eltype(halo) ,
     dims::NTuple{M,Int64}=interior_size(halo)
-    ) where {M}
-    # Create a new HaloArray with given interior dims, preserving halo_width and topology
-    HaloArray(element_type, dims ,halo_width(halo), halo.topology; boundary_condition=halo.boundary_condition)
+    ) where {T, N, A, Halo, B, BCondition, M}    ## Create a new HaloArray with given interior dims, preserving halo_width and topology
+    #HaloArray(element_type, dims ,halo_width(halo), halo.topology; boundary_condition=halo.boundary_condition)
+
+        # crea array fullsize (interior + halo) e costruisci HaloArray riutilizzando
+    # topology e boundary_condition esistenti tramite build_haloarray_from_data
+    fullsize = ntuple(i -> dims[i] + 2 * halo_width(halo), Val(N))
+    data = zeros(element_type, fullsize...)
+    return build_haloarray_from_data(data, halo_width(halo), halo.topology, halo.boundary_condition)
 end
 
 #this function is to give back a view of a generic array with singleton and on abstract array 
@@ -515,6 +527,11 @@ end
 
 # Helper: validate boundary_condition vs topology (semplificata)
 function validate_boundary_condition(topology::CartesianTopology{N}, boundary_condition) where {N}
+
+    if !isactive(topology)
+        return true  # No need to validate if topology is inactive
+    end
+
     for d in 1:N
         left, right = boundary_condition[d]
 
@@ -530,9 +547,11 @@ function validate_boundary_condition(topology::CartesianTopology{N}, boundary_co
         if topo_is_periodic && !both_periodic
             error("Topology is periodic in dimension $d but boundary_condition[$d] is not (both sides must be Periodic).")
         elseif !topo_is_periodic && any_periodic
-            error("Boundary condition in dimension $d uses Periodic but topology is not periodic.")
+            error("Boundary condition in dimension $d uses Periodic but topology is not periodic.
+            $d: $(topology), boundary_condition[$d]: ($(left), $(right)), isactive: $(isactive(topology))")
         end
     end
+
     return true
 end
 

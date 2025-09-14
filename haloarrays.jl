@@ -1,10 +1,10 @@
 # MultiHaloArray using NamedTuple to store fields
-struct MultiHaloArray{T, N, A } #<: AbstractArray{T, N}
+mutable struct MultiHaloArray{T, N, A } #<: AbstractArray{T, N}
     arrays::A  # NamedTuple of HaloArrays
 end
 
 
-function MultiHaloArray(arrs::NamedTuple)
+function MultiHaloArray(arrs::NamedTuple;check=false)
     field_names = keys(arrs)
     field_values = values(arrs)
 
@@ -12,10 +12,12 @@ function MultiHaloArray(arrs::NamedTuple)
     field_eltypes = map(eltype, field_values)
    
     TTypes = promote_type(field_eltypes...)
-  
-
-    # Check all have same dimensionality
     N_ref = ndims(first(field_values))
+
+    
+    if check
+    # Check all have same dimensionality
+   
     if !all(ndims(a) == N_ref for a in field_values)
         throw(ArgumentError("All HaloArrays must have the same dimensionality N"))
     end
@@ -27,15 +29,16 @@ function MultiHaloArray(arrs::NamedTuple)
             throw(DimensionMismatch("Field `$(name)` has interior size $(size(interior_view(a))) ≠ $ref_size"))
         end
     end
+    end 
 
-    newarr=map(field_values) do data 
-        HaloArray(convert.(TTypes,data.data),halo_width(data), data.topology,
-    data.boundary_condition)
-    end
+    #newarr=map(field_values) do data 
+    #    HaloArray(convert.(TTypes,data.data),halo_width(data), data.topology,
+    #data.boundary_condition)
+    #end
     
-    ntup =NamedTuple{field_names}(newarr)
-    Len=length(field_values)
-    return MultiHaloArray{TTypes, N_ref , typeof(ntup)}(ntup)
+    #ntup =NamedTuple{field_names}(newarr)
+    #Len=length(field_values)
+    return MultiHaloArray{TTypes, N_ref ,typeof(arrs)}(arrs)
 end
 
 
@@ -59,6 +62,7 @@ Base.getindex(mha::MultiHaloArray, name::Symbol) = mha.arrays[name]
 # Metadata helpers
 Base.eltype(mha::MultiHaloArray{T, N, A}) where {T,N,A} = T
 Base.ndims(mha::MultiHaloArray{T, N, A}) where {T,N,A} = N
+Base.ndims(::Type{MultiHaloArray{T, N, A}}) where {T,N,A} = N
 
 # Size includes field axis
 @inline Base.size(mha::MultiHaloArray) = (length(mha.arrays), size(first(mha.arrays))...)
@@ -151,6 +155,27 @@ function map_over_field(f, mha::MultiHaloArray,etc::Vararg{MultiHaloArray})
     end
 
     return NamedTuple{keyset}(result)
+end
+
+"""
+    interior_view(mha::MultiHaloArray)
+
+Restituisce un NamedTuple con le interior view di ciascun campo del MultiHaloArray.
+I campi del NamedTuple hanno gli stessi simboli del `mha.arrays`.
+"""
+function interior_view(mha::MultiHaloArray)
+    return (; (name => interior_view(v) for (name,v) in mha.arrays)...)
+end
+
+# isactive per MultiHaloArray: true se almeno un campo è active
+# richiede che isactive sia definita per i singoli HaloArray
+function isactive(mha::MultiHaloArray)
+    return all(isactive, values(mha.arrays))
+end
+
+# utility: ritorna NamedTuple mapping field -> Bool (active per campo)
+function active_fields(mha::MultiHaloArray)
+    return (; (name => isactive(ha) for (name, ha) in mha.arrays)...)
 end
 
 

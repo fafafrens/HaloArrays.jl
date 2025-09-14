@@ -7,10 +7,9 @@ MultiHaloArrayStyle{Ndim}(::Val{Ndim}) where {Ndim} = MultiHaloArrayStyle{Ndim}(
 
 # The order is important here. We want to override Base.Broadcast.DefaultArrayStyle to return another Base.Broadcast.DefaultArrayStyle.
 Broadcast.BroadcastStyle(a::MultiHaloArrayStyle, ::Base.Broadcast.DefaultArrayStyle{0}) = a
-Broadcast.BroadcastStyle(::Type{<:MultiHaloArray{T,Ndim,A}}) where {T,Ndim,A} =
-    MultiHaloArrayStyle{Ndim}()
+Broadcast.BroadcastStyle(::Type{<:MultiHaloArray{T,Ndim,A}}) where {T,Ndim,A} =MultiHaloArrayStyle{Ndim}()
 
-    function Broadcast.BroadcastStyle(::MultiHaloArrayStyle{Ndim},
+function Broadcast.BroadcastStyle(::MultiHaloArrayStyle{Ndim},
         a::Base.Broadcast.DefaultArrayStyle{M}) where { Ndim ,M}
     Base.Broadcast.DefaultArrayStyle(Val(max(M, Ndim)))
 end
@@ -54,7 +53,6 @@ unpack_mha(x::MultiHaloArray, i) = values(x.arrays)[i]
 function unpack_mha(x::AbstractArray{T, N}, i) where {T, N}
    x
 end
-
 function unpack_mha(x::HaloArray, i) 
     interior_view(x)
 end

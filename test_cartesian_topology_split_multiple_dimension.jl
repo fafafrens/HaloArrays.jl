@@ -7,7 +7,7 @@ include("boundary.jl")        # <<-- boundary prima
 include("interior_broadcast.jl")
 include("halo_exchange.jl")
 include("meybehaloarray.jl")
-include("reduce_dim.jl")
+include("reduction.jl")
 
 MPI.Init()
 comm = MPI.COMM_WORLD
@@ -41,7 +41,7 @@ tests = [
 results = Dict{Tuple{Vararg{Int}}, Any}()
 
 for dims_to_remove in tests
-    maybe_reduced = mapreduce_haloarray_dims(identity, +, ha, dims_to_remove; root_coord=0)
+    maybe_reduced = mapreduce_haloarray_dims(identity, +, ha, dims_to_remove)
 
     # compute expected sum for this process's kept coords (only meaningful on root_topo active procs)
     coords = topo.cart_coords
@@ -138,7 +138,7 @@ results2 = Dict{Tuple{Vararg{Int}}, Any}()
 for dims_to_remove in tests2
 
 
-    maybe_new = mapreduce_haloarray_dims(identity,+,ha2, dims_to_remove; root_coord=0)
+    maybe_new = mapreduce_haloarray_dims(identity,+,ha2, dims_to_remove)
 
 
     # compute expected by summing contributions from all ranks in the slice

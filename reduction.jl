@@ -1,5 +1,3 @@
-
-
 # We force specialisation on each function to avoid (tiny) allocations.
 #reduce
 # Note that, for mapreduce, we can assume that the operation is commutative,
@@ -145,6 +143,28 @@ function mapreduce_haloarray_dims(f,op,ha::HaloArray{T,N,A,Halo,B,BCondition}, d
     end
 
     return MaybeHaloArray(new_ha)
+end
+
+"""
+    reduce_mhaloarray_dims(op, mha::MultiHaloArray, dims; root_coord=0)
+
+Riduce `mha` campo-per-campo lungo `dims` usando `mapreduce_haloarray_dims(identity, op, ...)`.
+Restituisce un `MaybeHaloArray(MultiHaloArray(...))` attivo solo sui root delle slice ridotte.
+Se nessun campo è root sulla slice (tutti inactive) ritorna MaybeHaloArray(mha, false).
+Se alcuni campi risultano active e altri no -> errore (incoerenza).
+"""
+function mapreduce_mhaloarray_dims(f, op, mha::MultiHaloArray, dims)
+    
+    names = keys(mha.arrays)
+
+    list_of_maybe = map_over_field( mha) do field 
+        mapreduce_haloarray_dims(f, op, field, dims)
+    end
+    # unwrap e costruisci NamedTuple dei campi ridotti
+    
+    nt = NamedTuple{names}(list_of_maybe)
+
+    return MultiHaloArray(nt)   # constructor decide active in base ai campi
 end
 
 
