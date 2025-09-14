@@ -2,7 +2,7 @@ using MPI
 using HaloArrays
 
 # include topology definition
-include("/Users/eduardogrossi/mpistuff/cartesian_topology.jl")
+#include("/Users/eduardogrossi/mpistuff/cartesian_topology.jl")
 
 MPI.Init()
 comm = MPI.COMM_WORLD

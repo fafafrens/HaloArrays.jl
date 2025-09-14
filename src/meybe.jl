@@ -17,7 +17,7 @@ isactive(m::MaybeActive) = m.active
 
 Return `m.value` if active, otherwise return `default`.
 """
-get(m::MaybeActive, default) = m.active ? m.value : default
+Base.get(m::MaybeActive, default) = m.active ? m.value : default
 
 unsafe_get(m::MaybeActive) = m.value
 
