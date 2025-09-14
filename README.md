@@ -1,23 +1,27 @@
-# Haloarray
+# HaloArrays.jl
 
 Distributed halo array utilities for Julia.
 
 ## Status
-Work-in-progress. This repository currently contains scripts and utilities; it is not yet a registered Julia package.
-In the file with the prefix test are some working example, like solving heat equation in parallel. 
-Also there are some test to verify the logic and the corecntess, i even test the speed of some routine. 
-The main goal was to have an array for distributed computing that simply work. 
-Currently the main logic of halo excange is implementet in a way that can work with normal array or 
-possible GPU array. 
-The boundary condition are implemted but i am not happy. 
-The broadcast looks solid works in place and in out of place, this i am really happy i do not know how 
-i managed to do it. 
-I define also an array that take multiple haloarray with nametuple but it beahves like an array, with the broadcast and ecc. 
+This repository now contains a Julia package skeleton with tests. Many tests require MPI and are gated behind environment flags to keep CI green.
 
-I define a gather function and mapreduce of the total array. 
-The mapreduce of some silce is under construction since is hard. 
-I have wrote some function for printing into hdf5 in parallel or 
-on after a gather on root rank. 
+## What’s here
+- HaloArray and MultiHaloArray types, broadcasting over interiors
+- Halo exchange implementations (waitall, async, unsafe variants)
+- Boundary conditions (Reflecting, Antireflecting, Repeating, Periodic)
+- CartesianTopology helpers
+- Reductions and gather
+- HDF5 parallel I/O helpers
+
+## Running tests
+- Unit tests (no MPI):
+  ```bash
+  HALOARRAYS_RUN_UNIT_TESTS=true julia --project=. -e 'using Pkg; Pkg.test()'
+  ```
+- MPI tests (require mpiexec):
+  ```bash
+  HALOARRAYS_RUN_MPI_TESTS=true mpiexec -n 4 julia --project=. -e 'using Pkg; Pkg.test()'
+  ```
 
 
 ## Getting started

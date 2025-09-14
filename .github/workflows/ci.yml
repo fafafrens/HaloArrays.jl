@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        julia-version: ['1.10', '1.11']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ matrix.julia-version }}
+      - name: Cache artifacts
+        uses: actions/cache@v4
+        with:
+          path: ~/.julia/artifacts
+          key: ${{ runner.os }}-julia-artifacts-${{ hashFiles('**/Project.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-julia-artifacts-
+      - name: Instantiate
+        run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
+      - name: Run unit tests (no MPI)
+        env:
+          HALOARRAYS_RUN_UNIT_TESTS: "true"
+          HALOARRAYS_RUN_MPI_TESTS: "false"
+        run: julia --project=. -e 'using Pkg; Pkg.test()'
+
+  mpitests:
+    if: false  # Enable when you have mpiexec in CI or provide container with MPI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.11'
+      - name: Install OpenMPI
+        run: sudo apt-get update && sudo apt-get install -y libopenmpi-dev openmpi-bin
+      - name: Instantiate
+        run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
+      - name: Run MPI tests
+        env:
+          HALOARRAYS_RUN_UNIT_TESTS: "false"
+          HALOARRAYS_RUN_MPI_TESTS: "true"
+        run: mpiexec -n 4 julia --project=. -e 'using Pkg; Pkg.test()'

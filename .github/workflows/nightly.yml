@@ -1,0 +1,21 @@
+name = "Sparse tag nightly"
+
+on:
+  schedule:
+    - cron: "0 4 * * 0"
+  workflow_dispatch:
+
+jobs:
+  nightly:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: 'nightly'
+      - name: Instantiate
+        run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
+      - name: Build
+        run: julia --project=. -e 'using Pkg; Pkg.build()'
+      - name: Precompile
+        run: julia --project=. -e 'using Pkg; Pkg.precompile()'
