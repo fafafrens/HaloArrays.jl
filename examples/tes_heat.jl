@@ -7,7 +7,7 @@ function heat_1d_step!( u_old::HaloArray, α, dt, dx)
     
     data_old=u_old.data
 
-@inbounds for I in CartesianIndices(HaloArrays.interior_range(u_old))
+@inbounds for I in CartesianIndices(interior_range(u_old))
         # Because of halos, interior indices shifted by h
         idx=first(Tuple(I))
 

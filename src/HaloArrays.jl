@@ -28,8 +28,8 @@ export \
     Reflecting, Antireflecting, Repeating, Periodic, \
     Side, Dim, \
     # basic API
-    interior_view, full_size, interior_size, halo_width, get_comm, \
-    global_size, parent, axes, \
+    interior_view, interior_range, full_size, interior_size, halo_width, get_comm, \
+    global_size, parent, axes, versors, \
     # boundary conditions
     boundary_condition!, register_bc, normalize_boundary_condition, to_bc, \
     # halo exchange
