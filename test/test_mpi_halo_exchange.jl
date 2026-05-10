@@ -52,7 +52,121 @@ function _check_periodic_1d_halo_exchange!(exchange!)
     return nothing
 end
 
+function _fill_2d_rank_pattern!(ha, rank)
+    nx, ny = size(ha)
+    for i in 1:nx, j in 1:ny
+        ha[i, j] = 1000 * rank + 100 * i + j
+    end
+    return ha
+end
+
+function _check_periodic_2d_halo_exchange!(exchange!)
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+    nranks = MPI.Comm_size(comm)
+
+    @test nranks > 1
+
+    topology = CartesianTopology(comm, (0, 0); periodic=(true, true))
+    halo_width_cells = 1
+    local_size = (4, 3)
+    ha = HaloArray(
+        Int,
+        local_size,
+        halo_width_cells,
+        topology;
+        boundary_condition=((Periodic(), Periodic()), (Periodic(), Periodic())),
+    )
+
+    _fill_2d_rank_pattern!(ha, rank)
+    MPI.Barrier(comm)
+    exchange!(ha)
+    MPI.Barrier(comm)
+
+    nx, ny = local_size
+    left_rank = topology.neighbors[1][1]
+    right_rank = topology.neighbors[1][2]
+    down_rank = topology.neighbors[2][1]
+    up_rank = topology.neighbors[2][2]
+
+    @test collect(parent(ha)[1, 2:(ny + 1)]) == [1000 * left_rank + 100 * nx + j for j in 1:ny]
+    @test collect(parent(ha)[nx + 2, 2:(ny + 1)]) == [1000 * right_rank + 100 + j for j in 1:ny]
+    @test collect(parent(ha)[2:(nx + 1), 1]) == [1000 * down_rank + 100 * i + ny for i in 1:nx]
+    @test collect(parent(ha)[2:(nx + 1), ny + 2]) == [1000 * up_rank + 100 * i + 1 for i in 1:nx]
+    @test collect(interior_view(ha)) == [1000 * rank + 100 * i + j for i in 1:nx, j in 1:ny]
+
+    return nothing
+end
+
+function _check_haloarray_broadcast()
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+
+    topology = CartesianTopology(comm, (0,); periodic=(true,))
+    a = HaloArray(Float64, (4,), 1, topology; boundary_condition=((Periodic(), Periodic()),))
+    b = similar(a)
+
+    for i in eachindex(a)
+        a[i] = rank + i
+        b[i] = 10 * rank + 2 * i
+    end
+
+    c = 2 .* a .+ b .+ 1
+    @test c isa HaloArray
+    @test collect(interior_view(c)) == [2 * (rank + i) + (10 * rank + 2 * i) + 1 for i in 1:4]
+
+    c .= a .- b
+    @test collect(interior_view(c)) == [(rank + i) - (10 * rank + 2 * i) for i in 1:4]
+
+    MPI.Barrier(comm)
+    halo_exchange_waitall!(c)
+    MPI.Barrier(comm)
+
+    left_rank = topology.neighbors[1][1]
+    right_rank = topology.neighbors[1][2]
+    @test parent(c)[1] == (left_rank + 4) - (10 * left_rank + 2 * 4)
+    @test parent(c)[end] == (right_rank + 1) - (10 * right_rank + 2)
+
+    return nothing
+end
+
+function _check_multihaloarray_broadcast()
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+
+    topology = CartesianTopology(comm, (0,); periodic=(true,))
+    u = HaloArray(Float64, (4,), 1, topology; boundary_condition=((Periodic(), Periodic()),))
+    v = HaloArray(Float64, (4,), 1, topology; boundary_condition=((Periodic(), Periodic()),))
+
+    for i in eachindex(u)
+        u[i] = rank + i
+        v[i] = 100 * rank + 10 * i
+    end
+
+    fields = MultiHaloArray((; u, v); check=true)
+    shifted = fields .+ 3
+    @test shifted isa MultiHaloArray
+    @test collect(interior_view(shifted.arrays.u)) == [rank + i + 3 for i in 1:4]
+    @test collect(interior_view(shifted.arrays.v)) == [100 * rank + 10 * i + 3 for i in 1:4]
+
+    dest = similar(fields)
+    dest .= 2 .* fields
+    @test collect(interior_view(dest.arrays.u)) == [2 * (rank + i) for i in 1:4]
+    @test collect(interior_view(dest.arrays.v)) == [2 * (100 * rank + 10 * i) for i in 1:4]
+
+    return nothing
+end
+
 @testset "MPI halo exchange across ranks" begin
     _check_periodic_1d_halo_exchange!(halo_exchange_waitall!)
     _check_periodic_1d_halo_exchange!(halo_exchange_async!)
+    _check_periodic_2d_halo_exchange!(halo_exchange_waitall!)
+    _check_periodic_2d_halo_exchange!(halo_exchange_async!)
+    _check_periodic_2d_halo_exchange!(halo_exchange_waitall_unsafe!)
+    _check_periodic_2d_halo_exchange!(halo_exchange_async_unsafe!)
+end
+
+@testset "MPI broadcast over halo arrays" begin
+    _check_haloarray_broadcast()
+    _check_multihaloarray_broadcast()
 end
