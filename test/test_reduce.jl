@@ -1,50 +1,90 @@
 using Test
 using MPI
-using LinearAlgebra
-MPI.Init()
-include("cartesian_topology.jl") 
-include("haloarray.jl")
-include("haloarrays.jl")
-include("boundary.jl")        # <<-- boundary prima
-include("interior_broadcast.jl")
-include("halo_exchange.jl")    
-include("reduction.jl")      # Boundary conditions
+using HaloArrays
 
-
-function test_reduction()
-    h = 1
-    local_shape = (4, 4)
-    halo = HaloArray(local_shape, h)
-    
-    # Fill interior with rank-specific values
-    rank = MPI.Comm_rank(get_comm(halo))
-    interior = interior_view(halo)
-    fill!(halo.data, -1)  # Reset full buffer including halos
-    interior .= rank + 1  # Interior elements = rank + 1
-    
-    # Perform MPI halo exchange if needed (optional, depending on your use)
-    # halo_exchange!(halo)
-
-    # Test sum reduction over the HaloArray interior
-    expected_sum = (rank + 1.) * prod(local_shape)
-    expected_prod = (rank + 1.) ^ prod(local_shape)
-    global_sum = reduce(+, halo)
-    global_prod = reduce(*, halo)
-
-
-    global_sum_mpi =MPI.Allreduce(expected_sum, MPI.SUM, get_comm(halo))
-
-    global_prod_mpi =  MPI.Allreduce(expected_prod, MPI.PROD, get_comm(halo))
-    
-    @test isapprox(global_sum, global_sum_mpi, atol=1e-14)
-    @test isapprox(global_prod, global_prod_mpi, atol=1e-14)
-
-    
-    
-
-    println("✅ Reduction tests passed on rank $rank")
+function _periodic_bc(::Val{N}) where {N}
+    return ntuple(_ -> (Periodic(), Periodic()), Val(N))
 end
 
-test_reduction()
+@testset "MPI reductions" begin
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+    nranks = MPI.Comm_size(comm)
+    @test nranks > 1
 
-MPI.Barrier(comm)
+    topology = CartesianTopology(comm, (0,); periodic=(true,))
+    ha = HaloArray(Float64, (4,), 1, topology; boundary_condition=_periodic_bc(Val(1)))
+
+    for i in eachindex(ha)
+        ha[i] = rank + i / 10
+    end
+
+    local_sum = sum(interior_view(ha))
+    @test mapreduce(identity, +, ha) ≈ MPI.Allreduce(local_sum, MPI.SUM, topology.cart_comm)
+    @test reduce(+, ha) ≈ MPI.Allreduce(local_sum, MPI.SUM, topology.cart_comm)
+    @test any(x -> x < 0, ha) == false
+    @test all(x -> x >= 0, ha) == true
+
+    u = copy(ha)
+    v = similar(ha)
+    for i in eachindex(v)
+        v[i] = 10 * rank + i
+    end
+    fields = MultiHaloArray((; u, v); check=true)
+
+    local_field_sum = sum(interior_view(u)) + sum(interior_view(v))
+    @test mapreduce(identity, +, fields) ≈ MPI.Allreduce(local_field_sum, MPI.SUM, topology.cart_comm)
+    @test all(x -> x >= 0, fields)
+    @test any(x -> x == 1, fields)
+end
+
+@testset "MPI dimension reductions" begin
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+    topology = CartesianTopology(comm, (0, 0); periodic=(true, true))
+    halo = 1
+    local_size = (2, 3)
+
+    ha = HaloArray(Int, local_size, halo, topology; boundary_condition=_periodic_bc(Val(2)))
+    fill!(parent(ha), -10_000)
+    for i in 1:local_size[1], j in 1:local_size[2]
+        ha[i, j] = 1000 * rank + 10 * i + j
+    end
+
+    maybe_reduced = mapreduce_haloarray_dims(identity, +, ha, (1,))
+
+    if topology.cart_coords[1] == 0
+        @test isactive(maybe_reduced)
+        reduced = unwrap(maybe_reduced)
+        @test size(reduced) == (local_size[2],)
+        @test halo_width(reduced) == halo
+
+        expected = zeros(Int, local_size[2])
+        for x in 0:(topology.dims[1] - 1)
+            source_rank = MPI.Cart_rank(topology.cart_comm, (x, topology.cart_coords[2]))
+            for j in 1:local_size[2], i in 1:local_size[1]
+                expected[j] += 1000 * source_rank + 10 * i + j
+            end
+        end
+        @test collect(interior_view(reduced)) == expected
+    else
+        @test !isactive(maybe_reduced)
+    end
+
+    u = copy(ha)
+    v = similar(ha)
+    for i in 1:local_size[1], j in 1:local_size[2]
+        v[i, j] = 10_000 * rank + 100 * i + j
+    end
+
+    maybe_fields = mapreduce_mhaloarray_dims(identity, +, MultiHaloArray((; u, v); check=true), (1,))
+    if topology.cart_coords[1] == 0
+        @test isactive(maybe_fields)
+        fields = unwrap(maybe_fields)
+        @test fields isa MultiHaloArray
+        @test size(fields.arrays.u) == (local_size[2],)
+        @test size(fields.arrays.v) == (local_size[2],)
+    else
+        @test !isactive(maybe_fields)
+    end
+end

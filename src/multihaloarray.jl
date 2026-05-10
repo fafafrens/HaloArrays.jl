@@ -84,7 +84,7 @@ n_field(halos::MultiHaloArray{T,N,A}) where {T,N,A} = length(halos.arrays)
 
 to_tuple(mha::MultiHaloArray) = (mha.arrays...,)
 
-function Base.similar(mha::MultiHaloArray{AA, N, A}, ::Type{T},dims::NTuple{M,Inf64}) where {AA,N, A,T,M}
+function Base.similar(mha::MultiHaloArray{AA, N, A}, ::Type{T},dims::NTuple{M,Int64}) where {AA,N, A,T,M}
 
     arrs = map(a -> similar(a, T, dims), values(mha.arrays))
     names = keys(mha.arrays)
@@ -164,7 +164,7 @@ Restituisce un NamedTuple con le interior view di ciascun campo del MultiHaloArr
 I campi del NamedTuple hanno gli stessi simboli del `mha.arrays`.
 """
 function interior_view(mha::MultiHaloArray)
-    return (; (name => interior_view(v) for (name,v) in mha.arrays)...)
+    return NamedTuple{keys(mha.arrays)}(map(interior_view, values(mha.arrays)))
 end
 
 # isactive per MultiHaloArray: true se almeno un campo è active
@@ -177,5 +177,3 @@ end
 function active_fields(mha::MultiHaloArray)
     return (; (name => isactive(ha) for (name, ha) in mha.arrays)...)
 end
-
-

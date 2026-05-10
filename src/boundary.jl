@@ -77,7 +77,7 @@ function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,BCondition},s::Side{2}
     halo_region = get_recv_view(s, d, full, h)
     n = size(interior_region, dim)
     for i in 1:size(halo_region, dim)
-        src_i = n - h + i
+        src_i = n - (i - 1)
         mirror_idx = _slice_index(Val(N), dim, src_i)
         dst_idx = _slice_index(Val(N), dim, i)
         @views halo_region[dst_idx...] .= .- interior_region[mirror_idx...]
@@ -219,5 +219,4 @@ end
 function infer_periodicity(boundary_condition::NTuple{N,NTuple{2,AbstractBoundaryCondition}}) where {N}
     ntuple(i -> isperiodic(boundary_condition[i][1]) && isperiodic(boundary_condition[i][2]), Val(N))
 end
-
 
