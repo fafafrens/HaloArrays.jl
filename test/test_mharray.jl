@@ -1,163 +1,53 @@
-#@mpi_do manager begin
-using MPI
 using Test
+using MPI
 using HaloArrays
-# -- MAIN SCRIPT --
 
-
-function test_multihaloarray_broadcast()
-
-MPI.Init()
-
-comm = MPI.COMM_WORLD
-rank = MPI.Comm_rank(comm)
-nprocs = MPI.Comm_size(comm)
-
-#dims = (2, 2) # 2x2 process grid for example
-#topo = CartesianTopology(comm, dims)
-
-
-
-local_size = (4, 4)
-halo_size = 1
-#bd=((Periodic(),Periodic()),(Periodic(),Periodic()))
-halo_arr = HaloArray( local_size, halo_size)
-
-    A = similar(halo_arr)
-    A.data .=π
-    B = similar(halo_arr)
-    B.data .=20
-    C = similar(halo_arr)
-    C.data .=3
-
-   
-    mha1 = MultiHaloArray((; a=A, b=B));
-    mha2 = MultiHaloArray((; a=A, b=C));
-
-
-    # Test field-wise addition
-    res=similar(mha1)
-    res .= mha1 .+ mha2
-    @test res isa MultiHaloArray
-    res.arrays[:b].data
-    @test all(interior_view(res.arrays[:a]) .== 2π)
-    @test all(interior_view(res.arrays[:b]) .== 23.0)
-
-    # Test broadcasting with scalar
-    res2=similar(mha1)
-    res2 = mha1 .+ 1
-   
-  
-    @test all(interior_view(res2.arrays[:a]) .== 1+π)
-    @test all(interior_view(res2.arrays[:b]).== 21.0)
-
-    local_size = (7, 4)
-    halo_size = 1
-#bd=((Periodic(),Periodic()),(Periodic(),Periodic()))
-    halo_arr2 = HaloArray( local_size, halo_size)
-
-    # Mismatched dimensions should error
-    ntupbad=(; a=A, b=halo_arr2)
-    @test_throws DimensionMismatch mha_bad = MultiHaloArray(ntupbad)
-    
-
-    A = similar(halo_arr)
-    A.data .=π+1
-    B = similar(halo_arr)
-    B.data .=π/2
- 
-   
-    mha1 = MultiHaloArray((; a=A, b=B));
-
-
-    res3=similar( mha1)
-
-    res2 = sin.(mha1)
-
-    #res2.=res2 .+ A
-    @test res2 isa MultiHaloArray
-    @test res2.arrays[:a] isa HaloArray
-    @test res2.arrays[:b] isa HaloArray 
-    @test all(interior_view(res2.arrays[:a]) .≈ sin(π+1))
-    @test all(interior_view(res2.arrays[:b]).==sin(π/2))
-
-    res2323= sin.(mha1 .* 2)
-    @test all(interior_view(res2323.arrays[:a]) .≈ sin(2*(π+1)))
-
-
-
-end 
-
-function test_haloarray_broadcast()
-    MPI.Init()
-    comm = MPI.COMM_WORLD
-    rank = MPI.Comm_rank(comm)
-    nprocs = MPI.Comm_size(comm)
-
-    local_size = (4, 4)
-    halo_size = 1
-
-    A = HaloArray(local_size, halo_size)
-    B = similar(A)
-    C = similar(A)
-
-    A.data .= 2.0
-    B.data .= 3.0
-    C.data .= 0.0
-
-    # Binary operation test
-    res1 = similar(A)
-    res1 .= A .+ B
-    @test all(interior_view(res1) .== 5.0)
-
-    # Scalar broadcast
-    res2 = similar(A)
-    res2 .= A .+ 10
-    @test all(interior_view(res2) .== 12.0)
-
-    # Unary broadcast
-    res3 = similar(A)
-    res3 .= sin.(A)
-    @test all(interior_view(res3) .≈ sin.(2.0))
-
-    # Nested broadcast
-    res4 = similar(A)
-    res4 .= A .+ sin.(B)
-    @test all(interior_view(res4) .≈ 2.0 .+ sin.(3.0))
-
-    # Test copy
-    bc_expr = Base.Broadcast.broadcasted(+, A, B)
-    res5 = copy(bc_expr)
-    @test all(interior_view(res5) .== 5.0)
-
-    # Test materialize!
-    res6 = similar(A)
-    bc_expr = Base.Broadcast.broadcasted(*, A, B)
-    Base.Broadcast.materialize!(res6, bc_expr)
-    @test all(interior_view(res6) .== 6.0)
-
-    # Dimension mismatch
-    A2 = HaloArray((5, 5), halo_size)
-    @test_throws DimensionMismatch A .+ A2
-
-    # Type promotion
-    Aint = HaloArray(local_size, halo_size)
-    Aint.data .= 2
-    res7 = A .+ Aint
-    @test eltype(res7) == Float64
-    @test all(interior_view(res7) .== 4.0)
-
- 
+function _test_topology(dims::NTuple{N,Int}) where {N}
+    return CartesianTopology(MPI.COMM_SELF, dims; periodic=ntuple(_ -> false, Val(N)))
 end
 
+@testset "MultiHaloArray" begin
+    topology = _test_topology((1, 1))
+    u = HaloArray(Float64, (3, 2), 1, topology; boundary_condition=:repeating)
+    v = HaloArray(Int, (3, 2), 1, topology; boundary_condition=:repeating)
 
-@testset "HaloArray Broadcast Tests" begin
-    test_haloarray_broadcast()
+    for i in 1:size(u, 1), j in 1:size(u, 2)
+        u[i, j] = i + j / 10
+        v[i, j] = 10 * i + j
+    end
+
+    fields = MultiHaloArray((; u, v); check=true)
+
+    @test fields isa MultiHaloArray
+    @test eltype(fields) === Float64
+    @test ndims(fields) == 2
+    @test HaloArrays.n_field(fields) == 2
+    @test fields[:u] === u
+    @test fields[:v] === v
+    @test isactive(fields)
+
+    views = interior_view(fields)
+    @test keys(views) == (:u, :v)
+    @test collect(views.u) == [i + j / 10 for i in 1:3, j in 1:2]
+    @test collect(views.v) == [10 * i + j for i in 1:3, j in 1:2]
+
+    shifted = fields .+ 2
+    @test shifted isa MultiHaloArray
+    @test collect(interior_view(shifted.arrays.u)) == [i + j / 10 + 2 for i in 1:3, j in 1:2]
+    @test collect(interior_view(shifted.arrays.v)) == [10 * i + j + 2 for i in 1:3, j in 1:2]
+
+    dest = similar(fields)
+    dest .= 2 .* fields
+    @test collect(interior_view(dest.arrays.u)) == [2 * (i + j / 10) for i in 1:3, j in 1:2]
+    @test collect(interior_view(dest.arrays.v)) == [2 * (10 * i + j) for i in 1:3, j in 1:2]
+
+    copied = copy(fields)
+    copied.arrays.u[1, 1] = -1
+    @test fields.arrays.u[1, 1] != copied.arrays.u[1, 1]
+
+    bad = HaloArray(Float64, (4, 2), 1, topology; boundary_condition=:repeating)
+    @test_throws DimensionMismatch MultiHaloArray((; u, bad); check=true)
+
+    @test all(x -> x > 0, fields)
+    @test any(x -> x == 22, fields)
 end
-
-@testset "MultiHaloArray Broadcast Tests" begin
-    test_multihaloarray_broadcast()
-end
-
-  
-

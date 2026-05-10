@@ -103,38 +103,31 @@ function mapreduce_haloarray_dims(f,op,ha::HaloArray{T,N,A,Halo,B,BCondition}, d
     topo = ha.topology
     root_coord=0
     dims_to_remove = Tuple(dims)
+    dims_to_keep = Tuple(i for i in 1:N if !(i in dims_to_remove))
+    M = length(dims_to_keep)
+    M == 0 && throw(ArgumentError("Reducing all dimensions to a scalar is not supported by mapreduce_haloarray_dims"))
+
     # split communicator grouping processes that share coords on the kept dims
     (sub_comm, coords, subrank) = subcomm_for_slices(topo, dims_to_remove)
 
     mpi_op=MPI.Op(op, T; iscommutative=true)
 
     dimension_to_reduce = Tuple(dims_to_remove)
-    local_value = dropdims(mapreduce(f,op,ha.data,dims=dimension_to_reduce),dims=dimension_to_reduce)
-    # perform reduction (sum) inside the sub-communicator; result only valid on subrank==0
+    local_value = dropdims(mapreduce(f, op, interior_view(ha), dims=dimension_to_reduce), dims=dimension_to_reduce)
 
+    # perform reduction inside the sub-communicator; result only valid on subrank==0
 
     sum_on_root = MPI.Reduce(local_value, mpi_op, sub_comm, root=root_coord)
 
     # build the root (reduced) topology
     root_topo = root_topology_multi(topo, dims_to_remove; root_coord=root_coord)
-    rem = Tuple(i for i in 1:N if !(i in dims_to_remove))
-    new_boundary=Tuple(ha.boundary_condition[i] for i in 1:N if !(i in dims_to_remove))
-    
-    M = length(rem)
-
-    # construct new HaloArray for reduced topology (halo width preserved)
-    new_ha = HaloArray{T, M, typeof(local_value) , Halo}(undef, new_boundary)
+    new_boundary = ntuple(i -> ha.boundary_condition[dims_to_keep[i]], Val(M))
+    reduced_local_size = size(local_value)
+    new_ha = HaloArray(T, reduced_local_size, Halo, root_topo; boundary_condition=new_boundary)
 
     # if this process is the root of its sub-comm, place reduced scalar into the interior cell
     if isactive(root_topo)
-        sizes = size(sum_on_root)
-
-        new_ranges = ntuple(i -> halo_width(new_ha) + 1:sizes[i], Val(max(1,M)))
-
-        new_ha.data = sum_on_root
-        new_ha.topology = root_topo
-        new_ha.receive_bufs = make_recv_buffers(new_ha.data, Halo)
-        new_ha.send_bufs = make_send_buffers(new_ha.data, Halo)
+        interior_view(new_ha) .= sum_on_root
     end
 
     # free sub_comm if allocated
@@ -160,11 +153,13 @@ function mapreduce_mhaloarray_dims(f, op, mha::MultiHaloArray, dims)
     list_of_maybe = map_over_field( mha) do field 
         mapreduce_haloarray_dims(f, op, field, dims)
     end
-    # unwrap e costruisci NamedTuple dei campi ridotti
-    
-    nt = NamedTuple{names}(list_of_maybe)
+    active_states = map(isactive, values(list_of_maybe))
+    if any(active_states) && !all(active_states)
+        error("Inconsistent active state across reduced MultiHaloArray fields")
+    end
 
-    return MultiHaloArray(nt)   # constructor decide active in base ai campi
+    nt = NamedTuple{names}(map(getdata, values(list_of_maybe)))
+
+    return MaybeHaloArray(MultiHaloArray(nt; check=true))
 end
-
 

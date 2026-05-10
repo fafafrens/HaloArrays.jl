@@ -98,6 +98,100 @@ function _check_periodic_2d_halo_exchange!(exchange!)
     return nothing
 end
 
+function _fill_3d_rank_pattern!(ha, rank)
+    nx, ny, nz = size(ha)
+    for i in 1:nx, j in 1:ny, k in 1:nz
+        ha[i, j, k] = 100_000 * rank + 10_000 * i + 100 * j + k
+    end
+    return ha
+end
+
+function _value_3d(rank, i, j, k)
+    return 100_000 * rank + 10_000 * i + 100 * j + k
+end
+
+function _check_periodic_3d_halo_exchange!(exchange!)
+    comm = MPI.COMM_WORLD
+    nranks = MPI.Comm_size(comm)
+
+    @test nranks > 1
+
+    topology = CartesianTopology(comm, (0, 0, 0); periodic=(true, true, true))
+    halo_width_cells = 1
+    local_size = (3, 2, 2)
+    ha = HaloArray(
+        Int,
+        local_size,
+        halo_width_cells,
+        topology;
+        boundary_condition=ntuple(_ -> (Periodic(), Periodic()), 3),
+    )
+
+    _fill_3d_rank_pattern!(ha, MPI.Comm_rank(comm))
+    MPI.Barrier(comm)
+    exchange!(ha)
+    MPI.Barrier(comm)
+
+    nx, ny, nz = local_size
+    left_rank = topology.neighbors[1][1]
+    right_rank = topology.neighbors[1][2]
+    down_rank = topology.neighbors[2][1]
+    up_rank = topology.neighbors[2][2]
+    back_rank = topology.neighbors[3][1]
+    front_rank = topology.neighbors[3][2]
+
+    @test collect(parent(ha)[1, 2:(ny + 1), 2:(nz + 1)]) ==
+        [_value_3d(left_rank, nx, j, k) for j in 1:ny, k in 1:nz]
+    @test collect(parent(ha)[nx + 2, 2:(ny + 1), 2:(nz + 1)]) ==
+        [_value_3d(right_rank, 1, j, k) for j in 1:ny, k in 1:nz]
+    @test collect(parent(ha)[2:(nx + 1), 1, 2:(nz + 1)]) ==
+        [_value_3d(down_rank, i, ny, k) for i in 1:nx, k in 1:nz]
+    @test collect(parent(ha)[2:(nx + 1), ny + 2, 2:(nz + 1)]) ==
+        [_value_3d(up_rank, i, 1, k) for i in 1:nx, k in 1:nz]
+    @test collect(parent(ha)[2:(nx + 1), 2:(ny + 1), 1]) ==
+        [_value_3d(back_rank, i, j, nz) for i in 1:nx, j in 1:ny]
+    @test collect(parent(ha)[2:(nx + 1), 2:(ny + 1), nz + 2]) ==
+        [_value_3d(front_rank, i, j, 1) for i in 1:nx, j in 1:ny]
+
+    return nothing
+end
+
+function _check_exchange_implementations_agree()
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+    topology = CartesianTopology(comm, (0, 0); periodic=(true, true))
+    base = HaloArray(
+        Int,
+        (5, 4),
+        1,
+        topology;
+        boundary_condition=((Periodic(), Periodic()), (Periodic(), Periodic())),
+    )
+
+    _fill_2d_rank_pattern!(base, rank)
+
+    exchange_functions = (
+        halo_exchange_waitall!,
+        halo_exchange_async!,
+        halo_exchange_waitall_unsafe!,
+        halo_exchange_async_unsafe!,
+    )
+    exchanged = map(exchange_functions) do exchange!
+        ha = copy(base)
+        MPI.Barrier(comm)
+        exchange!(ha)
+        MPI.Barrier(comm)
+        return ha
+    end
+
+    reference = collect(parent(first(exchanged)))
+    for ha in exchanged
+        @test collect(parent(ha)) == reference
+    end
+
+    return nothing
+end
+
 function _check_haloarray_broadcast()
     comm = MPI.COMM_WORLD
     rank = MPI.Comm_rank(comm)
@@ -164,6 +258,9 @@ end
     _check_periodic_2d_halo_exchange!(halo_exchange_async!)
     _check_periodic_2d_halo_exchange!(halo_exchange_waitall_unsafe!)
     _check_periodic_2d_halo_exchange!(halo_exchange_async_unsafe!)
+    _check_periodic_3d_halo_exchange!(halo_exchange_waitall!)
+    _check_periodic_3d_halo_exchange!(halo_exchange_async!)
+    _check_exchange_implementations_agree()
 end
 
 @testset "MPI broadcast over halo arrays" begin
