@@ -14,14 +14,15 @@ This repository now contains a Julia package skeleton with tests. Many tests req
 - HDF5 parallel I/O helpers
 
 ## Running tests
-- Unit tests (no MPI):
+- Unit tests:
   ```bash
-  HALOARRAYS_RUN_UNIT_TESTS=true julia --project=. -e 'using Pkg; Pkg.test()'
+  julia --project=. -e 'using Pkg; Pkg.test()'
   ```
-- MPI tests (require mpiexec):
+- MPI tests with multiple ranks:
   ```bash
-  HALOARRAYS_RUN_MPI_TESTS=true mpiexec -n 4 julia --project=. -e 'using Pkg; Pkg.test()'
+  mpiexec -n 4 julia --project=. test/runtests.jl
   ```
+  MPI tests run automatically when `runtests.jl` sees more than one MPI rank.
 
 
 ## Getting started
@@ -43,4 +44,3 @@ please help me :-)
 
 ## License
 MIT — see [LICENSE](./LICENSE).
-

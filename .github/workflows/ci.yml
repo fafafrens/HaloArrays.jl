@@ -46,27 +46,22 @@ jobs:
       - uses: julia-actions/setup-julia@v2
         with:
           version: '1.11'
-      - name: Install test extras and MPIPreferences
-        run: julia --project=. -e 'using Pkg; Pkg.add(["BenchmarkTools","OrdinaryDiffEq","MPIPreferences"])'
-      - name: Configure MPI provider
-        run: julia --project=. -e 'using MPIPreferences; MPIPreferences.use_jll_binary("MPICH_jll")'
-      - name: Instantiate (after setting MPI preference)
-        run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
       - name: Instantiate
         run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
+      - name: Configure MPI provider
+        run: julia --project=. -e 'using Pkg; Pkg.add("MPIPreferences"); using MPIPreferences; MPIPreferences.use_jll_binary("MPICH_jll")'
       - name: Precompile (ensure deps are ready)
         run: julia --project=. -e 'using Pkg; Pkg.precompile(); using HaloArrays'
       - name: Run MPI tests
         env:
           HALOARRAYS_RUN_UNIT_TESTS: "false"
-          HALOARRAYS_RUN_MPI_TESTS: "true"
           NP: ${{ matrix.np }}
         run: |
           julia --project=. -e '
           using Pkg
           using MPI
           n = parse(Int, ENV["NP"])
-          cmd = `$(MPI.mpiexec()) -n $n $(Base.julia_cmd()) --project=. -e "include(joinpath(pwd(),\"test\",\"runtests.jl\"))"`
+          cmd = `$(MPI.mpiexec()) -n $n $(Base.julia_cmd()) --project=. test/runtests.jl`
           println(cmd)
           run(cmd)
           '

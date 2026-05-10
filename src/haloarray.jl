@@ -82,7 +82,7 @@ end
     halo.topology.cart_comm
 end
 
-Base.length(halo::HaloArray) = length(halo.data)
+@inline Base.length(halo::HaloArray) = length(interior_view(halo))
 @inline Base.size(halo::HaloArray) = interior_size(halo)
 @inline Base.size(halo::HaloArray, i::Int) = interior_size(halo)[i]
 @inline Base.eltype(ha::HaloArray{T,N,A,Halo,B,BCondition}) where {T,N,A,Halo,B,BCondition} = T
@@ -105,7 +105,10 @@ end
 @inline Base.ndims(::Type{HaloArray{T,N,A,Halo,B,BCondition}}) where {T,N,A,Halo,B,BCondition} = N
 
 @inline Base.parent(halo::HaloArray) = halo.data
-Base.axes(x::HaloArray) = axes(interior_view(x))
+@inline Base.axes(x::HaloArray) = axes(interior_view(x))
+@inline Base.eachindex(halo::HaloArray) = eachindex(interior_view(halo))
+@inline Base.getindex(halo::HaloArray, I...) = getindex(interior_view(halo), I...)
+@inline Base.setindex!(halo::HaloArray, value, I...) = setindex!(interior_view(halo), value, I...)
 
 
 isactive(a::HaloArray) = isactive(a.topology)
@@ -547,4 +550,3 @@ end
 function make_send_buffers(data::AbstractArray{T,N}, halo::Int) where {T,N}
     ntuple(D -> ntuple(S -> similar(get_send_view(Side(S), Dim(D), data, halo)), Val(2)), Val(N))
 end
-
