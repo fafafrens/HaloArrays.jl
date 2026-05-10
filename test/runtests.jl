@@ -1,9 +1,19 @@
 using Test
+using MPI
 using HaloArrays
 
-# Gating via environment variables
-const RUN_UNIT_TESTS = get(ENV, "HALOARRAYS_RUN_UNIT_TESTS", "false") == "true"
-const RUN_MPI_TESTS  = get(ENV, "HALOARRAYS_RUN_MPI_TESTS",  "false") == "true"
+if !MPI.Initialized()
+    MPI.Init()
+end
+
+_env_true(name) = lowercase(get(ENV, name, "")) in ("1", "true", "yes", "on")
+_env_false(name) = lowercase(get(ENV, name, "")) in ("0", "false", "no", "off")
+
+const MPI_COMM = MPI.COMM_WORLD
+const MPI_SIZE = MPI.Comm_size(MPI_COMM)
+const RUN_UNIT_TESTS = !_env_false("HALOARRAYS_RUN_UNIT_TESTS")
+const MPI_TESTS_REQUESTED = _env_true("HALOARRAYS_RUN_MPI_TESTS")
+const RUN_MPI_TESTS = !_env_false("HALOARRAYS_RUN_MPI_TESTS") && (MPI_TESTS_REQUESTED || MPI_SIZE > 1)
 
 # Helper to include test files relative to this directory
 function include_test(name)
@@ -15,42 +25,21 @@ end
     @test true
 
     if RUN_UNIT_TESTS
-        try
-            include_test("test_haloarray_helpers.jl")
-        catch err
-            @info("Skipping test_haloarray_helpers due to error", err)
-        end
+        include_test("test_public_api.jl")
+        include_test("test_haloarray_helpers.jl")
     else
         @info "Skipping unit tests (set HALOARRAYS_RUN_UNIT_TESTS=true to enable)"
     end
 
     if RUN_MPI_TESTS
-        for f in [
-            "test_boundary.jl",
-            "test_gather.jl",
-            "test_halo_excange.jl",
-            "test_halo_exchange_corecctness.jl",
-            "test_halo_exchange_corecctness_1d.jl",
-            "test_halo_exchange_corecctness_2d.jl",
-            "test_halo_exchange_corecctness_3d.jl",
-            "test_maybe_broadcast.jl",
-            "test_mharray.jl",
-            "test_reduce.jl",
-            "test_reduce_marray.jl",
-            "test_saving_hdf5.jl",
-            "test_cartesian_split.jl",
-            "test_cartesian_topology_split_multiple_dimension.jl",
-            "test_cartesiantopology_split.jl",
-            "test_coordinates_reduction.jl",
-            "test_ode.jl",
-        ]
-            try
-                include_test(f)
-            catch err
-                @info("Skipping test file", file=f, err)
-            end
+        if MPI_SIZE <= 1
+            @test MPI_SIZE > 1
+        else
+            include_test("test_mpi_halo_exchange.jl")
         end
     else
-        @info "Skipping MPI tests (run under mpiexec with HALOARRAYS_RUN_MPI_TESTS=true)"
+        @info "Skipping MPI tests (run with mpiexec -n 2 or set HALOARRAYS_RUN_MPI_TESTS=true)"
     end
+
+    MPI.Barrier(MPI_COMM)
 end

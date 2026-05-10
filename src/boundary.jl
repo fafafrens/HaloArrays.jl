@@ -1,5 +1,8 @@
 using StaticArrays
 
+@inline _slice_index(::Val{N}, dim, i) where {N} =
+    ntuple(j -> j == dim ? (i:i) : Colon(), Val(N))
+
 function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,BCondition}, s::Side{side},dim::Dim{d}) where {
     T,N,A,Halo,B,BCondition,side, d}
     
@@ -28,8 +31,8 @@ function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,BCondition},s::Side{1}
     for i in 1:size(halo_region, dim)
 
         src_i = h-i + 1                        # reflect index: 1 → 1, 2 → 2, ...
-        mirror_idx = ntuple(j -> j == dim ? src_i : Colon(), Val(N))
-        dst_idx = ntuple(j -> j == dim ?  i  : Colon(), Val(N))
+        mirror_idx = _slice_index(Val(N), dim, src_i)
+        dst_idx = _slice_index(Val(N), dim, i)
     
         @views halo_region[dst_idx...] .= interior_region[mirror_idx...]
     end
@@ -44,8 +47,8 @@ function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,BCondition},s::Side{2}
     n = size(interior_region, dim)
     for i in 1:size(halo_region, dim)
         src_i = n - (i - 1)
-        mirror_idx = ntuple(j -> j == dim ? src_i : Colon(), Val(N))
-        dst_idx = ntuple(j -> j == dim ? i : Colon(), Val(N))
+        mirror_idx = _slice_index(Val(N), dim, src_i)
+        dst_idx = _slice_index(Val(N), dim, i)
         @views halo_region[dst_idx...] .= interior_region[mirror_idx...]
     end
     return nothing
@@ -60,8 +63,8 @@ function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,BCondition}, s::Side{1
     halo_region = get_recv_view(s, d, full, h)
     for i in 1:size(halo_region, dim)
         src_i = h - i + 1                        # reflect index: 1 → 1, 2 → 2, ...
-        mirror_idx = ntuple(j -> j == dim ? src_i : Colon(), Val(N))
-        dst_idx = ntuple(j -> j == dim ? i : Colon(), Val(N))
+        mirror_idx = _slice_index(Val(N), dim, src_i)
+        dst_idx = _slice_index(Val(N), dim, i)
         @views halo_region[dst_idx...] .= .- interior_region[mirror_idx...]
     end
     return nothing
@@ -75,8 +78,8 @@ function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,BCondition},s::Side{2}
     n = size(interior_region, dim)
     for i in 1:size(halo_region, dim)
         src_i = n - h + i
-        mirror_idx = ntuple(j -> j == dim ? src_i : Colon(), Val(N))
-        dst_idx = ntuple(j -> j == dim ? i : Colon(), Val(N))
+        mirror_idx = _slice_index(Val(N), dim, src_i)
+        dst_idx = _slice_index(Val(N), dim, i)
         @views halo_region[dst_idx...] .= .- interior_region[mirror_idx...]
     end
     return nothing
@@ -89,10 +92,10 @@ function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,BCondition},s::Side{1}
     full = parent(halo)
     interior_region = interior_view(halo)
     halo_region = get_recv_view(s, d, full, h)
-    edge_idx = ntuple(j -> j == dim ? 1 : Colon(), Val(N))
+    edge_idx = _slice_index(Val(N), dim, 1)
     boundary_slice = @view interior_region[edge_idx...]
     for i in 1:size(halo_region, dim)
-        halo_idx = ntuple(j -> j == dim ? i : Colon(), Val(N))
+        halo_idx = _slice_index(Val(N), dim, i)
         @views halo_region[halo_idx...] .= boundary_slice
     end
     return nothing
@@ -103,10 +106,10 @@ function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,BCondition},s::Side{2}
     full = parent(halo)
     interior_region = interior_view(halo)
     halo_region = get_recv_view(s, d, full, h)
-    edge_idx = ntuple(j -> j == dim ? size(interior_region, dim) : Colon(), Val(N))
+    edge_idx = _slice_index(Val(N), dim, size(interior_region, dim))
     boundary_slice = @view interior_region[edge_idx...]
     for i in 1:size(halo_region, dim)
-        halo_idx = ntuple(j -> j == dim ? i : Colon(), Val(N))
+        halo_idx = _slice_index(Val(N), dim, i)
         @views halo_region[halo_idx...] .= boundary_slice
     end
     return nothing
@@ -216,6 +219,5 @@ end
 function infer_periodicity(boundary_condition::NTuple{N,NTuple{2,AbstractBoundaryCondition}}) where {N}
     ntuple(i -> isperiodic(boundary_condition[i][1]) && isperiodic(boundary_condition[i][2]), Val(N))
 end
-
 
 
