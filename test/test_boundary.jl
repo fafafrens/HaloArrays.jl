@@ -57,8 +57,9 @@ end
         )
 
         fill!(parent(ha), -1)
+        interior = interior_view(ha)
         for i in 1:size(ha, 1), j in 1:size(ha, 2)
-            ha[i, j] = 10 * i + j
+            interior[i, j] = 10 * i + j
         end
 
         boundary_condition!(ha)

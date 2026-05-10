@@ -105,12 +105,6 @@ end
 @inline Base.ndims(::Type{HaloArray{T,N,A,Halo,B,BCondition}}) where {T,N,A,Halo,B,BCondition} = N
 
 @inline Base.parent(halo::HaloArray) = halo.data
-@inline Base.axes(x::HaloArray) = axes(interior_view(x))
-@inline Base.eachindex(halo::HaloArray) = eachindex(interior_view(halo))
-@inline Base.iterate(halo::HaloArray) = iterate(interior_view(halo))
-@inline Base.iterate(halo::HaloArray, state) = iterate(interior_view(halo), state)
-@inline Base.getindex(halo::HaloArray, I...) = getindex(interior_view(halo), I...)
-@inline Base.setindex!(halo::HaloArray, value, I...) = setindex!(interior_view(halo), value, I...)
 
 
 isactive(a::HaloArray) = isactive(a.topology)

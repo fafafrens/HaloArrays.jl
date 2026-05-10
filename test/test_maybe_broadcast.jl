@@ -5,8 +5,9 @@ using HaloArrays
 @testset "MaybeHaloArray and MaybeActive" begin
     topology = CartesianTopology(MPI.COMM_SELF, (1,); periodic=(false,))
     ha = HaloArray(Int, (4,), 1, topology; boundary_condition=:repeating)
-    for i in eachindex(ha)
-        ha[i] = i
+    ha_interior = interior_view(ha)
+    for i in eachindex(ha_interior)
+        ha_interior[i] = i
     end
 
     maybe = MaybeHaloArray(ha)

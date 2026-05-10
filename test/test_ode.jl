@@ -58,7 +58,7 @@ end
     @test DiffEqBase.ODE_DEFAULT_UNSTABLE_CHECK(nothing, w, nothing, nothing) == false
 
     if MPI.Comm_rank(MPI.COMM_WORLD) == 0
-        w[1, 1] = NaN
+        interior_view(w)[1, 1] = NaN
     end
     @test DiffEqBase.ODE_DEFAULT_UNSTABLE_CHECK(nothing, w, nothing, nothing) == true
 end

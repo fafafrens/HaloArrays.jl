@@ -20,8 +20,9 @@ using HaloArrays
     )
 
     fill!(parent(ha), -1)
+    interior = interior_view(ha)
     for i in 1:local_size[1], j in 1:local_size[2]
-        ha[i, j] = 1000 * rank + 10 * i + j
+        interior[i, j] = 1000 * rank + 10 * i + j
     end
 
     gathered = gather_haloarray(ha; root=0)
