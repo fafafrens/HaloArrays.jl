@@ -2,6 +2,21 @@ using Test
 using MPI
 using HaloArrays
 
+const EXCHANGE_IMPLEMENTATIONS = (
+    waitall=halo_exchange_waitall!,
+    waitall_unsafe=halo_exchange_waitall_unsafe!,
+    async=halo_exchange_async!,
+    async_unsafe=halo_exchange_async_unsafe!,
+    split_async=(ha -> begin
+        start_halo_exchange_async!(ha)
+        HaloArrays.end_halo_exchange_wait!(ha)
+    end),
+    split_async_unsafe=(ha -> begin
+        start_halo_exchange_async_unsafe!(ha)
+        end_halo_exchange_async_wait_unsafe!(ha)
+    end),
+)
+
 function _fill_rank_pattern!(ha, rank)
     interior = interior_view(ha)
     for i in eachindex(interior)
@@ -173,13 +188,7 @@ function _check_exchange_implementations_agree()
 
     _fill_2d_rank_pattern!(base, rank)
 
-    exchange_functions = (
-        halo_exchange_waitall!,
-        halo_exchange_async!,
-        halo_exchange_waitall_unsafe!,
-        halo_exchange_async_unsafe!,
-    )
-    exchanged = map(exchange_functions) do exchange!
+    exchanged = map(values(EXCHANGE_IMPLEMENTATIONS)) do exchange!
         ha = copy(base)
         MPI.Barrier(comm)
         exchange!(ha)
@@ -259,14 +268,17 @@ function _check_multihaloarray_broadcast()
 end
 
 @testset "MPI halo exchange across ranks" begin
-    _check_periodic_1d_halo_exchange!(halo_exchange_waitall!)
-    _check_periodic_1d_halo_exchange!(halo_exchange_async!)
-    _check_periodic_2d_halo_exchange!(halo_exchange_waitall!)
-    _check_periodic_2d_halo_exchange!(halo_exchange_async!)
-    _check_periodic_2d_halo_exchange!(halo_exchange_waitall_unsafe!)
-    _check_periodic_2d_halo_exchange!(halo_exchange_async_unsafe!)
-    _check_periodic_3d_halo_exchange!(halo_exchange_waitall!)
-    _check_periodic_3d_halo_exchange!(halo_exchange_async!)
+    for (name, exchange!) in pairs(EXCHANGE_IMPLEMENTATIONS)
+        @testset "1D $name" begin
+            _check_periodic_1d_halo_exchange!(exchange!)
+        end
+        @testset "2D $name" begin
+            _check_periodic_2d_halo_exchange!(exchange!)
+        end
+        @testset "3D $name" begin
+            _check_periodic_3d_halo_exchange!(exchange!)
+        end
+    end
     _check_exchange_implementations_agree()
 end
 

@@ -33,7 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        np: [2, 4]
+        np: [2, 3, 4]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
