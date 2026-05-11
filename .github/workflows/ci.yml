@@ -58,14 +58,9 @@ jobs:
           NP: ${{ matrix.np }}
         run: |
           julia --project=. -e '
-          using Pkg, MPI
-          Pkg.activate(; temp=true)
-          Pkg.develop(PackageSpec(path=pwd()))
-          Pkg.add(["BenchmarkTools", "DiffEqBase", "Plots"])
-          Pkg.precompile()
+          using MPI
           n = parse(Int, ENV["NP"])
-          test_project = Base.active_project()
-          cmd = `$(MPI.mpiexec()) -n $n $(Base.julia_cmd()) --project=$test_project test/runtests.jl`
+          cmd = `$(MPI.mpiexec()) -n $n $(Base.julia_cmd()) --project=. test/runtests.jl`
           println(cmd)
           run(cmd)
           '
