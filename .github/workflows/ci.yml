@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [ main ]
   pull_request:
@@ -8,34 +9,27 @@ on:
 
 jobs:
   test:
+    name: Julia ${{ matrix.julia-version }} - unit tests
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]
         julia-version: ['1.10', '1.11']
-  
-    runs-on: ${{ matrix.os }}
+
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.julia-version }}
-      - name: Cache artifacts
-        uses: actions/cache@v4
-        with:
-          path: ~/.julia/artifacts
-          key: ${{ runner.os }}-julia-artifacts-${{ hashFiles('**/Project.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-julia-artifacts-
-      - name: Instantiate
-        run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
-      - name: Run unit tests (no MPI)
+      - uses: julia-actions/cache@v2
+      - uses: julia-actions/julia-buildpkg@v1
+      - uses: julia-actions/julia-runtest@v1
         env:
           HALOARRAYS_RUN_UNIT_TESTS: "true"
           HALOARRAYS_RUN_MPI_TESTS: "false"
-        run: julia --project=. -e 'using Pkg; Pkg.test()'
 
   mpitests:
+    name: MPI tests (${{ matrix.np }} ranks)
     strategy:
       fail-fast: false
       matrix:
@@ -46,21 +40,23 @@ jobs:
       - uses: julia-actions/setup-julia@v2
         with:
           version: '1.11'
-      - name: Instantiate
-        run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
+      - uses: julia-actions/cache@v2
       - name: Configure MPI provider
-        run: julia --project=. -e 'using Pkg; Pkg.add("MPIPreferences"); using MPIPreferences; MPIPreferences.use_jll_binary("MPICH_jll")'
-      - name: Precompile (ensure deps are ready)
-        run: julia --project=. -e 'using Pkg; Pkg.precompile(); using HaloArrays'
+        shell: julia --color=yes --project=. {0}
+        run: |
+          using Pkg
+          Pkg.add("MPIPreferences")
+          using MPIPreferences
+          MPIPreferences.use_jll_binary("MPICH_jll")
+      - uses: julia-actions/julia-buildpkg@v1
       - name: Run MPI tests
+        shell: julia --color=yes --project=. {0}
         env:
           HALOARRAYS_RUN_UNIT_TESTS: "false"
           NP: ${{ matrix.np }}
         run: |
-          julia --project=. -e '
           using MPI
           n = parse(Int, ENV["NP"])
           cmd = `$(MPI.mpiexec()) -n $n $(Base.julia_cmd()) --project=. test/runtests.jl`
           println(cmd)
           run(cmd)
-          '
