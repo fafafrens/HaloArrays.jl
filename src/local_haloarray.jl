@@ -70,6 +70,7 @@ end
 
 @inline get_send_view(s, d, array::LocalHaloArray) = get_send_view(s, d, parent(array), halo_width(array))
 @inline get_recv_view(s, d, array::LocalHaloArray) = get_recv_view(s, d, parent(array), halo_width(array))
+@inline versors(::LocalHaloArray{T,N}) where {T,N} = versors(Val(N))
 
 function Base.similar(halo::LocalHaloArray{T,N,A,Halo,BCondition}, element_type=eltype(halo),
         dims::NTuple{M,Int}=interior_size(halo)) where {T,N,A,Halo,BCondition,M}

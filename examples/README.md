@@ -2,6 +2,13 @@
 
 This folder contains example scripts that demonstrate using HaloArrays.jl to solve the heat equation in 1D, 2D, and 3D with periodic boundaries and parallel HDF5 I/O.
 
+Local no-MPI examples
+- The local examples use `LocalHaloArray`, the same interior/halo API, and boundary conditions without MPI:
+  - 1D: julia --project=. examples/heat_diffusion_local_1d.jl
+  - 2D: julia --project=. examples/heat_diffusion_local_2d.jl
+  - 3D: julia --project=. examples/heat_diffusion_local_3d.jl
+- The finite-difference update is shared in `examples/heat_diffusion_common.jl`, so the same stencil can be used by local arrays and MPI-backed `HaloArray`s.
+
 Run prerequisites
 - Julia with the project instantiated at the repo root:
   - julia --project=. -e 'using Pkg; Pkg.instantiate()'
