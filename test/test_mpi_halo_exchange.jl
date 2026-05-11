@@ -3,8 +3,9 @@ using MPI
 using HaloArrays
 
 function _fill_rank_pattern!(ha, rank)
-    for i in eachindex(ha)
-        ha[i] = 100 * rank + i
+    interior = interior_view(ha)
+    for i in eachindex(interior)
+        interior[i] = 100 * rank + i
     end
     return ha
 end
@@ -54,8 +55,9 @@ end
 
 function _fill_2d_rank_pattern!(ha, rank)
     nx, ny = size(ha)
+    interior = interior_view(ha)
     for i in 1:nx, j in 1:ny
-        ha[i, j] = 1000 * rank + 100 * i + j
+        interior[i, j] = 1000 * rank + 100 * i + j
     end
     return ha
 end
@@ -100,8 +102,9 @@ end
 
 function _fill_3d_rank_pattern!(ha, rank)
     nx, ny, nz = size(ha)
+    interior = interior_view(ha)
     for i in 1:nx, j in 1:ny, k in 1:nz
-        ha[i, j, k] = 100_000 * rank + 10_000 * i + 100 * j + k
+        interior[i, j, k] = 100_000 * rank + 10_000 * i + 100 * j + k
     end
     return ha
 end
@@ -200,9 +203,11 @@ function _check_haloarray_broadcast()
     a = HaloArray(Float64, (4,), 1, topology; boundary_condition=((Periodic(), Periodic()),))
     b = similar(a)
 
-    for i in eachindex(a)
-        a[i] = rank + i
-        b[i] = 10 * rank + 2 * i
+    a_interior = interior_view(a)
+    b_interior = interior_view(b)
+    for i in eachindex(a_interior)
+        a_interior[i] = rank + i
+        b_interior[i] = 10 * rank + 2 * i
     end
 
     c = 2 .* a .+ b .+ 1
@@ -232,9 +237,11 @@ function _check_multihaloarray_broadcast()
     u = HaloArray(Float64, (4,), 1, topology; boundary_condition=((Periodic(), Periodic()),))
     v = HaloArray(Float64, (4,), 1, topology; boundary_condition=((Periodic(), Periodic()),))
 
-    for i in eachindex(u)
-        u[i] = rank + i
-        v[i] = 100 * rank + 10 * i
+    u_interior = interior_view(u)
+    v_interior = interior_view(v)
+    for i in eachindex(u_interior)
+        u_interior[i] = rank + i
+        v_interior[i] = 100 * rank + 10 * i
     end
 
     fields = MultiHaloArray((; u, v); check=true)

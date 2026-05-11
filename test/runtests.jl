@@ -31,6 +31,7 @@ end
         include_test("test_cartesian_topology.jl")
         include_test("test_mharray.jl")
         include_test("test_maybe_broadcast.jl")
+        include_test("test_ode.jl")
     else
         @info "Skipping unit tests (set HALOARRAYS_RUN_UNIT_TESTS=true to enable)"
     end
@@ -43,6 +44,9 @@ end
             include_test("test_mpi_halo_exchange.jl")
             include_test("test_reduce.jl")
             include_test("test_gather.jl")
+            if !RUN_UNIT_TESTS
+                include_test("test_ode.jl")
+            end
         end
     else
         @info "Skipping MPI tests (run with mpiexec -n 2 or set HALOARRAYS_RUN_MPI_TESTS=true)"

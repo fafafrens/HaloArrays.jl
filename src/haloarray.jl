@@ -105,10 +105,6 @@ end
 @inline Base.ndims(::Type{HaloArray{T,N,A,Halo,B,BCondition}}) where {T,N,A,Halo,B,BCondition} = N
 
 @inline Base.parent(halo::HaloArray) = halo.data
-@inline Base.axes(x::HaloArray) = axes(interior_view(x))
-@inline Base.eachindex(halo::HaloArray) = eachindex(interior_view(halo))
-@inline Base.getindex(halo::HaloArray, I...) = getindex(interior_view(halo), I...)
-@inline Base.setindex!(halo::HaloArray, value, I...) = setindex!(interior_view(halo), value, I...)
 
 
 isactive(a::HaloArray) = isactive(a.topology)
@@ -386,12 +382,19 @@ end
 function Base.copyto!(dest::HaloArray, src::HaloArray)
     @assert size(dest) == size(src) "Incompatible array sizes"
     copyto!(parent(dest), parent(src))
+    return dest
 end
 
 function Base.copy(src::HaloArray)
     new_halo = similar(src)
     copyto!(new_halo, src)
     return new_halo
+end
+
+function Base.zero(halo::HaloArray)
+    z = similar(halo)
+    fill!(z, zero(eltype(halo)))
+    return z
 end
 
 function Base.fill!(halo::HaloArray,num)
@@ -451,6 +454,20 @@ function Base.map(f,src::Vararg{HaloArray,N}) where {N}
     similar_src = similar(src[1])
     map!(f,similar_src,src...)
     return similar_src
+end
+
+Base.:/(halo::HaloArray, x::Number) = halo ./ x
+Base.:*(halo::HaloArray, x::Number) = halo .* x
+Base.:*(x::Number, halo::HaloArray) = x .* halo
+
+function LinearAlgebra.norm(halo::HaloArray, p::Real=2)
+    if p == 2
+        return sqrt(mapreduce(abs2, +, halo))
+    elseif p == Inf
+        return mapreduce(abs, max, halo)
+    else
+        return mapreduce(x -> abs(x)^p, +, halo)^(1 / p)
+    end
 end
 
 

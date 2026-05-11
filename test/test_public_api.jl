@@ -11,13 +11,12 @@ using HaloArrays
     @test halo_width(ha) == 2
     @test size(ha) == (5,)
     @test length(ha) == 5
-    @test collect(eachindex(ha)) == collect(eachindex(interior_view(ha)))
 
     fill_interior(ha, 3.0)
     @test all(interior_view(ha) .== 3.0)
 
-    ha[1] = 4.0
-    @test ha[1] == 4.0
+    interior_view(ha)[1] = 4.0
+    @test interior_view(ha)[1] == 4.0
     @test parent(ha)[3] == 4.0
 
     boundary_condition!(ha)

@@ -15,8 +15,9 @@ end
     topology = CartesianTopology(comm, (0,); periodic=(true,))
     ha = HaloArray(Float64, (4,), 1, topology; boundary_condition=_periodic_bc(Val(1)))
 
-    for i in eachindex(ha)
-        ha[i] = rank + i / 10
+    ha_interior = interior_view(ha)
+    for i in eachindex(ha_interior)
+        ha_interior[i] = rank + i / 10
     end
 
     local_sum = sum(interior_view(ha))
@@ -27,8 +28,9 @@ end
 
     u = copy(ha)
     v = similar(ha)
-    for i in eachindex(v)
-        v[i] = 10 * rank + i
+    v_interior = interior_view(v)
+    for i in eachindex(v_interior)
+        v_interior[i] = 10 * rank + i
     end
     fields = MultiHaloArray((; u, v); check=true)
 
@@ -47,8 +49,9 @@ end
 
     ha = HaloArray(Int, local_size, halo, topology; boundary_condition=_periodic_bc(Val(2)))
     fill!(parent(ha), -10_000)
+    ha_interior = interior_view(ha)
     for i in 1:local_size[1], j in 1:local_size[2]
-        ha[i, j] = 1000 * rank + 10 * i + j
+        ha_interior[i, j] = 1000 * rank + 10 * i + j
     end
 
     maybe_reduced = mapreduce_haloarray_dims(identity, +, ha, (1,))
@@ -73,8 +76,9 @@ end
 
     u = copy(ha)
     v = similar(ha)
+    v_interior = interior_view(v)
     for i in 1:local_size[1], j in 1:local_size[2]
-        v[i, j] = 10_000 * rank + 100 * i + j
+        v_interior[i, j] = 10_000 * rank + 100 * i + j
     end
 
     maybe_fields = mapreduce_mhaloarray_dims(identity, +, MultiHaloArray((; u, v); check=true), (1,))

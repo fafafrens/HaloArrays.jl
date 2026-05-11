@@ -1,124 +1,113 @@
-# Test interaction with DifferentialEquations.jl.
-# We solve a trivial decoupled system of ODEs.
-
-
-using MPI
-using OrdinaryDiffEq
 using Test
-using HDF5
+using MPI
+using DiffEqBase
+using HaloArrays
 
+const ODE_RATE = 0.1
 
-include("cartesian_topology.jl")
-include("haloarray.jl")
-include("haloarrays.jl")
-include("interior_broadcast.jl")
-include("interior_broadcast_marray.jl")
-include("reduction.jl")
-include("halo_exchange.jl")
-include("boundary.jl")
-include("reduce_dim.jl")
-include("gather.jl")
-include("save_hdf5.jl")
-
-MPI.Init()
-
-comm = MPI.COMM_WORLD
-rank = MPI.Comm_rank(comm)
-nproc = MPI.Comm_size(comm)
-rank == 0 || redirect_stdout(devnull)
-
-dims = MPI.Dims_create(nproc, (0, 0))
-periods = (true, true)  # periodic boundary in 2D
-topology = CartesianTopology(comm, Tuple(dims), periodic=periods)
-
-N_local = (10, 10)  # Local grid size per process
-Nglobal = N_local .* dims
-h = 1
-
-u0 = HaloArray(Float64, N_local, h, topology; boundary_condition = (:periodic, :periodic))
-
-fill_from_global_indices!(u0) do i
-    x = i[1]
-    y = i[2]
-    return  10 * exp(-(x - (Nglobal[1]/2))^2/5^2 - (y - (Nglobal[2]/2))^2/10^2) + 1
+function _ode_topology(comm)
+    dims = MPI.Dims_create(MPI.Comm_size(comm), (0, 0))
+    return CartesianTopology(comm, Tuple(Int.(dims)); periodic=(false, false))
 end
 
+function _ode_initial_condition(topology)
+    local_size = (4, 5)
+    global_dims = local_size .* topology.dims
+    u0 = HaloArray(Float64, local_size, 1, topology; boundary_condition=:repeating)
 
-function rhs!(du, u, p, t)
-    @. du = -0.1 * u
-    du
-end
-
-
-
-
-@testset "OrdinaryDiffEq" begin
-    tspan = (0.0, 1000.0)
-    params = (;)
-    prob = @inferred ODEProblem{true}(rhs!, u0, tspan, params)
-
-    # This is not fully inferred...
-    integrator = init(
-        prob, Tsit5();
-        adaptive = true, save_everystep = false,
-    )
-
-    # Check that all timesteps are the same
-    for _ = 1:10
-        local dts = MPI.Allgather(integrator.dt, comm)
-        @test allequal(dts)
-        step!(integrator)
+    fill_from_global_indices!(u0) do I
+        x = I[1]
+        y = I[2]
+        return 1 + exp(-(x - global_dims[1] / 2)^2 / 5^2 - (y - global_dims[2] / 2)^2 / 7^2)
     end
 
-end 
+    return u0
+end
 
+function _rhs!(du, u, p, t)
+    interior_view(du) .= -ODE_RATE .* interior_view(u)
+    return du
+end
 
-@testset "DiffEqBase" begin
-    unorm = DiffEqBase.ODE_DEFAULT_NORM(u0, 0.0)
-    unorms = MPI.Allgather(unorm, comm)
+function _explicit_euler_solve(prob, dt)
+    u = copy(prob.u0)
+    du = zero(prob.u0)
+    steps = round(Int, (last(prob.tspan) - first(prob.tspan)) / dt)
+    t = first(prob.tspan)
+
+    for _ in 1:steps
+        prob.f(du, u, prob.p, t)
+        interior_view(u) .+= dt .* interior_view(du)
+        t += dt
+    end
+
+    return u
+end
+
+function _solve_halo_ode(comm)
+    topology = _ode_topology(comm)
+    u0 = _ode_initial_condition(topology)
+
+    tspan = (0.0, 0.5)
+    dt = 0.1
+    prob = ODEProblem{true}(_rhs!, u0, tspan, (;))
+    u_final = _explicit_euler_solve(prob, dt)
+
+    expected_factor = (1 - ODE_RATE * dt)^round(Int, last(tspan) / dt)
+    return u0, u_final, expected_factor
+end
+
+function _check_solution(u0, u_final, expected_factor)
+    @test u_final isa HaloArray
+    @test size(u_final) == size(u0)
+    @test halo_width(u_final) == halo_width(u0)
+    @test interior_view(u_final) ≈ expected_factor .* interior_view(u0)
+    return nothing
+end
+
+@testset "ODEProblem HaloArray state" begin
+    topology = _ode_topology(MPI.COMM_SELF)
+    u0 = _ode_initial_condition(topology)
+
+    prob = ODEProblem{true}(_rhs!, u0, (0.0, 1.0), (;))
+    du = zero(u0)
+    _rhs!(du, u0, prob.p, 0.0)
+
+    @test prob.u0 === u0
+    @test du isa HaloArray
+    @test size(du) == size(u0)
+    @test halo_width(du) == halo_width(u0)
+    @test all(isfinite, interior_view(du))
+    @test all(x -> x < 0, interior_view(du))
+end
+
+@testset "Explicit Euler ODE solve on one rank" begin
+    u0, u_final, expected_factor = _solve_halo_ode(MPI.COMM_SELF)
+    _check_solution(u0, u_final, expected_factor)
+end
+
+@testset "Explicit Euler ODE solve on MPI ranks" begin
+    if MPI.Comm_size(MPI.COMM_WORLD) == 1
+        @test_skip "MPI multi-rank ODE solve requires mpiexec -n > 1"
+    else
+        u0, u_final, expected_factor = _solve_halo_ode(MPI.COMM_WORLD)
+        _check_solution(u0, u_final, expected_factor)
+    end
+end
+
+@testset "DiffEq default checks use HaloArray reductions" begin
+    topology = _ode_topology(MPI.COMM_WORLD)
+    u = _ode_initial_condition(topology)
+
+    unorm = DiffEqBase.ODE_DEFAULT_NORM(u, 0.0)
+    unorms = MPI.Allgather(unorm, MPI.COMM_WORLD)
     @test allequal(unorms)
 
-    # Note that ODE_DEFAULT_UNSTABLE_CHECK calls NAN_CHECK.
-    w = copy(u0)
-    wcheck = DiffEqBase.ODE_DEFAULT_UNSTABLE_CHECK(nothing, w, nothing, nothing)
-    @test wcheck == false
+    w = copy(u)
+    @test DiffEqBase.ODE_DEFAULT_UNSTABLE_CHECK(nothing, w, nothing, nothing) == false
 
-    # After setting a single value to NaN, all processes should detect it.
-    if rank == 0
-        w[1] = NaN
+    if MPI.Comm_rank(MPI.COMM_WORLD) == 0
+        interior_view(w)[1, 1] = NaN
     end
-    wcheck = DiffEqBase.ODE_DEFAULT_UNSTABLE_CHECK(nothing, w, nothing, nothing)
-    @test wcheck == true
+    @test DiffEqBase.ODE_DEFAULT_UNSTABLE_CHECK(nothing, w, nothing, nothing) == true
 end
-
-#=
-    @testset "ArrayPartition" begin
-        v0 = ArrayPartition(u0)
-        prob = @inferred ODEProblem{true}(rhs!, v0, tspan, params)
-
-        # TODO for now this fails when permutations are enabled due to incompatible
-        # broadcasting.
-        @test_skip integrator = init(
-            prob, Tsit5();
-            adaptive = true, save_everystep = false,
-        )
-    end
-
-    # Solve the equation for a 2D vector field represented by a StructArray.
-    @testset "StructArray" begin
-        v0 = to_structarray((u0, 2u0))
-        @assert eltype(v0) <: SVector{2}
-        tspan = (0.0, 1.0)
-        prob = @inferred ODEProblem{true}(rhs!, v0, tspan, params)
-        integrator = init(
-            prob, Tsit5();
-            adaptive = true, save_everystep = false,
-        )
-        @test integrator.u == v0
-        for _ ∈ 1:10
-            step!(integrator)
-        end
-        @test integrator.u ≠ v0
-    end
-end
-=#

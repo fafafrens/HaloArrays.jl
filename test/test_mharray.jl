@@ -11,9 +11,11 @@ end
     u = HaloArray(Float64, (3, 2), 1, topology; boundary_condition=:repeating)
     v = HaloArray(Int, (3, 2), 1, topology; boundary_condition=:repeating)
 
+    u_interior = interior_view(u)
+    v_interior = interior_view(v)
     for i in 1:size(u, 1), j in 1:size(u, 2)
-        u[i, j] = i + j / 10
-        v[i, j] = 10 * i + j
+        u_interior[i, j] = i + j / 10
+        v_interior[i, j] = 10 * i + j
     end
 
     fields = MultiHaloArray((; u, v); check=true)
@@ -42,8 +44,8 @@ end
     @test collect(interior_view(dest.arrays.v)) == [2 * (10 * i + j) for i in 1:3, j in 1:2]
 
     copied = copy(fields)
-    copied.arrays.u[1, 1] = -1
-    @test fields.arrays.u[1, 1] != copied.arrays.u[1, 1]
+    interior_view(copied.arrays.u)[1, 1] = -1
+    @test interior_view(fields.arrays.u)[1, 1] != interior_view(copied.arrays.u)[1, 1]
 
     bad = HaloArray(Float64, (4, 2), 1, topology; boundary_condition=:repeating)
     @test_throws DimensionMismatch MultiHaloArray((; u, bad); check=true)

@@ -3,6 +3,7 @@ module HaloArrays
 
 using MPI
 using HDF5
+using LinearAlgebra
 using StaticArrays
 
 # Include library files
