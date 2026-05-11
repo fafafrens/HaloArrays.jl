@@ -5,6 +5,8 @@ using MPI
 # include le definizioni usate nei test
 using HaloArrays
 
+struct CustomBoundaryForTest <: HaloArrays.AbstractBoundaryCondition end
+
 # non richiediamo mpiexec per questi test; MPI è usato solo per costanti come COMM_NULL
 @testset "HaloArray helpers" begin
 
@@ -27,6 +29,10 @@ using HaloArrays
 
         # bad length -> error
         @test_throws ArgumentError HaloArrays.normalize_boundary_condition((:repeating,), 2)
+        @test_throws ArgumentError HaloArrays.normalize_boundary_condition(:custom, 1)
+        @test HaloArrays.to_bc(CustomBoundaryForTest) isa CustomBoundaryForTest
+        @test HaloArrays.to_bc(CustomBoundaryForTest()) isa CustomBoundaryForTest
+        @test !isdefined(HaloArrays, :register_bc)
     end
 
     @testset "uninitialized HaloArray constructor (undef)" begin
@@ -56,5 +62,4 @@ h = HaloArrays.HaloArray{Float64,2,Array{Float64,2},1}(undef, bc)
     end
 
 end
-
 

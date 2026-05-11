@@ -272,38 +272,20 @@ function boundary_condition!(mha::LocalMultiHaloArray)
     return nothing
 end
 
-
-
-# Global mapping symbol -> BC type/instance (modificabile tramite register_bc)
-const BC_SYMBOL_MAP = Dict{Symbol, Union{DataType, AbstractBoundaryCondition}}(
-    :reflecting     => Reflecting,
-    :antireflecting => Antireflecting,
-    :repeating      => Repeating,
-    :periodic       => Periodic
-)
-
-"""
-    register_bc(sym::Symbol, ctor_or_instance)
-
-Registra una nuova mappatura per `to_bc(:sym)`. `ctor_or_instance` può essere:
-- un Type <: AbstractBoundaryCondition (viene istanziato quando usato),
-- oppure una istanza di AbstractBoundaryCondition.
-Esempio: register_bc(:mybc, MyBC) o register_bc(:mybc, MyBC()).
-"""
-function register_bc(sym::Symbol, ctor_or_instance)
-    if !(ctor_or_instance isa DataType || ctor_or_instance isa AbstractBoundaryCondition)
-        throw(ArgumentError("ctor_or_instance must be a Type <: AbstractBoundaryCondition or an instance"))
-    end
-    BC_SYMBOL_MAP[sym] = ctor_or_instance
-    return nothing
-end
-
 # Unified converter: Symbol | Type | instance -> concrete BC instance
 function to_bc(x)
     if x isa Symbol
-        entry = Base.get(BC_SYMBOL_MAP, x, nothing)
-        entry === nothing && throw(ArgumentError("Unknown boundary condition symbol: $x. Register it with register_bc(:$x, MyBC)."))
-        return entry isa DataType ? entry() : entry
+        if x == :reflecting
+            return Reflecting()
+        elseif x == :antireflecting
+            return Antireflecting()
+        elseif x == :repeating
+            return Repeating()
+        elseif x == :periodic
+            return Periodic()
+        else
+            throw(ArgumentError("Unknown boundary condition symbol: $x"))
+        end
     elseif x isa DataType && x <: AbstractBoundaryCondition
         return x()
     elseif x isa AbstractBoundaryCondition

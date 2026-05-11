@@ -55,7 +55,6 @@ export interior_view,
 
 # Boundary conditions
 export boundary_condition!,
-    register_bc,
     normalize_boundary_condition,
     to_bc
 
