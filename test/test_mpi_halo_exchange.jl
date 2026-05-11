@@ -3,17 +3,22 @@ using MPI
 using HaloArrays
 
 const EXCHANGE_IMPLEMENTATIONS = (
-    waitall=halo_exchange_waitall!,
-    waitall_unsafe=halo_exchange_waitall_unsafe!,
-    async=halo_exchange_async!,
-    async_unsafe=halo_exchange_async_unsafe!,
+    blocking=halo_exchange!,
+    waitall=HaloArrays.halo_exchange_waitall!,
+    waitall_unsafe=HaloArrays.halo_exchange_waitall_unsafe!,
+    async=HaloArrays.halo_exchange_async!,
+    async_unsafe=HaloArrays.halo_exchange_async_unsafe!,
     split_async=(ha -> begin
-        start_halo_exchange_async!(ha)
+        HaloArrays.start_halo_exchange_async!(ha)
         HaloArrays.end_halo_exchange_wait!(ha)
     end),
     split_async_unsafe=(ha -> begin
-        start_halo_exchange_async_unsafe!(ha)
-        end_halo_exchange_async_wait_unsafe!(ha)
+        HaloArrays.start_halo_exchange_async_unsafe!(ha)
+        HaloArrays.end_halo_exchange_async_wait_unsafe!(ha)
+    end),
+    public_split=(ha -> begin
+        start_halo_exchange!(ha)
+        finish_halo_exchange!(ha)
     end),
 )
 
@@ -227,7 +232,7 @@ function _check_haloarray_broadcast()
     @test collect(interior_view(c)) == [(rank + i) - (10 * rank + 2 * i) for i in 1:4]
 
     MPI.Barrier(comm)
-    halo_exchange_waitall!(c)
+    halo_exchange!(c)
     MPI.Barrier(comm)
 
     left_rank = topology.neighbors[1][1]

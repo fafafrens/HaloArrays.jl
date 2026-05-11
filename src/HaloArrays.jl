@@ -61,16 +61,9 @@ export boundary_condition!,
 
 # Halo exchange
 export halo_exchange!,
-    halo_exchange_wait!,
-    halo_exchange_waitall!,
-    halo_exchange_waitall_unsafe!,
-    halo_exchange_async!,
-    halo_exchange_async_unsafe!,
-    start_halo_exchange_async!,
-    halo_exchange_async_wait!,
-    halo_exchange_async_wait_unsafe!,
-    start_halo_exchange_async_unsafe!,
-    end_halo_exchange_async_wait_unsafe!,
+    start_halo_exchange!,
+    finish_halo_exchange!,
+    synchronize_halo!,
     get_send_view,
     get_recv_view
 

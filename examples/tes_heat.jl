@@ -56,7 +56,7 @@ HaloArrays.fill_from_global_indices!(u) do i
     MPI.Barrier(comm)
     for step in 1:nt
         # Halo exchange updates ghost cells, periodic neighbors wrap correctly
-        halo_exchange_async_unsafe!(u)
+        synchronize_halo!(u)
 
         if any(isnan, u.data)
             @show step, u.data

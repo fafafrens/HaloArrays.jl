@@ -1,387 +1,248 @@
-function halo_exchange!(halo::HaloArray,side::Side{S}, dim::Dim{D}) where {S,D}
-    h= halo_width(halo)
-    comm = halo.topology.cart_comm
-    topo = halo.topology
-
-    recv_reqs = halo.comm_state.recv_reqs
-    send_reqs = halo.comm_state.send_reqs
-    recv_bufs = halo.receive_bufs
-    send_bufs = halo.send_bufs
-
-    nbrank = topo.neighbors[D][S]
-    if nbrank != MPI.PROC_NULL
-        recv_reqs[D][S] = MPI.Irecv!(recv_bufs[D][S], comm, recv_reqs[D][S]; source=nbrank, tag=tag_recv(Val{D}(), Val{S}()))
-        send_view = get_send_view(Side(S), Dim(D), halo.data, h)
-        copyto!(send_bufs[D][S], send_view)
-
-        send_reqs[D][S] = MPI.Isend(send_bufs[D][S], comm, send_reqs[D][S]; dest=nbrank, tag=tag_send(Val{D}(), Val{S}()))
-
-        recv_ready = false
-        send_ready = false
-
-        while !(recv_ready && send_ready)
-            if MPI.Test(recv_reqs[D][S]) && !recv_ready
-                recv_view = get_recv_view(Side(S), Dim(D), halo.data, h)
-                copyto!(recv_view, recv_bufs[D][S])
-                recv_ready = true
-            end
-
-            send_ready = MPI.Test(send_reqs[D][S])
-        end
-    end
-    return 1
-end
-
-
-function halo_exchange!(halo::HaloArray{T, N, A,H, B,C}) where {T,N,A,H,B,C}
-    ntuple(Val(N)) do D
-        ntuple(Val(2)) do S
-            halo_exchange!(halo,Side(S), Dim(D))
-        end
-    end
-    return nothing
-end
-
-
-# helper tags: runtime (Int) and compile-time (Val) interfaces
-@inline tag_send(dim::Int, side::Int) = 2*(dim - 1) + side
+# MPI tags: side 1 receives from side 2 of the neighbor, and conversely.
+@inline tag_send(dim::Int, side::Int) = 2 * (dim - 1) + side
 @inline tag_recv(dim::Int, side::Int) = tag_send(dim, 3 - side)
 
-@inline tag_send(::Val{D}, ::Val{S}) where {D,S} = 2*(D - 1) + S
+@inline tag_send(::Val{D}, ::Val{S}) where {D,S} = 2 * (D - 1) + S
 @inline tag_recv(::Val{D}, ::Val{S}) where {D,S} = tag_send(Val{D}(), Val{3 - S}())
 
-
-function halo_exchange_wait!(halo::HaloArray,side::Side{S}, dim::Dim{D}) where {S,D}
-    h= halo_width(halo)
+function halo_exchange_waitall!(halo::HaloArray{T,N,A,H,B,BCondition}) where {T,N,A,H,B,BCondition}
     comm = halo.topology.cart_comm
     topo = halo.topology
+    recv_reqs = halo.comm_state.recv_reqs_flat
+    send_reqs = halo.comm_state.send_reqs_flat
+    recv_bufs = halo.receive_bufs
+    send_bufs = halo.send_bufs
 
+    @inbounds for dim in 1:N, side in 1:2
+        nbrank = topo.neighbors[dim][side]
+        if nbrank != MPI.PROC_NULL
+            idx = tag_send(dim, side)
+            send_view = get_send_view(Side(side), dim, halo)
+            copyto!(send_bufs[dim][side], send_view)
+            recv_reqs[idx] = MPI.Irecv!(recv_bufs[dim][side], comm, recv_reqs[idx]; source=nbrank, tag=tag_recv(dim, side))
+            send_reqs[idx] = MPI.Isend(send_bufs[dim][side], comm, send_reqs[idx]; dest=nbrank, tag=tag_send(dim, side))
+        end
+    end
+
+    MPI.Waitall(recv_reqs)
+
+    @inbounds for dim in 1:N, side in 1:2
+        nbrank = topo.neighbors[dim][side]
+        if nbrank != MPI.PROC_NULL
+            recv_view = get_recv_view(Side(side), dim, halo)
+            copyto!(recv_view, recv_bufs[dim][side])
+        end
+    end
+
+    MPI.Waitall(send_reqs)
+    return nothing
+end
+
+function halo_exchange_waitall_unsafe!(halo::HaloArray{T,N,A,H,B,BCondition}) where {T,N,A,H,B,BCondition}
+    comm = halo.topology.cart_comm
+    topo = halo.topology
+    recv_reqs = halo.comm_state.unsafe_recv_reqs
+    send_reqs = halo.comm_state.unsafe_send_reqs
+    recv_bufs = halo.receive_bufs
+    send_bufs = halo.send_bufs
+
+    recv_state = (recv_reqs, recv_bufs)
+    send_state = (send_reqs, send_bufs)
+
+    @inbounds for dim in 1:N, side in 1:2
+        nbrank = topo.neighbors[dim][side]
+        if nbrank != MPI.PROC_NULL
+            idx = tag_send(dim, side)
+            send_view = get_send_view(Side(side), dim, halo)
+            copyto!(send_bufs[dim][side], send_view)
+            GC.@preserve recv_state MPI.Irecv!(recv_bufs[dim][side], comm, recv_reqs[idx]; source=nbrank, tag=tag_recv(dim, side))
+            GC.@preserve send_state MPI.Isend(send_bufs[dim][side], comm, send_reqs[idx]; dest=nbrank, tag=tag_send(dim, side))
+        end
+    end
+
+    GC.@preserve recv_state MPI.Waitall(recv_reqs)
+
+    @inbounds for dim in 1:N, side in 1:2
+        nbrank = topo.neighbors[dim][side]
+        if nbrank != MPI.PROC_NULL
+            recv_view = get_recv_view(Side(side), dim, halo)
+            copyto!(recv_view, recv_bufs[dim][side])
+        end
+    end
+
+    GC.@preserve send_state MPI.Waitall(send_reqs)
+    return nothing
+end
+
+function _start_halo_exchange_safe!(halo::HaloArray{T,N,A,H,B,BCondition}) where {T,N,A,H,B,BCondition}
+    comm = halo.topology.cart_comm
+    topo = halo.topology
     recv_reqs = halo.comm_state.recv_reqs
     send_reqs = halo.comm_state.send_reqs
     recv_bufs = halo.receive_bufs
     send_bufs = halo.send_bufs
 
-    nbrank = topo.neighbors[D][S]
-    if nbrank != MPI.PROC_NULL
-        send_view = get_send_view(side, dim, halo.data, h)
-        copyto!(send_bufs[D][S], send_view)
-        # Post non-blocking recv and send (use compile-time tags)
-        recv_reqs[D][S] = MPI.Irecv!(recv_bufs[D][S], comm, recv_reqs[D][S]; source=nbrank, tag=tag_recv(Val{D}(), Val{S}()))
-        send_reqs[D][S] = MPI.Isend(send_bufs[D][S], comm, send_reqs[D][S]; dest=nbrank, tag=tag_send(Val{D}(), Val{S}()))
-        # Wait for the receive to complete, then copy buffer into halo region
-        MPI.Wait(recv_reqs[D][S])
-        recv_view = get_recv_view(side, dim, halo.data, h)
-        copyto!(recv_view, recv_bufs[D][S])
-        # Wait for send completion
-        MPI.Wait(send_reqs[D][S])
-    end
-    return 1
-end
-
-function halo_exchange_wait!(halo::HaloArray{T,N,A,Halo,B,BCondition}) where {T,N,A,Halo,B,BCondition}
-    ntuple(Val(N)) do D
-        ntuple(Val(2)) do s
-            # Call the halo exchange wait for each side and dimension
-            halo_exchange_wait!(halo,Side(s), Dim(D))
+    @inbounds for dim in 1:N, side in 1:2
+        nbrank = topo.neighbors[dim][side]
+        if nbrank != MPI.PROC_NULL
+            send_view = get_send_view(Side(side), dim, halo)
+            copyto!(send_bufs[dim][side], send_view)
+            recv_reqs[dim][side] = MPI.Irecv!(recv_bufs[dim][side], comm, recv_reqs[dim][side]; source=nbrank, tag=tag_recv(dim, side))
+            send_reqs[dim][side] = MPI.Isend(send_bufs[dim][side], comm, send_reqs[dim][side]; dest=nbrank, tag=tag_send(dim, side))
         end
     end
     return nothing
 end
 
-
-    function halo_exchange_waitall!(halo::HaloArray{T, N, A,H,C,BCondition}) where {T,N,A,H,C,BCondition}
-
-    h= halo_width(halo)
-    comm = halo.topology.cart_comm
+function _finish_halo_exchange_safe!(halo::HaloArray{T,N,A,H,B,BCondition}) where {T,N,A,H,B,BCondition}
     topo = halo.topology
-
-    recv_reqs_flat = halo.comm_state.recv_reqs_flat
-    send_reqs_flat = halo.comm_state.send_reqs_flat
-    recv_bufs = halo.receive_bufs
-    send_bufs = halo.send_bufs
-
-    for D in 1:N
-        nbrank = topo.neighbors[D][1]
-        if nbrank != MPI.PROC_NULL
-            send_view = get_send_view(Side(1), D, halo)
-            copyto!(send_bufs[D][1], send_view)
-            idx = 2*(D - 1) + 1
-            recv_reqs_flat[idx] = MPI.Irecv!(recv_bufs[D][1], comm, recv_reqs_flat[idx]; source=nbrank, tag=tag_recv(D,1))
-            send_reqs_flat[idx] = MPI.Isend(send_bufs[D][1], comm, send_reqs_flat[idx]; dest=nbrank, tag=tag_send(D,1))
-        end
-
-        nbrank = topo.neighbors[D][2]
-        if nbrank != MPI.PROC_NULL
-            send_view = get_send_view(Side(2), D, halo)
-            copyto!(send_bufs[D][2], send_view)
-            idx = 2*(D - 1) + 2
-            recv_reqs_flat[idx] = MPI.Irecv!(recv_bufs[D][2], comm, recv_reqs_flat[idx]; source=nbrank, tag=tag_recv(D,2))
-            send_reqs_flat[idx] = MPI.Isend(send_bufs[D][2], comm, send_reqs_flat[idx]; dest=nbrank, tag=tag_send(D,2))
-        end
-    end
-
-    MPI.Waitall(recv_reqs_flat)
-
-    @inbounds for D in 1:N
-        nbrank = topo.neighbors[D][1]
-        if nbrank != MPI.PROC_NULL
-            recv_view = get_recv_view(Side(1), D, halo)
-            copyto!(recv_view, recv_bufs[D][1])
-        end
-        nbrank = topo.neighbors[D][2]
-        if nbrank != MPI.PROC_NULL
-            recv_view = get_recv_view(Side(2), D, halo)
-            copyto!(recv_view, recv_bufs[D][2])
-        end
-    end
-
-    MPI.Waitall(send_reqs_flat)
-
-    return nothing
-end
-
-
-function halo_exchange_waitall_unsafe!(halo::HaloArray{T,N,A,Halo,B,BCondition}) where {T,N,A,Halo,B,BCondition}
-
-    h= halo_width(halo)
-    comm = halo.topology.cart_comm
-    topo = halo.topology
-
-    unsafe_rec_req = halo.comm_state.unsafe_recv_reqs
-    unsafe_send_req = halo.comm_state.unsafe_send_reqs
-    rec_bufs = halo.receive_bufs
-    send_bufs = halo.send_bufs
-
-    rec_state = (unsafe_rec_req, rec_bufs)
-    send_state = (unsafe_send_req, send_bufs)
-
-    for D in 1:N
-        @inbounds nbrank = topo.neighbors[D][1]
-        if nbrank != MPI.PROC_NULL
-            send_view = get_send_view(Side{1}(), D, halo)
-            copyto!(send_bufs[D][1], send_view)
-            idx = 2*(D - 1) + 1
-            GC.@preserve rec_state MPI.Irecv!(rec_bufs[D][1], comm, unsafe_rec_req[idx]; source=nbrank, tag=tag_recv(D,1))
-            GC.@preserve send_state MPI.Isend(send_bufs[D][1], comm, unsafe_send_req[idx]; dest=nbrank, tag=tag_send(D,1))
-        end
-    end
-
-    @inbounds for D in 1:N
-        nbrank = topo.neighbors[D][2]
-        if nbrank != MPI.PROC_NULL
-            send_view = get_send_view(Side{2}(), D, halo)
-            copyto!(send_bufs[D][2], send_view)
-            idx = 2*(D - 1) + 2
-            GC.@preserve rec_state MPI.Irecv!(rec_bufs[D][2], comm, unsafe_rec_req[idx]; source=nbrank, tag=tag_recv(D,2))
-            GC.@preserve send_state MPI.Isend(send_bufs[D][2], comm, unsafe_send_req[idx]; dest=nbrank, tag=tag_send(D,2))
-        end
-    end
-
-    GC.@preserve rec_state MPI.Waitall(unsafe_rec_req)
-
-    @inbounds for D in 1:N
-        nbrank = topo.neighbors[D][1]
-        if nbrank != MPI.PROC_NULL
-            recv_view = get_recv_view(Side{1}(), D, halo)
-            copyto!(recv_view, rec_bufs[D][1])
-        end
-    end
-
-    @inbounds for D in 1:N
-        nbrank = topo.neighbors[D][2]
-        if nbrank != MPI.PROC_NULL
-            recv_view = get_recv_view(Side{2}(),D, halo)
-            copyto!(recv_view, rec_bufs[D][2])
-        end
-    end
-
-    GC.@preserve send_state MPI.Waitall(unsafe_send_req)
-
-    return nothing
-end
-
-
-
-function halo_exchange_async!(halo::HaloArray, side::Side{S}, dim::Dim{D}) where {S,D}
-    h = halo_width(halo)
-    comm = halo.topology.cart_comm
-    topo = halo.topology
-
     recv_reqs = halo.comm_state.recv_reqs
     send_reqs = halo.comm_state.send_reqs
     recv_bufs = halo.receive_bufs
-    send_bufs = halo.send_bufs
 
-    nbrank = topo.neighbors[D][S]
-    if nbrank != MPI.PROC_NULL
-        recv_reqs[D][S] = MPI.Irecv!(recv_bufs[D][S], comm, recv_reqs[D][S]; source=nbrank, tag=tag_recv(Val{D}(), Val{S}()))
-        send_view = get_send_view(side, dim, halo)
-        copyto!(send_bufs[D][S], send_view)
-        send_reqs[D][S] = MPI.Isend(send_bufs[D][S], comm, send_reqs[D][S]; dest=nbrank, tag=tag_send(Val{D}(), Val{S}()))
-    end
-
-end
-
-function halo_exchange_async!(halo::HaloArray, side::Side{S}, D::Int) where {S}
-    h = halo_width(halo)
-    comm = halo.topology.cart_comm
-    topo = halo.topology
-
-    recv_reqs = halo.comm_state.recv_reqs
-    send_reqs = halo.comm_state.send_reqs
-    recv_bufs = halo.receive_bufs
-    send_bufs = halo.send_bufs
-
-    nbrank = topo.neighbors[D][S]
-    if nbrank != MPI.PROC_NULL
-        recv_reqs[D][S] = MPI.Irecv!(recv_bufs[D][S], comm, recv_reqs[D][S]; source=nbrank, tag=tag_recv(D,S))
-        send_view = get_send_view(side, D, halo)
-        copyto!(send_bufs[D][S], send_view)
-        send_reqs[D][S] = MPI.Isend(send_bufs[D][S], comm, send_reqs[D][S]; dest=nbrank, tag=tag_send(D,S))
-    end
-
-end
-
-function start_halo_exchange_async!(halo::HaloArray{T,N,A,Halo,B,BCondition}) where {T,N,A,Halo,B,BCondition}
-    for D in 1:N
-        halo_exchange_async!(halo, Side{1}(),D)
-        halo_exchange_async!(halo, Side{2}(), D)
+    @inbounds for dim in 1:N, side in 1:2
+        nbrank = topo.neighbors[dim][side]
+        if nbrank != MPI.PROC_NULL
+            MPI.Wait(recv_reqs[dim][side])
+            recv_view = get_recv_view(Side(side), dim, halo)
+            copyto!(recv_view, recv_bufs[dim][side])
+            MPI.Wait(send_reqs[dim][side])
+        end
     end
     return nothing
 end
 
-function halo_exchange_async_wait!(halo::HaloArray, side::Side{S}, dim::Dim{D}) where {S,D}
-    h = halo_width(halo)
+function start_halo_exchange_async_unsafe!(halo::HaloArray{T,N,A,H,B,BCondition}) where {T,N,A,H,B,BCondition}
     comm = halo.topology.cart_comm
     topo = halo.topology
-
-    recv_reqs = halo.comm_state.recv_reqs
-    send_reqs = halo.comm_state.send_reqs
+    recv_reqs = halo.comm_state.unsafe_recv_reqs_vv
+    send_reqs = halo.comm_state.unsafe_send_reqs_vv
     recv_bufs = halo.receive_bufs
     send_bufs = halo.send_bufs
 
-    nbrank = topo.neighbors[D][S]
-    if nbrank != MPI.PROC_NULL
-        MPI.Wait(recv_reqs[D][S])
-        recv_view = get_recv_view(side, dim, halo)
-        copyto!(recv_view, recv_bufs[D][S])
-        MPI.Wait(send_reqs[D][S])
-    end
+    recv_state = (recv_reqs, recv_bufs)
+    send_state = (send_reqs, send_bufs)
 
-end
-
-function halo_exchange_async_wait!(halo::HaloArray, side::Side{S}, D::Int) where {S}
-    h = halo_width(halo)
-    comm = halo.topology.cart_comm
-    topo = halo.topology
-
-    recv_reqs = halo.comm_state.recv_reqs
-    send_reqs = halo.comm_state.send_reqs
-    recv_bufs = halo.receive_bufs
-    send_bufs = halo.send_bufs
-
-    nbrank = topo.neighbors[D][S]
-    if nbrank != MPI.PROC_NULL
-        MPI.Wait(recv_reqs[D][S])
-        recv_view = get_recv_view(side, D, halo)
-        copyto!(recv_view, recv_bufs[D][S])
-        MPI.Wait(send_reqs[D][S])
-    end
-
-end
-
-function end_halo_exchange_wait!(halo::HaloArray{T, N, A,Halo,B,BCondition}) where {T,N,A,Halo,B,BCondition}
-    for D in 1:N
-        halo_exchange_async_wait!(halo, Side{1}(),D)
-        halo_exchange_async_wait!(halo, Side{2}(),D)
+    @inbounds for dim in 1:N, side in 1:2
+        nbrank = topo.neighbors[dim][side]
+        if nbrank != MPI.PROC_NULL
+            send_view = get_send_view(Side(side), dim, halo)
+            copyto!(send_bufs[dim][side], send_view)
+            GC.@preserve recv_state MPI.Irecv!(recv_bufs[dim][side], comm, recv_reqs[dim][side]; source=nbrank, tag=tag_recv(dim, side))
+            GC.@preserve send_state MPI.Isend(send_bufs[dim][side], comm, send_reqs[dim][side]; dest=nbrank, tag=tag_send(dim, side))
+        end
     end
     return nothing
 end
 
-function halo_exchange_async!(halo::HaloArray{T, N, A,Halo,B,BCondition}) where {T,N,A,Halo,B,BCondition}
+function end_halo_exchange_async_wait_unsafe!(halo::HaloArray{T,N,A,H,B,BCondition}) where {T,N,A,H,B,BCondition}
+    topo = halo.topology
+    recv_reqs = halo.comm_state.unsafe_recv_reqs_vv
+    send_reqs = halo.comm_state.unsafe_send_reqs_vv
+    recv_bufs = halo.receive_bufs
+
+    recv_state = (recv_reqs, recv_bufs)
+    send_state = send_reqs
+
+    @inbounds for dim in 1:N, side in 1:2
+        nbrank = topo.neighbors[dim][side]
+        if nbrank != MPI.PROC_NULL
+            GC.@preserve recv_state MPI.Wait(recv_reqs[dim][side])
+            recv_view = get_recv_view(Side(side), dim, halo)
+            copyto!(recv_view, recv_bufs[dim][side])
+            GC.@preserve send_state MPI.Wait(send_reqs[dim][side])
+        end
+    end
+    return nothing
+end
+
+# Public exchange API.
+halo_exchange!(halo::HaloArray) = halo_exchange_waitall_unsafe!(halo)
+halo_exchange!(halo::LocalHaloArray) = halo
+
+function halo_exchange!(halo::MultiHaloArray)
+    foreach_field!(halo_exchange!, halo)
+    return halo
+end
+
+function halo_exchange!(halo::LocalMultiHaloArray)
+    return halo
+end
+
+start_halo_exchange!(halo::HaloArray) = start_halo_exchange_async_unsafe!(halo)
+finish_halo_exchange!(halo::HaloArray) = end_halo_exchange_async_wait_unsafe!(halo)
+start_halo_exchange!(halo::LocalHaloArray) = halo
+finish_halo_exchange!(halo::LocalHaloArray) = halo
+
+function start_halo_exchange!(halo::MultiHaloArray)
+    foreach_field!(start_halo_exchange!, halo)
+    return halo
+end
+
+function finish_halo_exchange!(halo::MultiHaloArray)
+    foreach_field!(finish_halo_exchange!, halo)
+    return halo
+end
+
+start_halo_exchange!(halo::LocalMultiHaloArray) = halo
+finish_halo_exchange!(halo::LocalMultiHaloArray) = halo
+
+function synchronize_halo!(halo::HaloArray)
+    halo_exchange!(halo)
+    boundary_condition!(halo)
+    return halo
+end
+
+function synchronize_halo!(halo::LocalHaloArray)
+    boundary_condition!(halo)
+    return halo
+end
+
+function synchronize_halo!(halo::MultiHaloArray)
+    halo_exchange!(halo)
+    boundary_condition!(halo)
+    return halo
+end
+
+function synchronize_halo!(halo::LocalMultiHaloArray)
+    boundary_condition!(halo)
+    return halo
+end
+
+# Compatibility wrappers for the older API names.
+halo_exchange_wait!(halo::HaloArray) = halo_exchange_waitall!(halo)
+
+function start_halo_exchange_async!(halo::HaloArray)
+    _start_halo_exchange_safe!(halo)
+    return nothing
+end
+
+function end_halo_exchange_wait!(halo::HaloArray)
+    _finish_halo_exchange_safe!(halo)
+    return nothing
+end
+
+function halo_exchange_async!(halo::HaloArray)
     start_halo_exchange_async!(halo)
-    ###Here you can put additional
     end_halo_exchange_wait!(halo)
     return nothing
 end
 
-
-
-function halo_exchange_async_unsafe!(halo::HaloArray, side::Side{S}, D::Int) where {S}
-    h = halo_width(halo)
-    comm = halo.topology.cart_comm
-    topo = halo.topology
-
-    recv_reqs = halo.comm_state.unsafe_recv_reqs_vv
-    send_reqs = halo.comm_state.unsafe_send_reqs_vv
-    recv_bufs = halo.receive_bufs
-    send_bufs = halo.send_bufs
-
-    rec_state = (recv_reqs , recv_bufs)
-    send_state = (send_reqs, send_bufs)
-
-    nbrank = topo.neighbors[D][S]
-    if nbrank != MPI.PROC_NULL
-        GC.@preserve rec_state MPI.Irecv!(recv_bufs[D][S], comm, recv_reqs[D][S]; source=nbrank, tag=tag_recv(D,S))
-        send_view = get_send_view(side, D, halo)
-        copyto!(send_bufs[D][S], send_view)
-        GC.@preserve send_state MPI.Isend(send_bufs[D][S], comm, send_reqs[D][S]; dest=nbrank, tag=tag_send(D,S))
-    end
-
-end
-
-function start_halo_exchange_async_unsafe!(halo::HaloArray{T, N, A,Halo,B,BCondition}) where {T,N,A,Halo,B,BCondition}
-    for D in 1:N
-        halo_exchange_async_unsafe!(halo, Side{1}(),D)
-        halo_exchange_async_unsafe!(halo, Side{2}(), D)
-    end
-    return nothing
-end
-
-function halo_exchange_async_wait_unsafe!(halo::HaloArray, side::Side{S}, D::Int) where {S}
-    h = halo_width(halo)
-    comm = halo.topology.cart_comm
-    topo = halo.topology
-
-    recv_reqs = halo.comm_state.unsafe_recv_reqs_vv
-    send_reqs = halo.comm_state.unsafe_send_reqs_vv
-    recv_bufs = halo.receive_bufs
-    send_bufs = halo.send_bufs
-
-    rec_state = (recv_reqs , recv_bufs)
-    send_state = (send_reqs, send_bufs)
-
-    nbrank = topo.neighbors[D][S]
-    if nbrank != MPI.PROC_NULL
-        GC.@preserve rec_state MPI.Wait(recv_reqs[D][S])
-        recv_view = get_recv_view(side, D, halo)
-        copyto!(recv_view, recv_bufs[D][S])
-        GC.@preserve send_state MPI.Wait(send_reqs[D][S])
-    end
-
-end
-
-function end_halo_exchange_async_wait_unsafe!(halo::HaloArray{T, N, A,Halo,B,BCondition}) where {T,N,A,Halo,B,BCondition}
-    for D in 1:N
-        halo_exchange_async_wait_unsafe!(halo, Side{1}(),D)
-        halo_exchange_async_wait_unsafe!(halo, Side{2}(),D)
-    end
-    return nothing
-end
-
-function halo_exchange_async_unsafe!(halo::HaloArray{T,N,A,Halo,B,BCondition}) where {T,N,A,Halo,B,BCondition}
+function halo_exchange_async_unsafe!(halo::HaloArray)
     start_halo_exchange_async_unsafe!(halo)
-    ###Here you can put additional
     end_halo_exchange_async_wait_unsafe!(halo)
     return nothing
 end
 
+halo_exchange_async_wait!(halo::HaloArray) = end_halo_exchange_wait!(halo)
+halo_exchange_async_wait_unsafe!(halo::HaloArray) = end_halo_exchange_async_wait_unsafe!(halo)
+
 function start_halo_exchange_async_unsafe!(halo::MultiHaloArray)
-    foreach_field!( start_halo_exchange_async_unsafe!,halo)
+    foreach_field!(start_halo_exchange_async_unsafe!, halo)
     return nothing
 end
 
 function end_halo_exchange_async_wait_unsafe!(halo::MultiHaloArray)
-    foreach_field!( end_halo_exchange_async_wait_unsafe!,halo)
+    foreach_field!(end_halo_exchange_async_wait_unsafe!, halo)
     return nothing
 end

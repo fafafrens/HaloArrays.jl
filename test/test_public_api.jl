@@ -26,4 +26,11 @@ using HaloArrays
     if ha.topology.neighbors[1][2] == MPI.PROC_NULL
         @test parent(ha)[8:9] == [3.0, 3.0]
     end
+
+    local_ha = LocalHaloArray(Float64, (3,), 1; boundary_condition=:repeating)
+    interior_view(local_ha) .= [1.0, 2.0, 3.0]
+    @test start_halo_exchange!(local_ha) === local_ha
+    @test finish_halo_exchange!(local_ha) === local_ha
+    @test synchronize_halo!(local_ha) === local_ha
+    @test parent(local_ha) == [1.0, 1.0, 2.0, 3.0, 3.0]
 end

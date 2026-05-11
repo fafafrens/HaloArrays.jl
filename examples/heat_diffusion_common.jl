@@ -22,17 +22,6 @@ function fill_centered_gaussian!(u; baseline=1.0, amplitude=1.0, widths=nothing)
     return u
 end
 
-function synchronize_halo!(u::HaloArray)
-    halo_exchange_waitall_unsafe!(u)
-    boundary_condition!(u)
-    return u
-end
-
-function synchronize_halo!(u::LocalHaloArray)
-    boundary_condition!(u)
-    return u
-end
-
 function heat_step!(u_next, u_old, alpha, dt, dx)
     N = ndims(u_old)
     dxs = _as_tuple(dx, Val(N))
