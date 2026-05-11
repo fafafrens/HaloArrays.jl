@@ -13,6 +13,7 @@ Broadcast.BroadcastStyle(a::HaloArrayStyle, ::Base.Broadcast.DefaultArrayStyle{0
 
 # BroadcastStyle inference for HaloArray types
 Broadcast.BroadcastStyle(::Type{<:HaloArray{T,N}}) where {T,N} = HaloArrayStyle{N}()
+Broadcast.BroadcastStyle(::Type{<:LocalHaloArray{T,N}}) where {T,N} = HaloArrayStyle{N}()
 
 function Broadcast.BroadcastStyle(::HaloArrayStyle{N}, a::Base.Broadcast.DefaultArrayStyle{M}) where {N,M}
     Base.Broadcast.DefaultArrayStyle(Val(max(M, N)))
@@ -34,16 +35,19 @@ end
 # ------------------------------------------------------------------------------
 
 Broadcast.broadcastable(x::HaloArray) = x
+Broadcast.broadcastable(x::LocalHaloArray) = x
 
 # Find first HaloArray in a broadcast expression
 find_ha(bc::Broadcasted) = find_ha(bc.args)
 find_ha(args::Tuple) = find_ha(find_ha(args[1]), Base.tail(args))
 find_ha(x::HaloArray, rest) = x
+find_ha(x::LocalHaloArray, rest) = x
 find_ha(x, rest) = find_ha(rest)
 find_ha(x) = x
 
 # Unpack broadcast args per field
 unpack_ha(x::HaloArray) = interior_view(x)
+unpack_ha(x::LocalHaloArray) = interior_view(x)
 unpack_ha(x) = x 
 @inline function unpack_ha(bc::Broadcasted{Style}) where {Style}
     Broadcasted{Style}(bc.f, unpack_args_ha(bc.args))
@@ -70,6 +74,12 @@ unpack_args_ha( args::Tuple{Any}) = (unpack_ha(args[1]),)
     return dest
 end
 
+@inline function Base.copyto!(dest::LocalHaloArray, bc::Broadcasted{<:HaloArrayStyle})
+    bc_flat = Broadcast.flatten(bc)
+    copyto!(interior_view(dest), unpack_ha(bc_flat))
+    return dest
+end
+
 
 @inline function Base.copy(bc::Broadcast.Broadcasted{<:HaloArrayStyle})
     bc_flat = Broadcast.flatten(bc)
@@ -84,16 +94,22 @@ function Broadcast.materialize!(dest::HaloArray, bc::Broadcasted)
     return dest
 end
 
+function Broadcast.materialize!(dest::LocalHaloArray, bc::Broadcasted)
+    bc_flat = Broadcast.flatten(bc)
+    Broadcast.materialize!(interior_view(dest), unpack_ha(bc_flat))
+    return dest
+end
+
 # ------------------------------------------------------------------------------
 # Allocation
 # ------------------------------------------------------------------------------
 
 function Base.similar(bc::Broadcasted{<:HaloArrayStyle}, ::Type{T}) where {T}
-    ha = find_ha(bc)::HaloArray
+    ha = find_ha(bc)
     return similar(ha, T)
 end
 
 function Base.similar(bc::Broadcasted{<:HaloArrayStyle})
-    ha = find_ha(bc)::HaloArray
+    ha = find_ha(bc)
     return similar(ha)
 end

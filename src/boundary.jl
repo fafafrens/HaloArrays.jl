@@ -136,11 +136,140 @@ function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,BCondition}) where {
     return nothing
 end
 
+function boundary_condition!(halo::LocalHaloArray, s::Side{side}, dim::Dim{d}) where {side,d}
+    mode = halo.boundary_condition[d][side]
+    boundary_condition!(halo, s, dim, mode)
+    return nothing
+end
+
+function boundary_condition!(halo::LocalHaloArray, s::Side{1}, d::Dim{dim}, mode::Reflecting) where {dim}
+    h = halo_width(halo)
+    interior_region = interior_view(halo)
+    halo_region = get_recv_view(s, d, halo)
+
+    for i in 1:size(halo_region, dim)
+        src_i = h - i + 1
+        mirror_idx = _slice_index(Val(ndims(halo)), dim, src_i)
+        dst_idx = _slice_index(Val(ndims(halo)), dim, i)
+        @views halo_region[dst_idx...] .= interior_region[mirror_idx...]
+    end
+    return nothing
+end
+
+function boundary_condition!(halo::LocalHaloArray, s::Side{2}, d::Dim{dim}, mode::Reflecting) where {dim}
+    interior_region = interior_view(halo)
+    halo_region = get_recv_view(s, d, halo)
+    n = size(interior_region, dim)
+
+    for i in 1:size(halo_region, dim)
+        src_i = n - (i - 1)
+        mirror_idx = _slice_index(Val(ndims(halo)), dim, src_i)
+        dst_idx = _slice_index(Val(ndims(halo)), dim, i)
+        @views halo_region[dst_idx...] .= interior_region[mirror_idx...]
+    end
+    return nothing
+end
+
+function boundary_condition!(halo::LocalHaloArray, s::Side{1}, d::Dim{dim}, mode::Antireflecting) where {dim}
+    h = halo_width(halo)
+    interior_region = interior_view(halo)
+    halo_region = get_recv_view(s, d, halo)
+
+    for i in 1:size(halo_region, dim)
+        src_i = h - i + 1
+        mirror_idx = _slice_index(Val(ndims(halo)), dim, src_i)
+        dst_idx = _slice_index(Val(ndims(halo)), dim, i)
+        @views halo_region[dst_idx...] .= .- interior_region[mirror_idx...]
+    end
+    return nothing
+end
+
+function boundary_condition!(halo::LocalHaloArray, s::Side{2}, d::Dim{dim}, mode::Antireflecting) where {dim}
+    interior_region = interior_view(halo)
+    halo_region = get_recv_view(s, d, halo)
+    n = size(interior_region, dim)
+
+    for i in 1:size(halo_region, dim)
+        src_i = n - (i - 1)
+        mirror_idx = _slice_index(Val(ndims(halo)), dim, src_i)
+        dst_idx = _slice_index(Val(ndims(halo)), dim, i)
+        @views halo_region[dst_idx...] .= .- interior_region[mirror_idx...]
+    end
+    return nothing
+end
+
+function boundary_condition!(halo::LocalHaloArray, s::Side{1}, d::Dim{dim}, mode::Repeating) where {dim}
+    interior_region = interior_view(halo)
+    halo_region = get_recv_view(s, d, halo)
+    edge_idx = _slice_index(Val(ndims(halo)), dim, 1)
+    boundary_slice = @view interior_region[edge_idx...]
+
+    for i in 1:size(halo_region, dim)
+        halo_idx = _slice_index(Val(ndims(halo)), dim, i)
+        @views halo_region[halo_idx...] .= boundary_slice
+    end
+    return nothing
+end
+
+function boundary_condition!(halo::LocalHaloArray, s::Side{2}, d::Dim{dim}, mode::Repeating) where {dim}
+    interior_region = interior_view(halo)
+    halo_region = get_recv_view(s, d, halo)
+    edge_idx = _slice_index(Val(ndims(halo)), dim, size(interior_region, dim))
+    boundary_slice = @view interior_region[edge_idx...]
+
+    for i in 1:size(halo_region, dim)
+        halo_idx = _slice_index(Val(ndims(halo)), dim, i)
+        @views halo_region[halo_idx...] .= boundary_slice
+    end
+    return nothing
+end
+
+function boundary_condition!(halo::LocalHaloArray, s::Side{1}, d::Dim{dim}, mode::Periodic) where {dim}
+    interior_region = interior_view(halo)
+    halo_region = get_recv_view(s, d, halo)
+    n = size(interior_region, dim)
+    h = halo_width(halo)
+
+    for i in 1:size(halo_region, dim)
+        src_i = n - h + i
+        src_idx = _slice_index(Val(ndims(halo)), dim, src_i)
+        dst_idx = _slice_index(Val(ndims(halo)), dim, i)
+        @views halo_region[dst_idx...] .= interior_region[src_idx...]
+    end
+    return nothing
+end
+
+function boundary_condition!(halo::LocalHaloArray, s::Side{2}, d::Dim{dim}, mode::Periodic) where {dim}
+    interior_region = interior_view(halo)
+    halo_region = get_recv_view(s, d, halo)
+
+    for i in 1:size(halo_region, dim)
+        src_idx = _slice_index(Val(ndims(halo)), dim, i)
+        dst_idx = _slice_index(Val(ndims(halo)), dim, i)
+        @views halo_region[dst_idx...] .= interior_region[src_idx...]
+    end
+    return nothing
+end
+
+function boundary_condition!(halo::LocalHaloArray{T,N}) where {T,N}
+    ntuple(Val(N)) do D
+        ntuple(Val(2)) do S
+            boundary_condition!(halo, Side(S), Dim(D))
+        end
+    end
+    return nothing
+end
+
 function boundary_condition!(mha::MultiHaloArray{T,N,A}) where {T,N,A}
     # Dispatch to each field's boundary condition
     foreach_field!(boundary_condition!,mha)
     return nothing
     
+end
+
+function boundary_condition!(mha::LocalMultiHaloArray)
+    foreach_field!(boundary_condition!, mha)
+    return nothing
 end
 
 
@@ -219,4 +348,3 @@ end
 function infer_periodicity(boundary_condition::NTuple{N,NTuple{2,AbstractBoundaryCondition}}) where {N}
     ntuple(i -> isperiodic(boundary_condition[i][1]) && isperiodic(boundary_condition[i][2]), Val(N))
 end
-

@@ -9,7 +9,9 @@ using StaticArrays
 # Include library files
 include("cartesian_topology.jl")
 include("haloarray.jl")
+include("local_haloarray.jl")
 include("multihaloarray.jl")
+include("local_multihaloarray.jl")
 include("meybe.jl")
 include("meybehaloarray.jl")
 include("interior_broadcast.jl")
@@ -23,7 +25,9 @@ include("save_hdf5.jl")
 
 # Core types
 export HaloArray,
+    LocalHaloArray,
     MultiHaloArray,
+    LocalMultiHaloArray,
     MaybeHaloArray,
     CartesianTopology,
     AbstractBoundaryCondition,

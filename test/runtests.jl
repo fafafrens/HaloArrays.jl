@@ -29,6 +29,7 @@ end
         include_test("test_haloarray_helpers.jl")
         include_test("test_boundary.jl")
         include_test("test_cartesian_topology.jl")
+        include_test("test_local_haloarray.jl")
         include_test("test_mharray.jl")
         include_test("test_maybe_broadcast.jl")
     else
