@@ -12,6 +12,7 @@ include("haloarray.jl")
 include("local_haloarray.jl")
 include("multihaloarray.jl")
 include("local_multihaloarray.jl")
+include("face_ranges.jl")
 include("meybe.jl")
 include("meybehaloarray.jl")
 include("interior_broadcast.jl")
@@ -19,6 +20,7 @@ include("interior_broadcast_marray.jl")
 include("interior_broadcast_maybe.jl")
 include("boundary.jl")
 include("halo_exchange.jl")
+include("flux_contribution_exchange.jl")
 include("gather.jl")
 include("reduction.jl")
 include("save_hdf5.jl")
@@ -47,6 +49,12 @@ export interior_view,
     get_comm,
     global_size,
     versors,
+    face_offset,
+    lower_owned_face_range,
+    internal_owned_face_left_range,
+    upper_owned_face_range,
+    owned_face_ranges,
+    foreach_owned_face!,
     local_to_global_index,
     global_to_local_index,
     fill_interior,
@@ -63,6 +71,7 @@ export halo_exchange!,
     start_halo_exchange!,
     finish_halo_exchange!,
     synchronize_halo!,
+    synchronize_flux_contributions!,
     get_send_view,
     get_recv_view
 

@@ -182,7 +182,7 @@ function Base.similar(halo::HaloArray{T, N, A, Halo, B, BCondition}, element_typ
         # crea array fullsize (interior + halo) e costruisci HaloArray riutilizzando
     # topology e boundary_condition esistenti tramite build_haloarray_from_data
     fullsize = ntuple(i -> dims[i] + 2 * halo_width(halo), Val(N))
-    data = zeros(element_type, fullsize...)
+    data = similar(parent(halo), element_type, fullsize)
     return build_haloarray_from_data(data, halo_width(halo), halo.topology, halo.boundary_condition)
 end
 

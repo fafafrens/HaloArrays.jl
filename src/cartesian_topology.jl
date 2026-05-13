@@ -30,7 +30,8 @@ struct CartesianTopology{N}
     active::Bool
 end
 
-function inactive_cartesian_topology(dims::NTuple{N,Int}) where {N}
+function inactive_cartesian_topology(dims::NTuple{N,<:Integer}) where {N}
+   dims = ntuple(i -> Int(dims[i]), Val(N))
    # usa i costanti MPI per valori "null"
    nprocs = 0
    global_rank = MPI.PROC_NULL
@@ -55,7 +56,8 @@ Construct a `CartesianTopology` for `comm`.
 - `dims` may contain zeros; `MPI.Dims_create` will fill them.
 - `periodic` indicates per-dimension periodicity.
 """
-function CartesianTopology(comm::MPI.Comm, dims::NTuple{N,Int};periodic=ntuple(i->true, Val(N)),active::Bool=true) where {N}
+function CartesianTopology(comm::MPI.Comm, dims::NTuple{N,<:Integer};periodic=ntuple(i->true, Val(N)),active::Bool=true) where {N}
+     dims = ntuple(i -> Int(dims[i]), Val(N))
      
      if comm == MPI.COMM_NULL || !active
         return inactive_cartesian_topology(dims)
@@ -78,8 +80,8 @@ function CartesianTopology(comm::MPI.Comm, dims::NTuple{N,Int};periodic=ntuple(i
     CartesianTopology{N}(nprocs, dims, global_rank, cart_coords, neighbors, comm, cart_comm,periodic,true)
 end
 
-function CartesianTopology(comm::MPI.Comm,n_dimension;periodic=ntuple(i->true, n_dimension),active::Bool=true) 
-CartesianTopology(comm, ntuple(i->0, n_dimension); periodic=periodic, active=active)
+function CartesianTopology(comm::MPI.Comm, n_dimension::Integer; periodic=ntuple(i -> true, Int(n_dimension)), active::Bool=true)
+    CartesianTopology(comm, ntuple(i -> 0, Int(n_dimension)); periodic=periodic, active=active)
 end
 
 

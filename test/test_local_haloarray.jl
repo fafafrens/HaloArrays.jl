@@ -38,6 +38,34 @@ using HaloArrays
         @test parent(ha)[7:8] == [10, 20]
     end
 
+    @testset "periodic flux contributions fold local ghosts" begin
+        ha = LocalHaloArray(Int, (4,), 1; boundary_condition=:periodic)
+        fill!(parent(ha), 0)
+        interior_view(ha) .= [1, 2, 3, 4]
+        parent(ha)[1] = 10
+        parent(ha)[end] = 20
+
+        synchronize_flux_contributions!(ha)
+
+        @test collect(interior_view(ha)) == [21, 2, 3, 14]
+        @test parent(ha)[1] == 10
+        @test parent(ha)[end] == 20
+    end
+
+    @testset "non-periodic flux contributions leave local ghosts unchanged" begin
+        ha = LocalHaloArray(Int, (4,), 1; boundary_condition=:repeating)
+        fill!(parent(ha), 0)
+        interior_view(ha) .= [1, 2, 3, 4]
+        parent(ha)[1] = 10
+        parent(ha)[end] = 20
+
+        synchronize_flux_contributions!(ha)
+
+        @test collect(interior_view(ha)) == [1, 2, 3, 4]
+        @test parent(ha)[1] == 10
+        @test parent(ha)[end] == 20
+    end
+
     @testset "2D mixed boundaries" begin
         ha = LocalHaloArray(
             Int,
@@ -72,6 +100,11 @@ using HaloArrays
         dest = similar(ha)
         dest .= 2 .* ha
         @test collect(interior_view(dest)) == [2.0, 4.0, 6.0]
+
+        resized = similar(ha, Float32, (2,))
+        @test eltype(resized) === Float32
+        @test size(resized) == (2,)
+        @test full_size(resized) == (4,)
 
         copied = copy(ha)
         interior_view(copied)[1] = -1

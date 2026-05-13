@@ -27,6 +27,12 @@ using HaloArrays
         @test parent(ha)[8:9] == [3.0, 3.0]
     end
 
+    resized = similar(ha, Float32, (3,))
+    @test resized isa HaloArray
+    @test eltype(resized) === Float32
+    @test size(resized) == (3,)
+    @test full_size(resized) == (7,)
+
     local_ha = LocalHaloArray(Float64, (3,), 1; boundary_condition=:repeating)
     interior_view(local_ha) .= [1.0, 2.0, 3.0]
     @test start_halo_exchange!(local_ha) === local_ha

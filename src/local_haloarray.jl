@@ -76,7 +76,7 @@ function Base.similar(halo::LocalHaloArray{T,N,A,Halo,BCondition}, element_type=
         dims::NTuple{M,Int}=interior_size(halo)) where {T,N,A,Halo,BCondition,M}
     M == N || throw(DimensionMismatch("LocalHaloArray similar dims must have $N dimensions"))
     fullsize = ntuple(i -> dims[i] + 2 * halo_width(halo), Val(N))
-    data = zeros(element_type, fullsize...)
+    data = similar(parent(halo), element_type, fullsize)
     return LocalHaloArray(data, halo_width(halo), halo.boundary_condition)
 end
 

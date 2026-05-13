@@ -61,5 +61,49 @@ h = HaloArrays.HaloArray{Float64,2,Array{Float64,2},1}(undef, bc)
 
     end
 
-end
+    @testset "owned face ranges" begin
+        ha = LocalHaloArray(Int, (4, 5), 1; boundary_condition=:repeating)
 
+        @test lower_owned_face_range(ha, 1) == (2:2, 2:6)
+        @test internal_owned_face_left_range(ha, 1) == (2:4, 2:6)
+        @test upper_owned_face_range(ha, 1) == (5:5, 2:6)
+        @test face_offset(ha, 1) == CartesianIndex(1, 0)
+
+        dim2_ranges = owned_face_ranges(ha, Dim(2))
+        @test dim2_ranges.lower_owned == (2:5, 2:2)
+        @test dim2_ranges.internal_left == (2:5, 2:5)
+        @test dim2_ranges.upper_owned == (2:5, 6:6)
+        @test face_offset(ha, Dim(2)) == CartesianIndex(0, 1)
+
+        one_cell = LocalHaloArray(Int, (1,), 1; boundary_condition=:repeating)
+        one_cell_ranges = owned_face_ranges(one_cell, 1)
+        @test collect(CartesianIndices(one_cell_ranges.lower_owned)) == [CartesianIndex(2)]
+        @test isempty(CartesianIndices(one_cell_ranges.internal_left))
+        @test collect(CartesianIndices(one_cell_ranges.upper_owned)) == [CartesianIndex(2)]
+    end
+
+    @testset "owned face update helper" begin
+        u = LocalHaloArray(Int, (4,), 1; boundary_condition=:repeating)
+        du = similar(u)
+
+        parent(u) .= [100, 1, 2, 3, 4, 200]
+        fill!(parent(du), 0)
+
+        foreach_owned_face!((ul, ur) -> ur - ul, du, u, 1)
+
+        @test collect(interior_view(du)) == [-100, 0, 0, -195]
+        @test parent(du)[1] == 0
+        @test parent(du)[end] == 0
+
+        fill!(parent(du), 0)
+        foreach_owned_face!((ul, ur) -> ur - ul, du, u, Dim(1))
+        @test collect(interior_view(du)) == [-100, 0, 0, -195]
+
+        bad_size = LocalHaloArray(Int, (5,), 1; boundary_condition=:repeating)
+        bad_halo = LocalHaloArray(Int, (4,), 2; boundary_condition=:repeating)
+        @test_throws DimensionMismatch foreach_owned_face!((ul, ur) -> ur - ul, bad_size, u, 1)
+        @test_throws DimensionMismatch foreach_owned_face!((ul, ur) -> ur - ul, bad_halo, u, 1)
+        @test_throws ArgumentError foreach_owned_face!((ul, ur) -> ur - ul, du, u, 2)
+    end
+
+end

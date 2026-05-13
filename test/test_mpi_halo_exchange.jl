@@ -272,6 +272,260 @@ function _check_multihaloarray_broadcast()
     return nothing
 end
 
+function _check_periodic_1d_flux_contribution_exchange()
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+    nranks = MPI.Comm_size(comm)
+
+    @test nranks > 1
+
+    topology = CartesianTopology(comm, (0,); periodic = (true,))
+    halo_width_cells = 2
+    local_cells = 6
+    du = HaloArray(
+        Int,
+        (local_cells,),
+        halo_width_cells,
+        topology;
+        boundary_condition = ((Periodic(), Periodic()),),
+    )
+
+    fill!(parent(du), 0)
+    interior = interior_view(du)
+    for i in 1:local_cells
+        interior[i] = 10 * rank + i
+    end
+
+    left_ghost_values = [1000 * rank + 10 + i for i in 1:halo_width_cells]
+    right_ghost_values = [1000 * rank + 20 + i for i in 1:halo_width_cells]
+    parent(du)[1:halo_width_cells] .= left_ghost_values
+    parent(du)[(halo_width_cells + local_cells + 1):(2 * halo_width_cells + local_cells)] .= right_ghost_values
+
+    MPI.Barrier(comm)
+    synchronize_flux_contributions!(du)
+    MPI.Barrier(comm)
+
+    left_rank = topology.neighbors[1][1]
+    right_rank = topology.neighbors[1][2]
+    expected = [10 * rank + i for i in 1:local_cells]
+    expected[1:halo_width_cells] .+= [1000 * left_rank + 20 + i for i in 1:halo_width_cells]
+    expected[(local_cells - halo_width_cells + 1):local_cells] .+=
+        [1000 * right_rank + 10 + i for i in 1:halo_width_cells]
+
+    @test collect(interior_view(du)) == expected
+    @test collect(parent(du)[1:halo_width_cells]) == left_ghost_values
+    @test collect(parent(du)[(halo_width_cells + local_cells + 1):(2 * halo_width_cells + local_cells)]) ==
+        right_ghost_values
+
+    return nothing
+end
+
+function _check_nonperiodic_1d_flux_contribution_exchange()
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+    nranks = MPI.Comm_size(comm)
+
+    @test nranks > 1
+
+    topology = CartesianTopology(comm, (0,); periodic=(false,))
+    halo_width_cells = 2
+    local_cells = 6
+    du = HaloArray(
+        Int,
+        (local_cells,),
+        halo_width_cells,
+        topology;
+        boundary_condition=((Repeating(), Repeating()),),
+    )
+
+    fill!(parent(du), 0)
+    interior = interior_view(du)
+    for i in 1:local_cells
+        interior[i] = 10 * rank + i
+    end
+
+    left_ghost_values = [1000 * rank + 10 + i for i in 1:halo_width_cells]
+    right_ghost_values = [1000 * rank + 20 + i for i in 1:halo_width_cells]
+    parent(du)[1:halo_width_cells] .= left_ghost_values
+    parent(du)[(halo_width_cells + local_cells + 1):(2 * halo_width_cells + local_cells)] .= right_ghost_values
+
+    MPI.Barrier(comm)
+    synchronize_flux_contributions!(du)
+    MPI.Barrier(comm)
+
+    left_rank = topology.neighbors[1][1]
+    right_rank = topology.neighbors[1][2]
+    expected = [10 * rank + i for i in 1:local_cells]
+    if left_rank != MPI.PROC_NULL
+        expected[1:halo_width_cells] .+= [1000 * left_rank + 20 + i for i in 1:halo_width_cells]
+    end
+    if right_rank != MPI.PROC_NULL
+        expected[(local_cells - halo_width_cells + 1):local_cells] .+=
+            [1000 * right_rank + 10 + i for i in 1:halo_width_cells]
+    end
+
+    @test collect(interior_view(du)) == expected
+    @test collect(parent(du)[1:halo_width_cells]) == left_ghost_values
+    @test collect(parent(du)[(halo_width_cells + local_cells + 1):(2 * halo_width_cells + local_cells)]) ==
+        right_ghost_values
+
+    return nothing
+end
+
+function _ghost_face_value(rank, dim, side, I...)
+    return 100_000 * rank + 10_000 * dim + 1_000 * side + sum(10^(length(I) - i) * I[i] for i in eachindex(I))
+end
+
+function _check_periodic_2d_flux_contribution_exchange()
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+    nranks = MPI.Comm_size(comm)
+
+    @test nranks > 1
+
+    topology = CartesianTopology(comm, (0, 0); periodic = (true, true))
+    local_size = (4, 5)
+    nx, ny = local_size
+    du = HaloArray(
+        Int,
+        local_size,
+        1,
+        topology;
+        boundary_condition = ((Periodic(), Periodic()), (Periodic(), Periodic())),
+    )
+
+    fill!(parent(du), 0)
+    data = parent(du)
+    for j in 1:ny
+        data[1, j + 1] = _ghost_face_value(rank, 1, 1, j)
+        data[nx + 2, j + 1] = _ghost_face_value(rank, 1, 2, j)
+    end
+    for i in 1:nx
+        data[i + 1, 1] = _ghost_face_value(rank, 2, 1, i)
+        data[i + 1, ny + 2] = _ghost_face_value(rank, 2, 2, i)
+    end
+
+    MPI.Barrier(comm)
+    synchronize_flux_contributions!(du)
+    MPI.Barrier(comm)
+
+    expected = zeros(Int, local_size)
+    left_rank = topology.neighbors[1][1]
+    right_rank = topology.neighbors[1][2]
+    down_rank = topology.neighbors[2][1]
+    up_rank = topology.neighbors[2][2]
+
+    for j in 1:ny
+        expected[1, j] += _ghost_face_value(left_rank, 1, 2, j)
+        expected[nx, j] += _ghost_face_value(right_rank, 1, 1, j)
+    end
+    for i in 1:nx
+        expected[i, 1] += _ghost_face_value(down_rank, 2, 2, i)
+        expected[i, ny] += _ghost_face_value(up_rank, 2, 1, i)
+    end
+
+    @test collect(interior_view(du)) == expected
+
+    return nothing
+end
+
+function _check_nonperiodic_2d_flux_contribution_exchange()
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+    nranks = MPI.Comm_size(comm)
+
+    @test nranks > 1
+
+    topology = CartesianTopology(comm, (0, 0); periodic=(false, false))
+    local_size = (4, 5)
+    nx, ny = local_size
+    du = HaloArray(
+        Int,
+        local_size,
+        1,
+        topology;
+        boundary_condition=((Repeating(), Repeating()), (Repeating(), Repeating())),
+    )
+
+    fill!(parent(du), 0)
+    data = parent(du)
+    for j in 1:ny
+        data[1, j + 1] = _ghost_face_value(rank, 1, 1, j)
+        data[nx + 2, j + 1] = _ghost_face_value(rank, 1, 2, j)
+    end
+    for i in 1:nx
+        data[i + 1, 1] = _ghost_face_value(rank, 2, 1, i)
+        data[i + 1, ny + 2] = _ghost_face_value(rank, 2, 2, i)
+    end
+
+    MPI.Barrier(comm)
+    synchronize_flux_contributions!(du)
+    MPI.Barrier(comm)
+
+    expected = zeros(Int, local_size)
+    left_rank = topology.neighbors[1][1]
+    right_rank = topology.neighbors[1][2]
+    down_rank = topology.neighbors[2][1]
+    up_rank = topology.neighbors[2][2]
+
+    if left_rank != MPI.PROC_NULL
+        for j in 1:ny
+            expected[1, j] += _ghost_face_value(left_rank, 1, 2, j)
+        end
+    end
+    if right_rank != MPI.PROC_NULL
+        for j in 1:ny
+            expected[nx, j] += _ghost_face_value(right_rank, 1, 1, j)
+        end
+    end
+    if down_rank != MPI.PROC_NULL
+        for i in 1:nx
+            expected[i, 1] += _ghost_face_value(down_rank, 2, 2, i)
+        end
+    end
+    if up_rank != MPI.PROC_NULL
+        for i in 1:nx
+            expected[i, ny] += _ghost_face_value(up_rank, 2, 1, i)
+        end
+    end
+
+    @test collect(interior_view(du)) == expected
+
+    return nothing
+end
+
+function _check_multihaloarray_flux_contribution_exchange()
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+    nranks = MPI.Comm_size(comm)
+
+    @test nranks > 1
+
+    topology = CartesianTopology(comm, (0,); periodic = (true,))
+    u = HaloArray(Int, (4,), 1, topology; boundary_condition = ((Periodic(), Periodic()),))
+    v = HaloArray(Int, (4,), 1, topology; boundary_condition = ((Periodic(), Periodic()),))
+    fields = MultiHaloArray((; u, v); check = true)
+
+    fill!(parent(u), 0)
+    fill!(parent(v), 0)
+    parent(u)[1] = 10 * rank + 1
+    parent(u)[end] = 10 * rank + 2
+    parent(v)[1] = 100 * rank + 1
+    parent(v)[end] = 100 * rank + 2
+
+    MPI.Barrier(comm)
+    synchronize_flux_contributions!(fields)
+    MPI.Barrier(comm)
+
+    left_rank = topology.neighbors[1][1]
+    right_rank = topology.neighbors[1][2]
+
+    @test collect(interior_view(u)) == [10 * left_rank + 2, 0, 0, 10 * right_rank + 1]
+    @test collect(interior_view(v)) == [100 * left_rank + 2, 0, 0, 100 * right_rank + 1]
+
+    return nothing
+end
+
 @testset "MPI halo exchange across ranks" begin
     for (name, exchange!) in pairs(EXCHANGE_IMPLEMENTATIONS)
         @testset "1D $name" begin
@@ -290,4 +544,12 @@ end
 @testset "MPI broadcast over halo arrays" begin
     _check_haloarray_broadcast()
     _check_multihaloarray_broadcast()
+end
+
+@testset "MPI flux contribution exchange across ranks" begin
+    _check_periodic_1d_flux_contribution_exchange()
+    _check_nonperiodic_1d_flux_contribution_exchange()
+    _check_periodic_2d_flux_contribution_exchange()
+    _check_nonperiodic_2d_flux_contribution_exchange()
+    _check_multihaloarray_flux_contribution_exchange()
 end
