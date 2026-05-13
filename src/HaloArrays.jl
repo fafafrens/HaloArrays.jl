@@ -11,6 +11,7 @@ include("cartesian_topology.jl")
 include("haloarray.jl")
 include("local_haloarray.jl")
 include("threaded_haloarray.jl")
+include("threaded_multihaloarray.jl")
 include("multihaloarray.jl")
 include("local_multihaloarray.jl")
 include("face_ranges.jl")
@@ -30,6 +31,7 @@ include("save_hdf5.jl")
 export HaloArray,
     LocalHaloArray,
     ThreadedHaloArray,
+    ThreadedMultiHaloArray,
     MultiHaloArray,
     LocalMultiHaloArray,
     MaybeHaloArray,

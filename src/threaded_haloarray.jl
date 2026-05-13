@@ -121,6 +121,7 @@ ThreadedHaloArray(tile_size::NTuple{N,<:Integer}, halo::Integer; kwargs...) wher
 @inline Base.size(halo::ThreadedHaloArray, d::Int) = size(halo)[d]
 @inline Base.axes(halo::ThreadedHaloArray) = map(Base.OneTo, size(halo))
 @inline Base.axes(halo::ThreadedHaloArray, d::Int) = Base.OneTo(size(halo, d))
+@inline interior_size(halo::ThreadedHaloArray) = size(halo)
 @inline halo_width(::Type{<:ThreadedHaloArray{T,N,A,Halo}}) where {T,N,A,Halo} = Halo
 @inline halo_width(::ThreadedHaloArray{T,N,A,Halo}) where {T,N,A,Halo} = Halo
 @inline tile_size(halo::ThreadedHaloArray) = halo.tile_size
@@ -355,4 +356,12 @@ function Base.zero(halo::ThreadedHaloArray)
     z = similar(halo)
     fill!(z, zero(eltype(halo)))
     return z
+end
+
+function Base.copy(halo::ThreadedHaloArray)
+    copied = similar(halo)
+    for tile_id in eachindex(parent(halo))
+        copyto!(tile_parent(copied, tile_id), tile_parent(halo, tile_id))
+    end
+    return copied
 end

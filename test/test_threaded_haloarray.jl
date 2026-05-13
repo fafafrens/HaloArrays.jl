@@ -130,4 +130,147 @@
         @test collect(get_recv_view(Side(1), Dim(2), halo, 1)) == reshape([11, 21], 2, 1)
         @test collect(get_recv_view(Side(2), Dim(2), halo, 1)) == reshape([13, 23], 2, 1)
     end
+
+    @testset "threaded multi halo array fieldwise exchange and boundary conditions" begin
+        fields = ThreadedMultiHaloArray(
+            Int,
+            (3,),
+            1;
+            dims=(2,),
+            boundary_conditions=(;
+                rho=:repeating,
+                mom=:antireflecting,
+            ),
+        )
+
+        interior_view(fields.arrays.rho, 1) .= [11, 12, 13]
+        interior_view(fields.arrays.rho, 2) .= [21, 22, 23]
+        interior_view(fields.arrays.mom, 1) .= [31, 32, 33]
+        interior_view(fields.arrays.mom, 2) .= [41, 42, 43]
+
+        synchronize_halo!(fields)
+
+        @test size(fields) == (2, 6)
+        @test tile_size(fields) == (3,)
+        @test tile_count(fields) == 2
+        @test tile_coordinates(fields, 2) == (2,)
+        @test keys(interior_view(fields, 1)) == (:rho, :mom)
+        @test interior_view(fields, 1).rho == interior_view(fields.arrays.rho, 1)
+
+        @test tile_parent(fields.arrays.rho, 1) == [11, 11, 12, 13, 21]
+        @test tile_parent(fields.arrays.rho, 2) == [13, 21, 22, 23, 23]
+        @test tile_parent(fields.arrays.mom, 1) == [-31, 31, 32, 33, 41]
+        @test tile_parent(fields.arrays.mom, 2) == [33, 41, 42, 43, -43]
+
+        copied = copy(fields)
+        interior_view(copied.arrays.rho, 1)[1] = -1
+        @test interior_view(fields.arrays.rho, 1)[1] == 11
+
+        similar_fields = similar(fields, Float64)
+        @test eltype(similar_fields) == Float64
+        @test tile_size(similar_fields) == tile_size(fields)
+    end
+
+    @testset "threaded halo array broadcast" begin
+        a = ThreadedHaloArray(Int, (3,), 1; dims=(2,), boundary_condition=:repeating)
+        b = similar(a)
+
+        interior_view(a, 1) .= [1, 2, 3]
+        interior_view(a, 2) .= [4, 5, 6]
+        interior_view(b, 1) .= [10, 20, 30]
+        interior_view(b, 2) .= [40, 50, 60]
+
+        shifted = a .+ 2
+        @test shifted isa ThreadedHaloArray
+        @test collect(interior_view(shifted, 1)) == [3, 4, 5]
+        @test collect(interior_view(shifted, 2)) == [6, 7, 8]
+
+        dest = similar(a)
+        dest .= 2 .* a .+ b
+        @test collect(interior_view(dest, 1)) == [12, 24, 36]
+        @test collect(interior_view(dest, 2)) == [48, 60, 72]
+    end
+
+    @testset "threaded multi halo array broadcast" begin
+        fields = ThreadedMultiHaloArray(
+            Int,
+            (3,),
+            1;
+            dims=(2,),
+            boundary_conditions=(;
+                rho=:repeating,
+                mom=:repeating,
+            ),
+        )
+
+        interior_view(fields.arrays.rho, 1) .= [1, 2, 3]
+        interior_view(fields.arrays.rho, 2) .= [4, 5, 6]
+        interior_view(fields.arrays.mom, 1) .= [10, 20, 30]
+        interior_view(fields.arrays.mom, 2) .= [40, 50, 60]
+
+        shifted = fields .+ 5
+        @test shifted isa ThreadedMultiHaloArray
+        @test collect(interior_view(shifted.arrays.rho, 1)) == [6, 7, 8]
+        @test collect(interior_view(shifted.arrays.rho, 2)) == [9, 10, 11]
+        @test collect(interior_view(shifted.arrays.mom, 1)) == [15, 25, 35]
+        @test collect(interior_view(shifted.arrays.mom, 2)) == [45, 55, 65]
+
+        dest = similar(fields)
+        dest .= 3 .* fields .- 1
+        @test collect(interior_view(dest.arrays.rho, 1)) == [2, 5, 8]
+        @test collect(interior_view(dest.arrays.rho, 2)) == [11, 14, 17]
+        @test collect(interior_view(dest.arrays.mom, 1)) == [29, 59, 89]
+        @test collect(interior_view(dest.arrays.mom, 2)) == [119, 149, 179]
+    end
+
+    @testset "broadcast between different halo backends fails" begin
+        threaded = ThreadedHaloArray(Int, (3,), 1; dims=(2,), boundary_condition=:repeating)
+        local_halo = LocalHaloArray(Int, (6,), 1; boundary_condition=:repeating)
+
+        @test size(threaded) == size(local_halo)
+        @test_throws Exception threaded .+ local_halo
+        @test_throws Exception local_halo .+ threaded
+
+        threaded_dest = similar(threaded)
+        local_dest = similar(local_halo)
+        @test_throws Exception threaded_dest .= threaded .+ local_halo
+        @test_throws Exception local_dest .= local_halo .+ threaded
+
+        threaded_fields = ThreadedMultiHaloArray(
+            Int,
+            (3,),
+            1;
+            dims=(2,),
+            boundary_conditions=(;
+                rho=:repeating,
+                mom=:repeating,
+            ),
+        )
+        local_fields = LocalMultiHaloArray((;
+            rho=LocalHaloArray(Int, (6,), 1; boundary_condition=:repeating),
+            mom=LocalHaloArray(Int, (6,), 1; boundary_condition=:repeating),
+        ); check=true)
+
+        @test size(threaded_fields) == size(local_fields)
+        @test_throws Exception threaded_fields .+ local_fields
+        @test_throws Exception local_fields .+ threaded_fields
+
+        threaded_fields_dest = similar(threaded_fields)
+        local_fields_dest = similar(local_fields)
+        @test_throws Exception threaded_fields_dest .= threaded_fields .+ local_fields
+        @test_throws Exception local_fields_dest .= local_fields .+ threaded_fields
+    end
+
+    @testset "threaded multi halo array compatibility checks" begin
+        rho = ThreadedHaloArray(Int, (3,), 1; dims=(2,), boundary_condition=:repeating)
+        bad_tile_size = ThreadedHaloArray(Int, (4,), 1; dims=(2,), boundary_condition=:repeating)
+        bad_halo = ThreadedHaloArray(Int, (3,), 2; dims=(2,), boundary_condition=:repeating)
+        bad_topology = ThreadedHaloArray(Int, (3,), 1; dims=(3,), boundary_condition=:repeating)
+
+        @test ThreadedMultiHaloArray((; rho); check=true) isa ThreadedMultiHaloArray
+        @test_throws DimensionMismatch ThreadedMultiHaloArray((; rho, bad_tile_size); check=true)
+        @test_throws DimensionMismatch ThreadedMultiHaloArray((; rho, bad_halo); check=true)
+        @test_throws DimensionMismatch ThreadedMultiHaloArray((; rho, bad_topology); check=true)
+        @test_throws ArgumentError ThreadedMultiHaloArray((; rho, local_halo=LocalHaloArray(Int, (3,), 1)); check=true)
+    end
 end
