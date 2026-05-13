@@ -10,6 +10,7 @@ using StaticArrays
 include("cartesian_topology.jl")
 include("haloarray.jl")
 include("local_haloarray.jl")
+include("threaded_haloarray.jl")
 include("multihaloarray.jl")
 include("local_multihaloarray.jl")
 include("face_ranges.jl")
@@ -28,10 +29,12 @@ include("save_hdf5.jl")
 # Core types
 export HaloArray,
     LocalHaloArray,
+    ThreadedHaloArray,
     MultiHaloArray,
     LocalMultiHaloArray,
     MaybeHaloArray,
     CartesianTopology,
+    ThreadedCartesianTopology,
     AbstractBoundaryCondition,
     Reflecting,
     Antireflecting,
@@ -49,6 +52,11 @@ export interior_view,
     get_comm,
     global_size,
     versors,
+    tile_size,
+    tile_count,
+    tile_parent,
+    tile_coordinates,
+    neighbor_tile_id,
     face_offset,
     lower_owned_face_range,
     internal_owned_face_left_range,
