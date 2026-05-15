@@ -42,7 +42,7 @@ n_field(halos::ArrayOfHaloArray)  = prod(field_shape(S))
 @inline full_size(halos::ArrayOfHaloArray,i) =(field_shape(halos)..., map(full_size,halos.arrays)...)[i]
 @inline halo_width(halo::ArrayOfHaloArray,i)= map(halo_width,halo.arrays)
 @inline Base.parent(halo::ArrayOfHaloArray)  = halo.arrays
-function Base.axes(x::ArrayOfHaloArray)  = 
+function Base.axes(x::ArrayOfHaloArray)  
     shape=field_shape(x)
 return (ntuple(j->1:shape[j],lenght(shape))...,first(map(axes,parent(x)))...)
 end 
