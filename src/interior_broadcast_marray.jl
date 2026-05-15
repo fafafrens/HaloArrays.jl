@@ -76,9 +76,6 @@ unpack_args_mha(i, args::Tuple{Any}) = (unpack_mha(args[1], i),)
 unpack_args_mha(::Any, args::Tuple{}) = ()
 
 
-
-
-
 @inline function Base.copyto!(dest::MultiHaloArrayLike, bc::Broadcast.Broadcasted{<:MultiHaloArrayStyle{Ndim}}) where {Ndim}
     bc = Broadcast.flatten(bc)
     out = values(dest.arrays)
@@ -92,7 +89,6 @@ end
 @inline function Base.copy(bc::Broadcasted{<:MultiHaloArrayStyle{Ndim}}) where {Ndim}
     bc_flat = Broadcast.flatten(bc)
     
-
     dest = similar(bc)
     out=values(dest.arrays)
 

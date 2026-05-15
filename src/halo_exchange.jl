@@ -169,6 +169,12 @@ function halo_exchange!(halo::LocalMultiHaloArray)
     return halo
 end
 
+function halo_exchange!(halo::ArrayOfHaloArray)
+    foreach_field!(halo_exchange!, halo)
+    return halo
+end
+
+
 start_halo_exchange!(halo::HaloArray) = start_halo_exchange_async_unsafe!(halo)
 finish_halo_exchange!(halo::HaloArray) = end_halo_exchange_async_wait_unsafe!(halo)
 start_halo_exchange!(halo::LocalHaloArray) = halo
@@ -186,6 +192,16 @@ end
 
 start_halo_exchange!(halo::LocalMultiHaloArray) = halo
 finish_halo_exchange!(halo::LocalMultiHaloArray) = halo
+
+function start_halo_exchange!(halo::ArrayOfHaloArray)
+    foreach_field!(start_halo_exchange!, halo)
+    return halo
+end
+
+function finish_halo_exchange!(halo::ArrayOfHaloArray)
+    foreach_field!(finish_halo_exchange!, halo)
+    return halo
+end
 
 function synchronize_halo!(halo::HaloArray)
     halo_exchange!(halo)
@@ -205,6 +221,11 @@ function synchronize_halo!(halo::MultiHaloArray)
 end
 
 function synchronize_halo!(halo::LocalMultiHaloArray)
+    boundary_condition!(halo)
+    return halo
+end
+
+function synchronize_halo!(halo::ArrayOfHaloArray)
     boundary_condition!(halo)
     return halo
 end
@@ -246,3 +267,14 @@ function end_halo_exchange_async_wait_unsafe!(halo::MultiHaloArray)
     foreach_field!(end_halo_exchange_async_wait_unsafe!, halo)
     return nothing
 end
+
+function start_halo_exchange_async_unsafe!(halo::ArrayOfHaloArray)
+    foreach_field!(start_halo_exchange_async_unsafe!, halo)
+    return nothing
+end
+
+function end_halo_exchange_async_wait_unsafe!(halo::ArrayOfHaloArray)
+    foreach_field!(end_halo_exchange_async_wait_unsafe!, halo)
+    return nothing
+end
+

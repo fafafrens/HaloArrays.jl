@@ -272,6 +272,11 @@ function boundary_condition!(mha::LocalMultiHaloArray)
     return nothing
 end
 
+function boundary_condition!(mha::ArrayOfHaloArray)
+    foreach_field!(boundary_condition!, mha)
+    return nothing
+end
+
 # Unified converter: Symbol | Type | instance -> concrete BC instance
 function to_bc(x)
     if x isa Symbol

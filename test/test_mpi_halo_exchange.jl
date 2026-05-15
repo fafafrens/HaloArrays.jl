@@ -209,6 +209,105 @@ function _check_exchange_implementations_agree()
     return nothing
 end
 
+function _check_nonperiodic_1d_synchronize_halo_boundary_conditions()
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+    nranks = MPI.Comm_size(comm)
+
+    @test nranks > 1
+
+    topology = CartesianTopology(comm, (0,); periodic=(false,))
+    halo_width_cells = 2
+    local_cells = 5
+    ha = HaloArray(
+        Int,
+        (local_cells,),
+        halo_width_cells,
+        topology;
+        boundary_condition=((Reflecting(), Antireflecting()),),
+    )
+
+    _fill_rank_pattern!(ha, rank)
+    MPI.Barrier(comm)
+    synchronize_halo!(ha)
+    MPI.Barrier(comm)
+
+    left_rank = topology.neighbors[1][1]
+    right_rank = topology.neighbors[1][2]
+
+    expected_left = if left_rank == MPI.PROC_NULL
+        [100 * rank + 2, 100 * rank + 1]
+    else
+        [100 * left_rank + local_cells - halo_width_cells + i for i in 1:halo_width_cells]
+    end
+    expected_right = if right_rank == MPI.PROC_NULL
+        [-(100 * rank + local_cells), -(100 * rank + local_cells - 1)]
+    else
+        [100 * right_rank + i for i in 1:halo_width_cells]
+    end
+
+    @test collect(parent(ha)[1:halo_width_cells]) == expected_left
+    @test collect(parent(ha)[(halo_width_cells + local_cells + 1):(2 * halo_width_cells + local_cells)]) ==
+        expected_right
+    @test collect(interior_view(ha)) == [100 * rank + i for i in 1:local_cells]
+
+    return nothing
+end
+
+function _check_multihaloarray_public_split_exchange_with_boundaries()
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+    nranks = MPI.Comm_size(comm)
+
+    @test nranks > 1
+
+    topology = CartesianTopology(comm, (0,); periodic=(false,))
+    local_cells = 4
+    u = HaloArray(
+        Int,
+        (local_cells,),
+        1,
+        topology;
+        boundary_condition=((Repeating(), Reflecting()),),
+    )
+    v = HaloArray(
+        Int,
+        (local_cells,),
+        1,
+        topology;
+        boundary_condition=((Antireflecting(), Repeating()),),
+    )
+    fields = MultiHaloArray((; u, v); check=true)
+
+    for i in 1:local_cells
+        interior_view(u)[i] = 100 * rank + i
+        interior_view(v)[i] = 1000 * rank + 10 * i
+    end
+
+    MPI.Barrier(comm)
+    @test start_halo_exchange!(fields) === fields
+    @test finish_halo_exchange!(fields) === fields
+    boundary_condition!(fields)
+    MPI.Barrier(comm)
+
+    left_rank = topology.neighbors[1][1]
+    right_rank = topology.neighbors[1][2]
+
+    expected_u_left = left_rank == MPI.PROC_NULL ? 100 * rank + 1 : 100 * left_rank + local_cells
+    expected_u_right = right_rank == MPI.PROC_NULL ? 100 * rank + local_cells : 100 * right_rank + 1
+    expected_v_left = left_rank == MPI.PROC_NULL ? -(1000 * rank + 10) : 1000 * left_rank + 10 * local_cells
+    expected_v_right = right_rank == MPI.PROC_NULL ? 1000 * rank + 10 * local_cells : 1000 * right_rank + 10
+
+    @test parent(u)[1] == expected_u_left
+    @test parent(u)[end] == expected_u_right
+    @test parent(v)[1] == expected_v_left
+    @test parent(v)[end] == expected_v_right
+    @test collect(interior_view(u)) == [100 * rank + i for i in 1:local_cells]
+    @test collect(interior_view(v)) == [1000 * rank + 10 * i for i in 1:local_cells]
+
+    return nothing
+end
+
 function _check_haloarray_broadcast()
     comm = MPI.COMM_WORLD
     rank = MPI.Comm_rank(comm)
@@ -539,6 +638,11 @@ end
         end
     end
     _check_exchange_implementations_agree()
+end
+
+@testset "MPI synchronize_halo! with physical boundaries" begin
+    _check_nonperiodic_1d_synchronize_halo_boundary_conditions()
+    _check_multihaloarray_public_split_exchange_with_boundaries()
 end
 
 @testset "MPI broadcast over halo arrays" begin
