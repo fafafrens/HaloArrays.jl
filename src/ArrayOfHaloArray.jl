@@ -23,8 +23,8 @@ end
 
 # Metadata helpers
 Base.eltype(mha::ArrayOfHaloArray{T, N ,S, A}) where {T,N,S,A} = T
-Base.ndims(mha::ArrayOfHaloArray{T, N ,S, A}) where {T,N,S,A} 
-Base.ndims(::Type{ArrayOfHaloArray{T, N ,S, A}}) where {T,N,S,A} 
+Base.ndims(mha::ArrayOfHaloArray{T, N ,S, A}) where {T,N,S,A} =N +prod(S)
+Base.ndims(::Type{ArrayOfHaloArray{T, N ,S, A}}) where {T,N,S,A} =N +prod(S)
 
 # Size includes field axis
 @inline Base.size(mha::ArrayOfHaloArray) = (size(mha.arrays)..., size(first(mha.arrays))...)
