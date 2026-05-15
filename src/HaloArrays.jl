@@ -8,6 +8,7 @@ using StaticArrays
 
 # Include library files
 include("cartesian_topology.jl")
+include("ArrayOfHaloArray.jl")
 include("haloarray.jl")
 include("local_haloarray.jl")
 include("threaded_haloarray.jl")
