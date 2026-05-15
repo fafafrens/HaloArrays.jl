@@ -42,9 +42,9 @@ n_field(halos::ArrayOfHaloArray)  = prod(field_shape(S))
 @inline full_size(halos::ArrayOfHaloArray,i) =(field_shape(halos)..., map(full_size,halos.arrays)...)[i]
 @inline halo_width(halo::ArrayOfHaloArray,i)= map(halo_width,halo.arrays)
 @inline Base.parent(halo::ArrayOfHaloArray)  = halo.arrays
-function @inline Base.axes(x::ArrayOfHaloArray,i)  = 
+function Base.axes(x::ArrayOfHaloArray)  = 
     shape=field_shape(x)
-(ntuple(i->1:shape[i],size(shape))...,first(map(axes,parent(x)))...)
+return (ntuple(j->1:shape[j],lenght(shape))...,first(map(axes,parent(x)))...)
 end 
 
 function Base.similar(mha::ArrayOfHaloArray{AA, N,S, A}, ::Type{T},dims::NTuple{M,Int64}) where {AA,N, S,A,T,M}
