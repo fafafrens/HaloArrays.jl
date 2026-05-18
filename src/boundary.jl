@@ -267,11 +267,6 @@ function boundary_condition!(mha::MultiHaloArray{T,N,A}) where {T,N,A}
     
 end
 
-function boundary_condition!(mha::LocalMultiHaloArray)
-    foreach_field!(boundary_condition!, mha)
-    return nothing
-end
-
 function boundary_condition!(mha::ArrayOfHaloArray)
     foreach_field!(boundary_condition!, mha)
     return nothing

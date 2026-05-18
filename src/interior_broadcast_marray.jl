@@ -4,13 +4,16 @@ using Base.Broadcast: Broadcasted, broadcastable, BroadcastStyle, AbstractArrayS
 struct MultiHaloArrayStyle{Ndim} <: AbstractArrayStyle{Ndim} end
 
 MultiHaloArrayStyle{Ndim}(::Val{Ndim}) where {Ndim} = MultiHaloArrayStyle{Ndim}()
-const MultiHaloArrayLike = Union{MultiHaloArray,LocalMultiHaloArray,ThreadedMultiHaloArray}
+const MultiHaloArrayLike = Union{MultiHaloArray,ArrayOfHaloArray}
+
+@inline _field_values(mha::MultiHaloArray) = values(mha.arrays)
+@inline _field_values(mha::ArrayOfHaloArray) = mha.arrays
 
 # The order is important here. We want to override Base.Broadcast.DefaultArrayStyle to return another Base.Broadcast.DefaultArrayStyle.
 Broadcast.BroadcastStyle(a::MultiHaloArrayStyle, ::Base.Broadcast.DefaultArrayStyle{0}) = a
 Broadcast.BroadcastStyle(::Type{<:MultiHaloArray{T,Ndim,A}}) where {T,Ndim,A} =MultiHaloArrayStyle{Ndim}()
-Broadcast.BroadcastStyle(::Type{<:LocalMultiHaloArray{T,Ndim,A}}) where {T,Ndim,A} = MultiHaloArrayStyle{Ndim}()
-Broadcast.BroadcastStyle(::Type{<:ThreadedMultiHaloArray{T,Ndim,A}}) where {T,Ndim,A} = MultiHaloArrayStyle{Ndim}()
+Broadcast.BroadcastStyle(::Type{<:ArrayOfHaloArray{T,Ndim,Shape,A}}) where {T,Ndim,Shape,A} =
+    MultiHaloArrayStyle{Ndim + length(Shape)}()
 
 function Broadcast.BroadcastStyle(::MultiHaloArrayStyle{Ndim},
         a::Base.Broadcast.DefaultArrayStyle{M}) where { Ndim ,M}
@@ -34,8 +37,7 @@ end
 
 # make vectorofarrays broadcastable so they aren't collected
 Broadcast.broadcastable(x::MultiHaloArray) = x
-Broadcast.broadcastable(x::LocalMultiHaloArray) = x
-Broadcast.broadcastable(x::ThreadedMultiHaloArray) = x
+Broadcast.broadcastable(x::ArrayOfHaloArray) = x
 
 # Find MultiHaloArrayBroadcastable in tree
 find_mha(bc::Broadcasted) = find_mha(bc.args)
@@ -43,8 +45,7 @@ find_mha(args::Tuple) = find_mha(find_mha(args[1]), Base.tail(args))
 find_mha(x) = x
 find_mha(::Any, rest) = find_mha(rest)
 find_mha(mha::MultiHaloArray, rest) = mha
-find_mha(mha::LocalMultiHaloArray, rest) = mha
-find_mha(mha::ThreadedMultiHaloArray, rest) = mha
+find_mha(mha::ArrayOfHaloArray, rest) = mha
 
 
 # drop axes because it is easier to recompute
@@ -56,8 +57,7 @@ end
 end
 unpack_mha(x, ::Any) = x
 unpack_mha(x::MultiHaloArray, i) = values(x.arrays)[i]
-unpack_mha(x::LocalMultiHaloArray, i) = values(x.arrays)[i]
-unpack_mha(x::ThreadedMultiHaloArray, i) = values(x.arrays)[i]
+unpack_mha(x::ArrayOfHaloArray, i) = x.arrays[i]
 
 function unpack_mha(x::AbstractArray{T, N}, i) where {T, N}
    x
@@ -78,8 +78,9 @@ unpack_args_mha(::Any, args::Tuple{}) = ()
 
 @inline function Base.copyto!(dest::MultiHaloArrayLike, bc::Broadcast.Broadcasted{<:MultiHaloArrayStyle{Ndim}}) where {Ndim}
     bc = Broadcast.flatten(bc)
-    out = values(dest.arrays)
-    for (d, i) in zip(out, eachindex(out))
+    out = _field_values(dest)
+    for i in eachindex(out)
+        d = out[i]
         copyto!(d, unpack_mha(bc, i))
     end
     return dest
@@ -90,19 +91,21 @@ end
     bc_flat = Broadcast.flatten(bc)
     
     dest = similar(bc)
-    out=values(dest.arrays)
+    out = _field_values(dest)
 
-for (d, i) in zip(out, eachindex(out))
-    copyto!(d, unpack_mha(bc_flat, i))
-end
+    for i in eachindex(out)
+        d = out[i]
+        copyto!(d, unpack_mha(bc_flat, i))
+    end
    
     return dest
 end
 
 function Broadcast.materialize!(dest::MultiHaloArrayLike, bc::Broadcasted)
     bc_flat = Broadcast.flatten(bc)
-    out = values(dest.arrays)
-    for (d, i) in zip(out, eachindex(out))
+    out = _field_values(dest)
+    for i in eachindex(out)
+        d = out[i]
         Broadcast.materialize!(d, unpack_mha(bc_flat, i))
     end
     return dest

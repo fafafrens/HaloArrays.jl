@@ -160,6 +160,5 @@ function mapreduce_mhaloarray_dims(f, op, mha::MultiHaloArray, dims)
 
     nt = NamedTuple{names}(map(getdata, values(list_of_maybe)))
 
-    return MaybeHaloArray(MultiHaloArray(nt; check=true))
+    return MaybeHaloArray(MultiHaloArray(nt))
 end
-

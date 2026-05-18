@@ -65,6 +65,19 @@ function _check_solution(u0, u_final, expected_factor)
     return nothing
 end
 
+@testset "DiffEq recursive length" begin
+    topology = _ode_topology(MPI.COMM_WORLD)
+    u = _ode_initial_condition(topology)
+    local_u = LocalHaloArray(Float64, (3, 4), 1; boundary_condition=:repeating)
+    fields = MultiHaloArray((; u, v=similar(u)); check=true)
+    local_fields = LocalMultiHaloArray((; a=local_u, b=similar(local_u)); check=true)
+
+    @test DiffEqBase.recursive_length(u) == prod(global_size(u))
+    @test DiffEqBase.recursive_length(local_u) == prod(size(local_u))
+    @test DiffEqBase.recursive_length(fields) == 2 * prod(global_size(u))
+    @test DiffEqBase.recursive_length(local_fields) == 2 * prod(size(local_u))
+end
+
 @testset "ODEProblem HaloArray state" begin
     topology = _ode_topology(MPI.COMM_SELF)
     u0 = _ode_initial_condition(topology)

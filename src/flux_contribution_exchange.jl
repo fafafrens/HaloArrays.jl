@@ -84,8 +84,3 @@ function synchronize_flux_contributions!(halo::MultiHaloArray)
     foreach_field!(synchronize_flux_contributions!, halo)
     return halo
 end
-
-function synchronize_flux_contributions!(halo::LocalMultiHaloArray)
-    foreach_field!(synchronize_flux_contributions!, halo)
-    return halo
-end

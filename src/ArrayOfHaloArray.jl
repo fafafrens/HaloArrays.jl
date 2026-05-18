@@ -1,116 +1,264 @@
-# MultiHaloArray using NamedTuple to store fields
-mutable struct ArrayOfHaloArray{T, N, Shape ,A } #<: AbstractArray{T, N}
-    arrays::A  # Arra of HaloArrays
+# Multi-field halo container using an AbstractArray to store the fields.
+mutable struct ArrayOfHaloArray{T,N,Shape,A}
+    arrays::A
 end
 
-function ArrayOfHaloArray(array::AbstractArray{T, N}) where {T,N}
-    shape=size(array)
-    TTtype=promote_type(array...)
-    N_ref = ndims(first(field_values))+N
-    
-    ArrayOfHaloArray{TTtype, N_ref, shape ,typeof(array) }(arrays)
-end 
+const HaloArrayField = Union{HaloArray,LocalHaloArray,ThreadedHaloArray}
 
-function ArrayOfHaloArray(local_size::NTuple{N, Int}, halo::Int, 
-                        bcs::AbstractArray{T, N}) where {T,N}
-    
-    arrays= map(bcs) do  bc
-        HaloArray(local_size, halo, bc)
-    end 
-                       
+@inline _spatial_ndims(x) = ndims(x)
+@inline _spatial_size(x) = size(x)
+@inline _spatial_interior_size(x) = interior_size(x)
+@inline _spatial_full_size(x) = full_size(x)
+@inline _spatial_axes(x) = axes(x)
+
+@inline _spatial_ndims(::ArrayOfHaloArray{T,N}) where {T,N} = N
+@inline _spatial_size(x::ArrayOfHaloArray) = size(first(parent(x)))
+@inline _spatial_interior_size(x::ArrayOfHaloArray) = interior_size(first(parent(x)))
+@inline _spatial_full_size(x::ArrayOfHaloArray) = full_size(first(parent(x)))
+@inline _spatial_axes(x::ArrayOfHaloArray) = axes(first(parent(x)))
+
+function _check_array_fields(arrays::AbstractArray)
+    isempty(arrays) && throw(ArgumentError("ArrayOfHaloArray requires at least one field"))
+    all(a -> a isa HaloArrayField, arrays) ||
+        throw(ArgumentError("All fields must be HaloArray, LocalHaloArray, or ThreadedHaloArray"))
+    return nothing
+end
+
+function _check_arrayofhaloarray_compatible(arrays::AbstractArray)
+    _check_array_fields(arrays)
+
+    ref = first(arrays)
+    ref_ndims = ndims(ref)
+    ref_interior_size = interior_size(ref)
+    ref_halo_width = halo_width(ref)
+
+    for I in CartesianIndices(arrays)
+        a = arrays[I]
+        ndims(a) == ref_ndims ||
+            throw(ArgumentError("Field `$I` has dimensionality $(ndims(a)) != $ref_ndims"))
+        interior_size(a) == ref_interior_size ||
+            throw(DimensionMismatch("Field `$I` has interior size $(interior_size(a)) != $ref_interior_size"))
+        halo_width(a) == ref_halo_width ||
+            throw(DimensionMismatch("Field `$I` has halo width $(halo_width(a)) != $ref_halo_width"))
+    end
+
+    return nothing
+end
+
+function ArrayOfHaloArray(arrays::AbstractArray; check=nothing)
+    _check_arrayofhaloarray_compatible(arrays)
+
+    T = promote_type(map(eltype, arrays)...)
+    N = ndims(first(arrays))
+    Shape = size(arrays)
+    return ArrayOfHaloArray{T,N,Shape,typeof(arrays)}(arrays)
+end
+
+function ArrayOfHaloArray(::Type{T}, local_size::NTuple{N,Int}, halo::Int,
+        topology::CartesianTopology{N}; boundary_conditions::AbstractArray) where {T,N}
+    arrays = map(boundary_conditions) do bc
+        HaloArray(T, local_size, halo, topology; boundary_condition=bc)
+    end
     return ArrayOfHaloArray(arrays)
 end
 
-# Metadata helpers
-Base.eltype(mha::ArrayOfHaloArray{T, N ,S, A}) where {T,N,S,A} = T
-Base.ndims(mha::ArrayOfHaloArray{T, N ,S, A}) where {T,N,S,A} =N +prod(S)
-Base.ndims(::Type{ArrayOfHaloArray{T, N ,S, A}}) where {T,N,S,A} =N +prod(S)
+function ArrayOfHaloArray(::Type{T}, local_size::NTuple{N,Int}, halo::Int,
+        topology::CartesianTopology{N}, boundary_conditions::AbstractArray) where {T,N}
+    return ArrayOfHaloArray(T, local_size, halo, topology; boundary_conditions=boundary_conditions)
+end
 
-# Size includes field axis
-@inline Base.size(mha::ArrayOfHaloArray) = (size(mha.arrays)..., size(first(mha.arrays))...)
+function ArrayOfHaloArray(::Type{T}, local_size::NTuple{N,Int}, halo::Int;
+        boundary_conditions::AbstractArray) where {T,N}
+    arrays = map(boundary_conditions) do bc
+        HaloArray(T, local_size, halo; boundary_condition=bc)
+    end
+    return ArrayOfHaloArray(arrays)
+end
+
+function ArrayOfHaloArray(::Type{T}, local_size::NTuple{N,Int}, halo::Int,
+        boundary_conditions::AbstractArray) where {T,N}
+    return ArrayOfHaloArray(T, local_size, halo; boundary_conditions=boundary_conditions)
+end
+
+function ArrayOfHaloArray(local_size::NTuple{N,Int}, halo::Int;
+        boundary_conditions::AbstractArray) where {N}
+    return ArrayOfHaloArray(Float64, local_size, halo; boundary_conditions=boundary_conditions)
+end
+
+function ArrayOfHaloArray(local_size::NTuple{N,Int}, halo::Int,
+        boundary_conditions::AbstractArray) where {N}
+    return ArrayOfHaloArray(Float64, local_size, halo; boundary_conditions=boundary_conditions)
+end
+
+function ArrayOfHaloArray(::Type{LocalHaloArray}, ::Type{T}, local_size::NTuple{N,Int},
+        halo::Int; boundary_conditions::AbstractArray) where {T,N}
+    arrays = map(boundary_conditions) do bc
+        LocalHaloArray(T, local_size, halo; boundary_condition=bc)
+    end
+    return ArrayOfHaloArray(arrays)
+end
+
+function ArrayOfHaloArray(::Type{LocalHaloArray}, local_size::NTuple{N,Int}, halo::Int;
+        boundary_conditions::AbstractArray) where {N}
+    return ArrayOfHaloArray(LocalHaloArray, Float64, local_size, halo;
+        boundary_conditions=boundary_conditions)
+end
+
+function ArrayOfHaloArray(::Type{ThreadedHaloArray}, ::Type{T}, tile_size::NTuple{N,<:Integer},
+        halo::Integer; dims::NTuple{N,<:Integer}, boundary_conditions::AbstractArray) where {T,N}
+    arrays = map(boundary_conditions) do bc
+        ThreadedHaloArray(T, tile_size, halo; dims=dims, boundary_condition=bc)
+    end
+    return ArrayOfHaloArray(arrays)
+end
+
+function ArrayOfHaloArray(::Type{ThreadedHaloArray}, tile_size::NTuple{N,<:Integer},
+        halo::Integer; dims::NTuple{N,<:Integer}, boundary_conditions::AbstractArray) where {N}
+    return ArrayOfHaloArray(ThreadedHaloArray, Float64, tile_size, halo;
+        dims=dims, boundary_conditions=boundary_conditions)
+end
+
+Base.eltype(::ArrayOfHaloArray{T}) where {T} = T
+Base.ndims(::ArrayOfHaloArray{T,N,Shape}) where {T,N,Shape} = N + length(Shape)
+Base.ndims(::Type{<:ArrayOfHaloArray{T,N,Shape}}) where {T,N,Shape} = N + length(Shape)
+@inline field_shape(::ArrayOfHaloArray{T,N,Shape}) where {T,N,Shape} = Shape
+@inline n_field(mha::ArrayOfHaloArray) = length(mha.arrays)
+@inline Base.parent(mha::ArrayOfHaloArray) = mha.arrays
+
+@inline function Base.size(mha::ArrayOfHaloArray)
+    return (field_shape(mha)..., size(first(mha.arrays))...)
+end
 
 @inline Base.size(mha::ArrayOfHaloArray, i::Int) = size(mha)[i]
+@inline Base.length(mha::ArrayOfHaloArray) = prod(size(mha))
+@inline Base.axes(mha::ArrayOfHaloArray) = (map(Base.OneTo, field_shape(mha))..., axes(first(mha.arrays))...)
+@inline Base.axes(mha::ArrayOfHaloArray, i::Int) = axes(mha)[i]
+@inline Base.eachindex(mha::ArrayOfHaloArray) = CartesianIndices(axes(mha))
 
-@inline field_shape(halos::ArrayOfHaloArray{T, N ,S, A}) where {T, N ,S, A} = S
-n_field(halos::ArrayOfHaloArray)  = prod(field_shape(S))
-
-#Base.length(halo::HaloArray) = length(halo.data)
-
-
-@inline interior_size(halos::ArrayOfHaloArray) =(field_shape(halos)..., map(interior_size,halos.arrays)...)
-@inline full_size(halos::ArrayOfHaloArray) =(field_shape(halos)..., map(full_size,halos.arrays)...)
-@inline full_size(halos::ArrayOfHaloArray,i) =(field_shape(halos)..., map(full_size,halos.arrays)...)[i]
-@inline halo_width(halo::ArrayOfHaloArray,i)= map(halo_width,halo.arrays)
-@inline Base.parent(halo::ArrayOfHaloArray)  = halo.arrays
-function Base.axes(x::ArrayOfHaloArray)  
-    shape=field_shape(x)
-return (ntuple(j->1:shape[j],lenght(shape))...,first(map(axes,parent(x)))...)
-end 
-
-function Base.similar(mha::ArrayOfHaloArray{AA, N,S, A}, ::Type{T},dims::NTuple{M,Int64}) where {AA,N, S,A,T,M}
-
-    arrs = map(a -> similar(a, T, dims), parent(mha))
-
-    return ArrayOfHaloArray{T, N,S, typeof(arrs )}(arrs)
+@inline function interior_size(mha::ArrayOfHaloArray)
+    return (field_shape(mha)..., interior_size(first(mha.arrays))...)
 end
 
-function Base.similar(mha::ArrayOfHaloArray{AA, N,S, A}, ::Type{T}) where {AA,N,S, A, T}
-    
-    arrs = map(a -> similar(a, T), parent(mha))
-    
-    return ArrayOfHaloArray{T, N, S,typeof(arrs )}(arrs)
+@inline function full_size(mha::ArrayOfHaloArray)
+    return (field_shape(mha)..., full_size(first(mha.arrays))...)
 end
 
+@inline full_size(mha::ArrayOfHaloArray, i::Int) = full_size(mha)[i]
+@inline halo_width(mha::ArrayOfHaloArray) = halo_width(first(mha.arrays))
+@inline halo_width(mha::ArrayOfHaloArray, i) = map(halo_width, mha.arrays)
+@inline global_size(mha::ArrayOfHaloArray) = size(mha)
 
-function Base.similar(mha::ArrayOfHaloArray{AA, N,S, A}) where {AA,N,S, A}
-    arrs = map(a -> similar(a), parent(mha))
-    
-    return ArrayOfHaloArray{AA, N, S,typeof(arrs )}(arrs)
+function Base.getindex(mha::ArrayOfHaloArray{T,N,Shape}, I...) where {T,N,Shape}
+    field_ndims = length(Shape)
+
+    if length(I) <= field_ndims
+        return getindex(mha.arrays, I...)
+    elseif length(I) == field_ndims + N
+        field_index = ntuple(d -> I[d], Val(field_ndims))
+        halo_index = ntuple(d -> I[field_ndims + d], Val(N))
+        field = mha.arrays[field_index...]
+        field isa ThreadedHaloArray &&
+            throw(ArgumentError("global scalar indexing is not implemented for ThreadedHaloArray fields"))
+        return getindex(interior_view(field), halo_index...)
+    else
+        throw(BoundsError(mha, I))
+    end
 end
 
+function Base.setindex!(mha::ArrayOfHaloArray{T,N,Shape}, value, I...) where {T,N,Shape}
+    field_ndims = length(Shape)
+
+    if length(I) == field_ndims + N
+        field_index = ntuple(d -> I[d], Val(field_ndims))
+        halo_index = ntuple(d -> I[field_ndims + d], Val(N))
+        field = mha.arrays[field_index...]
+        field isa ThreadedHaloArray &&
+            throw(ArgumentError("global scalar indexing is not implemented for ThreadedHaloArray fields"))
+        setindex!(interior_view(field), value, halo_index...)
+        return mha
+    else
+        throw(BoundsError(mha, I))
+    end
+end
+
+function Base.similar(mha::ArrayOfHaloArray{AA,N,Shape,A}, ::Type{T},
+        dims::NTuple{M,Int}) where {AA,N,Shape,A,T,M}
+    arrs = map(a -> similar(a, T, dims), mha.arrays)
+    return ArrayOfHaloArray{T,N,Shape,typeof(arrs)}(arrs)
+end
+
+function Base.similar(mha::ArrayOfHaloArray{AA,N,Shape,A}, ::Type{T}) where {AA,N,Shape,A,T}
+    arrs = map(a -> similar(a, T), mha.arrays)
+    return ArrayOfHaloArray{T,N,Shape,typeof(arrs)}(arrs)
+end
+
+function Base.similar(mha::ArrayOfHaloArray{AA,N,Shape,A}) where {AA,N,Shape,A}
+    arrs = map(similar, mha.arrays)
+    return ArrayOfHaloArray{AA,N,Shape,typeof(arrs)}(arrs)
+end
+
+function Base.copyto!(dest::ArrayOfHaloArray, src::ArrayOfHaloArray)
+    field_shape(dest) == field_shape(src) ||
+        throw(DimensionMismatch("ArrayOfHaloArray field shapes must match"))
+    for I in eachindex(dest.arrays)
+        copyto!(dest.arrays[I], src.arrays[I])
+    end
+    return dest
+end
 
 function Base.copy(mha::ArrayOfHaloArray)
-    arrs = map(a -> copy(a), parent(mha))
+    arrs = map(copy, mha.arrays)
     return ArrayOfHaloArray(arrs)
 end
 
-# I ma not sure about this semantic
+function Base.fill!(mha::ArrayOfHaloArray, value)
+    foreach(a -> fill!(a, value), mha.arrays)
+    return mha
+end
+
 function Base.map(f, mha::ArrayOfHaloArray)
-    arrs  = map(x -> map(f, x),parent(mha))
-    # newfields is a Vector of mapped HaloArrays, but you want a NamedTuple
-    
+    arrs = map(a -> map(f, a), mha.arrays)
     return ArrayOfHaloArray(arrs)
 end
 
 function foreach_field!(f!, mha::ArrayOfHaloArray)
-
-    foreach(f!,parent(mha)) 
-
+    foreach(f!, mha.arrays)
+    return nothing
 end
 
+function foreach_field!(f!, mha::ArrayOfHaloArray, others::Vararg{ArrayOfHaloArray})
+    all(other -> field_shape(other) == field_shape(mha), others) ||
+        throw(DimensionMismatch("ArrayOfHaloArray field shapes must match"))
+    for I in eachindex(mha.arrays)
+        f!(mha.arrays[I], map(other -> other.arrays[I], others)...)
+    end
+    return nothing
+end
 
 function map_over_field(f, mha::ArrayOfHaloArray)
-
-    return map(f, parent(mha))
-
+    return map(f, mha.arrays)
 end
 
+function map_over_field(f, mha::ArrayOfHaloArray, others::Vararg{ArrayOfHaloArray})
+    all(other -> field_shape(other) == field_shape(mha), others) ||
+        throw(DimensionMismatch("ArrayOfHaloArray field shapes must match"))
+    return map(CartesianIndices(mha.arrays)) do I
+        f(mha.arrays[I], map(other -> other.arrays[I], others)...)
+    end
+end
 
-"""
-    interior_view(mha::MultiHaloArray)
-
-Restituisce un NamedTuple con le interior view di ciascun campo del MultiHaloArray.
-I campi del NamedTuple hanno gli stessi simboli del `mha.arrays`.
-"""
 function interior_view(mha::ArrayOfHaloArray)
-
-    return map(interior_view,mha)
-
+    return map(interior_view, mha.arrays)
 end
 
-# isactive per MultiHaloArray: true se almeno un campo è active
-# richiede che isactive sia definita per i singoli HaloArray
 function isactive(mha::ArrayOfHaloArray)
-    return all(isactive, parent(mha))
+    return all(isactive, mha.arrays)
 end
 
+function Base.all(f, mha::ArrayOfHaloArray)
+    return all(field -> all(f, field), mha.arrays)
+end
+
+function Base.any(f, mha::ArrayOfHaloArray)
+    return any(field -> any(f, field), mha.arrays)
+end

@@ -32,7 +32,7 @@ end
     for i in eachindex(v_interior)
         v_interior[i] = 10 * rank + i
     end
-    fields = MultiHaloArray((; u, v); check=true)
+    fields = MultiHaloArray((; u, v))
 
     local_field_sum = sum(interior_view(u)) + sum(interior_view(v))
     @test mapreduce(identity, +, fields) ≈ MPI.Allreduce(local_field_sum, MPI.SUM, topology.cart_comm)
@@ -81,7 +81,7 @@ end
         v_interior[i, j] = 10_000 * rank + 100 * i + j
     end
 
-    maybe_fields = mapreduce_mhaloarray_dims(identity, +, MultiHaloArray((; u, v); check=true), (1,))
+    maybe_fields = mapreduce_mhaloarray_dims(identity, +, MultiHaloArray((; u, v)), (1,))
     if topology.cart_coords[1] == 0
         @test isactive(maybe_fields)
         fields = unwrap(maybe_fields)
