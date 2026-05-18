@@ -277,7 +277,7 @@ function _check_multihaloarray_public_split_exchange_with_boundaries()
         topology;
         boundary_condition=((Antireflecting(), Repeating()),),
     )
-    fields = MultiHaloArray((; u, v); check=true)
+    fields = MultiHaloArray((; u, v))
 
     for i in 1:local_cells
         interior_view(u)[i] = 100 * rank + i
@@ -357,7 +357,7 @@ function _check_multihaloarray_broadcast()
         v_interior[i] = 100 * rank + 10 * i
     end
 
-    fields = MultiHaloArray((; u, v); check=true)
+    fields = MultiHaloArray((; u, v))
     shifted = fields .+ 3
     @test shifted isa MultiHaloArray
     @test collect(interior_view(shifted.arrays.u)) == [rank + i + 3 for i in 1:4]
@@ -367,6 +367,100 @@ function _check_multihaloarray_broadcast()
     dest .= 2 .* fields
     @test collect(interior_view(dest.arrays.u)) == [2 * (rank + i) for i in 1:4]
     @test collect(interior_view(dest.arrays.v)) == [2 * (100 * rank + 10 * i) for i in 1:4]
+
+    return nothing
+end
+
+function _check_arrayofhaloarray_broadcast()
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+
+    topology = CartesianTopology(comm, (0,); periodic=(true,))
+    arrays = [HaloArray(Float64, (4,), 1, topology; boundary_condition=((Periodic(), Periodic()),))
+              for _ in 1:2, _ in 1:2]
+
+    for I in CartesianIndices(arrays)
+        interior = interior_view(arrays[I])
+        for i in eachindex(interior)
+            interior[i] = 100 * I[1] + 10 * I[2] + rank + i
+        end
+    end
+
+    fields = ArrayOfHaloArray(arrays)
+    shifted = fields .+ 3
+    @test shifted isa ArrayOfHaloArray
+
+    for I in CartesianIndices(arrays)
+        expected = [100 * I[1] + 10 * I[2] + rank + i + 3 for i in 1:4]
+        @test collect(interior_view(shifted[I])) == expected
+    end
+
+    dest = similar(fields)
+    dest .= 2 .* fields .- shifted
+
+    for I in CartesianIndices(arrays)
+        expected = [100 * I[1] + 10 * I[2] + rank + i - 3 for i in 1:4]
+        @test collect(interior_view(dest[I])) == expected
+    end
+
+    MPI.Barrier(comm)
+    halo_exchange!(dest)
+    MPI.Barrier(comm)
+
+    left_rank = topology.neighbors[1][1]
+    right_rank = topology.neighbors[1][2]
+    for I in CartesianIndices(arrays)
+        @test parent(dest[I])[1] == 100 * I[1] + 10 * I[2] + left_rank + 4 - 3
+        @test parent(dest[I])[end] == 100 * I[1] + 10 * I[2] + right_rank + 1 - 3
+    end
+
+    return nothing
+end
+
+function _check_nested_multihaloarray_broadcast()
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+
+    topology = CartesianTopology(comm, (0,); periodic=(true,))
+    rho = HaloArray(Float64, (4,), 1, topology; boundary_condition=((Periodic(), Periodic()),))
+    q_arrays = [HaloArray(Float64, (4,), 1, topology; boundary_condition=((Periodic(), Periodic()),))
+                for _ in 1:2]
+
+    for i in eachindex(interior_view(rho))
+        interior_view(rho)[i] = rank + i
+    end
+
+    for c in eachindex(q_arrays)
+        interior = interior_view(q_arrays[c])
+        for i in eachindex(interior)
+            interior[i] = 100 * c + rank + i
+        end
+    end
+
+    fields = MultiHaloArray((; rho, q=ArrayOfHaloArray(q_arrays)))
+    shifted = fields .+ 4
+    @test shifted isa MultiHaloArray
+    @test shifted.arrays.q isa ArrayOfHaloArray
+    @test collect(interior_view(shifted.arrays.rho)) == [rank + i + 4 for i in 1:4]
+    @test collect(interior_view(shifted.arrays.q[1])) == [100 + rank + i + 4 for i in 1:4]
+    @test collect(interior_view(shifted.arrays.q[2])) == [200 + rank + i + 4 for i in 1:4]
+
+    dest = similar(fields)
+    dest .= fields .+ shifted
+
+    left_rank = topology.neighbors[1][1]
+    right_rank = topology.neighbors[1][2]
+
+    MPI.Barrier(comm)
+    halo_exchange!(dest)
+    MPI.Barrier(comm)
+
+    @test parent(dest.arrays.rho)[1] == 2 * (left_rank + 4) + 4
+    @test parent(dest.arrays.rho)[end] == 2 * (right_rank + 1) + 4
+    for c in eachindex(dest.arrays.q.arrays)
+        @test parent(dest.arrays.q[c])[1] == 2 * (100 * c + left_rank + 4) + 4
+        @test parent(dest.arrays.q[c])[end] == 2 * (100 * c + right_rank + 1) + 4
+    end
 
     return nothing
 end
@@ -603,7 +697,7 @@ function _check_multihaloarray_flux_contribution_exchange()
     topology = CartesianTopology(comm, (0,); periodic = (true,))
     u = HaloArray(Int, (4,), 1, topology; boundary_condition = ((Periodic(), Periodic()),))
     v = HaloArray(Int, (4,), 1, topology; boundary_condition = ((Periodic(), Periodic()),))
-    fields = MultiHaloArray((; u, v); check = true)
+    fields = MultiHaloArray((; u, v))
 
     fill!(parent(u), 0)
     fill!(parent(v), 0)
@@ -648,6 +742,8 @@ end
 @testset "MPI broadcast over halo arrays" begin
     _check_haloarray_broadcast()
     _check_multihaloarray_broadcast()
+    _check_arrayofhaloarray_broadcast()
+    _check_nested_multihaloarray_broadcast()
 end
 
 @testset "MPI flux contribution exchange across ranks" begin

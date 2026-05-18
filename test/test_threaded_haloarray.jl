@@ -209,7 +209,9 @@
         interior_view(fields.arrays.mom, 2) .= [40, 50, 60]
 
         shifted = fields .+ 5
-        @test shifted isa ThreadedMultiHaloArray
+        @test shifted isa MultiHaloArray
+        @test shifted.arrays.rho isa ThreadedHaloArray
+        @test shifted.arrays.mom isa ThreadedHaloArray
         @test collect(interior_view(shifted.arrays.rho, 1)) == [6, 7, 8]
         @test collect(interior_view(shifted.arrays.rho, 2)) == [9, 10, 11]
         @test collect(interior_view(shifted.arrays.mom, 1)) == [15, 25, 35]
@@ -249,7 +251,7 @@
         local_fields = LocalMultiHaloArray((;
             rho=LocalHaloArray(Int, (6,), 1; boundary_condition=:repeating),
             mom=LocalHaloArray(Int, (6,), 1; boundary_condition=:repeating),
-        ); check=true)
+        ))
 
         @test size(threaded_fields) == size(local_fields)
         @test_throws Exception threaded_fields .+ local_fields
@@ -267,10 +269,10 @@
         bad_halo = ThreadedHaloArray(Int, (3,), 2; dims=(2,), boundary_condition=:repeating)
         bad_topology = ThreadedHaloArray(Int, (3,), 1; dims=(3,), boundary_condition=:repeating)
 
-        @test ThreadedMultiHaloArray((; rho); check=true) isa ThreadedMultiHaloArray
-        @test_throws DimensionMismatch ThreadedMultiHaloArray((; rho, bad_tile_size); check=true)
-        @test_throws DimensionMismatch ThreadedMultiHaloArray((; rho, bad_halo); check=true)
-        @test_throws DimensionMismatch ThreadedMultiHaloArray((; rho, bad_topology); check=true)
-        @test_throws ArgumentError ThreadedMultiHaloArray((; rho, local_halo=LocalHaloArray(Int, (3,), 1)); check=true)
+        @test ThreadedMultiHaloArray((; rho)) isa MultiHaloArray
+        @test_throws DimensionMismatch ThreadedMultiHaloArray((; rho, bad_tile_size))
+        @test_throws DimensionMismatch ThreadedMultiHaloArray((; rho, bad_halo))
+        @test_throws DimensionMismatch ThreadedMultiHaloArray((; rho, bad_topology))
+        @test_throws ArgumentError ThreadedMultiHaloArray((; rho, local_halo=LocalHaloArray(Int, (3,), 1)))
     end
 end

@@ -2,6 +2,10 @@ using Test
 using MPI
 using HaloArrays
 
+if !MPI.Initialized()
+    MPI.Init()
+end
+
 function _test_topology(dims::NTuple{N,Int}) where {N}
     return CartesianTopology(MPI.COMM_SELF, dims; periodic=ntuple(_ -> false, Val(N)))
 end
@@ -18,7 +22,7 @@ end
         v_interior[i, j] = 10 * i + j
     end
 
-    fields = MultiHaloArray((; u, v); check=true)
+    fields = MultiHaloArray((; u, v))
 
     @test fields isa MultiHaloArray
     @test eltype(fields) === Float64
@@ -43,12 +47,117 @@ end
     @test collect(interior_view(dest.arrays.u)) == [2 * (i + j / 10) for i in 1:3, j in 1:2]
     @test collect(interior_view(dest.arrays.v)) == [2 * (10 * i + j) for i in 1:3, j in 1:2]
 
+    from_bcs = MultiHaloArray(Float64, (3, 2), 1, topology;
+        boundary_conditions=(; rho=:repeating, mom=:repeating))
+    @test from_bcs isa MultiHaloArray
+    @test from_bcs[:rho] isa HaloArray
+    @test size(from_bcs) == (2, 3, 2)
+    @test eltype(from_bcs) === Float64
+
+    local_fields = MultiHaloArray(LocalHaloArray, Int, (3,), 1;
+        boundary_conditions=(; rho=:repeating, mom=:antireflecting))
+    interior_view(local_fields.arrays.rho) .= [1, 2, 3]
+    interior_view(local_fields.arrays.mom) .= [10, 20, 30]
+
+    @test local_fields isa MultiHaloArray
+    @test local_fields[:rho] isa LocalHaloArray
+    @test size(local_fields) == (2, 3)
+
+    shifted_local = local_fields .+ 4
+    @test shifted_local isa MultiHaloArray
+    @test shifted_local.arrays.rho isa LocalHaloArray
+    @test collect(interior_view(shifted_local.arrays.rho)) == [5, 6, 7]
+    @test collect(interior_view(shifted_local.arrays.mom)) == [14, 24, 34]
+
+    local_dest = similar(local_fields)
+    local_dest .= 2 .* local_fields .+ shifted_local
+    @test collect(interior_view(local_dest.arrays.rho)) == [7, 10, 13]
+    @test collect(interior_view(local_dest.arrays.mom)) == [34, 64, 94]
+
+    synchronize_halo!(local_fields)
+    @test parent(local_fields.arrays.rho) == [1, 1, 2, 3, 3]
+    @test parent(local_fields.arrays.mom) == [-10, 10, 20, 30, -30]
+
+    threaded_fields = MultiHaloArray(ThreadedHaloArray, Int, (3,), 1;
+        dims=(2,),
+        boundary_conditions=(; rho=:repeating, mom=:repeating))
+    interior_view(threaded_fields.arrays.rho, 1) .= [1, 2, 3]
+    interior_view(threaded_fields.arrays.rho, 2) .= [4, 5, 6]
+    interior_view(threaded_fields.arrays.mom, 1) .= [10, 20, 30]
+    interior_view(threaded_fields.arrays.mom, 2) .= [40, 50, 60]
+
+    @test threaded_fields isa MultiHaloArray
+    @test threaded_fields[:rho] isa ThreadedHaloArray
+    @test size(threaded_fields) == (2, 6)
+
+    shifted_threaded = threaded_fields .+ 3
+    @test shifted_threaded isa MultiHaloArray
+    @test shifted_threaded.arrays.rho isa ThreadedHaloArray
+    @test collect(interior_view(shifted_threaded.arrays.rho, 1)) == [4, 5, 6]
+    @test collect(interior_view(shifted_threaded.arrays.rho, 2)) == [7, 8, 9]
+    @test collect(interior_view(shifted_threaded.arrays.mom, 1)) == [13, 23, 33]
+    @test collect(interior_view(shifted_threaded.arrays.mom, 2)) == [43, 53, 63]
+
+    threaded_dest = similar(threaded_fields)
+    threaded_dest .= threaded_fields .+ shifted_threaded
+    @test collect(interior_view(threaded_dest.arrays.rho, 1)) == [5, 7, 9]
+    @test collect(interior_view(threaded_dest.arrays.rho, 2)) == [11, 13, 15]
+    @test collect(interior_view(threaded_dest.arrays.mom, 1)) == [23, 43, 63]
+    @test collect(interior_view(threaded_dest.arrays.mom, 2)) == [83, 103, 123]
+
+    synchronize_halo!(threaded_fields)
+    @test tile_parent(threaded_fields.arrays.rho, 1) == [1, 1, 2, 3, 4]
+    @test tile_parent(threaded_fields.arrays.rho, 2) == [3, 4, 5, 6, 6]
+    @test tile_parent(threaded_fields.arrays.mom, 1) == [10, 10, 20, 30, 40]
+    @test tile_parent(threaded_fields.arrays.mom, 2) == [30, 40, 50, 60, 60]
+
+    q_arrays = [HaloArray(Float64, (3, 2), 1, topology; boundary_condition=:repeating) for _ in 1:2]
+    for c in eachindex(q_arrays)
+        q_interior = interior_view(q_arrays[c])
+        for i in 1:size(q_interior, 1), j in 1:size(q_interior, 2)
+            q_interior[i, j] = 100 * c + 10 * i + j
+        end
+    end
+
+    q = ArrayOfHaloArray(q_arrays)
+    nested_fields = MultiHaloArray((; rho=u, q))
+
+    @test nested_fields isa MultiHaloArray
+    @test ndims(nested_fields) == 2
+    @test size(nested_fields) == (2, 3, 2)
+    @test interior_size(nested_fields) == (2, 3, 2)
+    @test full_size(nested_fields) == (2, 5, 4)
+    @test halo_width(nested_fields) == 1
+    @test nested_fields[:q] === q
+
+    nested_shifted = nested_fields .+ 2
+    @test nested_shifted isa MultiHaloArray
+    @test nested_shifted.arrays.q isa ArrayOfHaloArray
+    @test collect(interior_view(nested_shifted.arrays.rho)) == [i + j / 10 + 2 for i in 1:3, j in 1:2]
+    @test collect(interior_view(nested_shifted.arrays.q[1])) == [100 + 10 * i + j + 2 for i in 1:3, j in 1:2]
+    @test collect(interior_view(nested_shifted.arrays.q[2])) == [200 + 10 * i + j + 2 for i in 1:3, j in 1:2]
+
+    nested_dest = similar(nested_fields)
+    nested_dest .= 2 .* nested_fields .+ nested_shifted
+    @test collect(interior_view(nested_dest.arrays.rho)) == [3 * (i + j / 10) + 2 for i in 1:3, j in 1:2]
+    @test collect(interior_view(nested_dest.arrays.q[1])) == [3 * (100 + 10 * i + j) + 2 for i in 1:3, j in 1:2]
+    @test collect(interior_view(nested_dest.arrays.q[2])) == [3 * (200 + 10 * i + j) + 2 for i in 1:3, j in 1:2]
+
+    synchronize_halo!(nested_fields)
+    @test parent(nested_fields.arrays.q[1])[1, 2] == first(interior_view(nested_fields.arrays.q[1]))
+    @test parent(nested_fields.arrays.q[2])[end, 3] == last(interior_view(nested_fields.arrays.q[2]))
+    @test all(x -> x > 0, nested_fields)
+    @test any(x -> x == 111, nested_fields)
+
     copied = copy(fields)
     interior_view(copied.arrays.u)[1, 1] = -1
     @test interior_view(fields.arrays.u)[1, 1] != interior_view(copied.arrays.u)[1, 1]
 
     bad = HaloArray(Float64, (4, 2), 1, topology; boundary_condition=:repeating)
-    @test_throws DimensionMismatch MultiHaloArray((; u, bad); check=true)
+    @test_throws DimensionMismatch MultiHaloArray((; u, bad))
+
+    bad_q = ArrayOfHaloArray([HaloArray(Float64, (4, 2), 1, topology; boundary_condition=:repeating)])
+    @test_throws DimensionMismatch MultiHaloArray((; u, q=bad_q))
 
     @test all(x -> x > 0, fields)
     @test any(x -> x == 22, fields)

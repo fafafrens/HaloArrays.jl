@@ -38,7 +38,7 @@ using HaloArrays
     u = copy(ha)
     v = copy(ha)
     v .= 10 .* v
-    multi = MultiHaloArray((; u, v); check=true)
+    multi = MultiHaloArray((; u, v))
     maybe_multi = MaybeHaloArray(multi)
 
     shifted_multi = maybe_multi .+ 5

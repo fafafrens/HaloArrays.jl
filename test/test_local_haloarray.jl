@@ -121,9 +121,11 @@ end
         interior_view(v)[i, j] = 10 * i + j
     end
 
-    fields = LocalMultiHaloArray((; u, v); check=true)
+    fields = LocalMultiHaloArray((; u, v))
 
-    @test fields isa LocalMultiHaloArray
+    @test fields isa MultiHaloArray
+    @test fields.arrays.u isa LocalHaloArray
+    @test fields.arrays.v isa LocalHaloArray
     @test eltype(fields) === Float64
     @test ndims(fields) == 2
     @test fields[:u] === u
@@ -136,7 +138,7 @@ end
     @test collect(views.v) == [10 * i + j for i in 1:3, j in 1:2]
 
     shifted = fields .+ 2
-    @test shifted isa LocalMultiHaloArray
+    @test shifted isa MultiHaloArray
     @test collect(interior_view(shifted.arrays.u)) == [i + j / 10 + 2 for i in 1:3, j in 1:2]
     @test collect(interior_view(shifted.arrays.v)) == [10 * i + j + 2 for i in 1:3, j in 1:2]
 
@@ -149,5 +151,5 @@ end
     @test parent(fields.arrays.u)[1, 2] == interior_view(u)[1, 1]
 
     bad = LocalHaloArray(Float64, (4, 2), 1; boundary_condition=:repeating)
-    @test_throws DimensionMismatch LocalMultiHaloArray((; u, bad); check=true)
+    @test_throws DimensionMismatch LocalMultiHaloArray((; u, bad))
 end

@@ -8,10 +8,10 @@ using StaticArrays
 
 # Include library files
 include("cartesian_topology.jl")
-include("ArrayOfHaloArray.jl")
 include("haloarray.jl")
 include("local_haloarray.jl")
 include("threaded_haloarray.jl")
+include("ArrayOfHaloArray.jl")
 include("threaded_multihaloarray.jl")
 include("multihaloarray.jl")
 include("local_multihaloarray.jl")
@@ -35,6 +35,7 @@ export HaloArray,
     ThreadedMultiHaloArray,
     MultiHaloArray,
     LocalMultiHaloArray,
+    ArrayOfHaloArray,
     MaybeHaloArray,
     CartesianTopology,
     ThreadedCartesianTopology,
@@ -51,6 +52,7 @@ export interior_view,
     interior_range,
     full_size,
     interior_size,
+    field_shape,
     halo_width,
     get_comm,
     global_size,
