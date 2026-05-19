@@ -18,6 +18,7 @@ Icon?
 *.jl.mem
 
 # Julia Pkg build artifacts
+Manifest.toml
 deps/build.log
 deps/deps.jl
 deps/usr/
@@ -38,4 +39,3 @@ deps/builds/
 
 # Jupyter
 .ipynb_checkpoints/
-
