@@ -16,7 +16,10 @@
 
         @test tile_size(halo) == (4, 5)
         @test size(halo) == (12, 10)
+        @test local_size(halo) == (12, 10)
         @test global_size(halo) == (12, 10)
+        @test axes(halo) == map(Base.OneTo, global_size(halo))
+        @test local_axes(halo) == map(Base.OneTo, local_size(halo))
         @test halo_width(halo) == 2
         @test tile_count(halo) == 6
         @test full_size(halo) == (8, 9)

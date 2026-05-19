@@ -74,7 +74,7 @@ function _check_periodic_1d_halo_exchange!(exchange!)
 end
 
 function _fill_2d_rank_pattern!(ha, rank)
-    nx, ny = size(ha)
+    nx, ny = local_size(ha)
     interior = interior_view(ha)
     for i in 1:nx, j in 1:ny
         interior[i, j] = 1000 * rank + 100 * i + j
@@ -121,7 +121,7 @@ function _check_periodic_2d_halo_exchange!(exchange!)
 end
 
 function _fill_3d_rank_pattern!(ha, rank)
-    nx, ny, nz = size(ha)
+    nx, ny, nz = local_size(ha)
     interior = interior_view(ha)
     for i in 1:nx, j in 1:ny, k in 1:nz
         interior[i, j, k] = 100_000 * rank + 10_000 * i + 100 * j + k

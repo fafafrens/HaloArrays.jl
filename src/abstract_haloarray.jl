@@ -5,3 +5,26 @@ abstract type AbstractDistributedHaloArray <: AbstractSingleHaloArray end
 abstract type AbstractSerialHaloArray <: AbstractSingleHaloArray end
 
 abstract type AbstractHaloCollection <: AbstractHaloArray end
+
+"""
+    local_size(halo)
+
+Return the owned interior size of a halo container on the current process.
+
+For `HaloArray` this is the local MPI subdomain size, not the global
+distributed size. For serial containers it is equal to their full logical
+interior size.
+"""
+@inline local_size(halo::AbstractHaloArray) = interior_size(halo)
+@inline local_size(halo::AbstractHaloArray, i::Int) = local_size(halo)[i]
+
+"""
+    local_axes(halo)
+
+Return the local owned-cell axes of a halo container on the current process.
+
+Use `axes(halo)` for the global logical axes and `local_axes(halo)` when
+looping over data that this process can update directly.
+"""
+@inline local_axes(halo::AbstractHaloArray) = map(Base.OneTo, local_size(halo))
+@inline local_axes(halo::AbstractHaloArray, i::Int) = local_axes(halo)[i]

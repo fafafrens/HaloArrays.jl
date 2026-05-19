@@ -11,10 +11,15 @@ using HaloArrays
     @test ha isa AbstractHaloArray
     @test !(ha isa AbstractArray)
     @test interior_size(ha) == (5,)
+    @test local_size(ha) == (5,)
     @test full_size(ha) == (9,)
     @test halo_width(ha) == 2
-    @test size(ha) == (5,)
-    @test length(ha) == 5
+    @test size(ha) == global_size(ha)
+    @test axes(ha) == map(Base.OneTo, global_size(ha))
+    @test local_axes(ha) == axes(interior_view(ha))
+    @test length(axes(ha, 1)) == size(ha, 1)
+    @test length(local_axes(ha, 1)) == local_size(ha, 1)
+    @test length(ha) == prod(global_size(ha))
 
     fill_interior(ha, 3.0)
     @test all(interior_view(ha) .== 3.0)
@@ -34,7 +39,8 @@ using HaloArrays
     resized = similar(ha, Float32, (3,))
     @test resized isa HaloArray
     @test eltype(resized) === Float32
-    @test size(resized) == (3,)
+    @test size(resized) == global_size(resized)
+    @test local_size(resized) == (3,)
     @test full_size(resized) == (7,)
 
     local_ha = LocalHaloArray(Float64, (3,), 1; boundary_condition=:repeating)
@@ -42,6 +48,10 @@ using HaloArrays
     @test local_ha isa AbstractSingleHaloArray
     @test local_ha isa AbstractHaloArray
     @test !(local_ha isa AbstractArray)
+    @test local_size(local_ha) == (3,)
+    @test global_size(local_ha) == local_size(local_ha)
+    @test axes(local_ha) == map(Base.OneTo, global_size(local_ha))
+    @test local_axes(local_ha) == axes(interior_view(local_ha))
     interior_view(local_ha) .= [1.0, 2.0, 3.0]
     @test start_halo_exchange!(local_ha) === local_ha
     @test finish_halo_exchange!(local_ha) === local_ha

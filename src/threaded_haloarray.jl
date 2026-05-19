@@ -117,18 +117,21 @@ ThreadedHaloArray(tile_size::NTuple{N,<:Integer}, halo::Integer; kwargs...) wher
 @inline Base.ndims(::Type{<:ThreadedHaloArray{T,N}}) where {T,N} = N
 @inline Base.parent(halo::ThreadedHaloArray) = halo.data
 @inline Base.length(halo::ThreadedHaloArray) = prod(size(halo))
-@inline Base.size(halo::ThreadedHaloArray) = ntuple(d -> halo.tile_size[d] * halo.topology.dims[d], Val(ndims(halo)))
+@inline local_size(halo::ThreadedHaloArray) = ntuple(d -> halo.tile_size[d] * halo.topology.dims[d], Val(ndims(halo)))
+@inline Base.size(halo::ThreadedHaloArray) = global_size(halo)
 @inline Base.size(halo::ThreadedHaloArray, d::Int) = size(halo)[d]
 @inline Base.axes(halo::ThreadedHaloArray) = map(Base.OneTo, size(halo))
 @inline Base.axes(halo::ThreadedHaloArray, d::Int) = Base.OneTo(size(halo, d))
-@inline interior_size(halo::ThreadedHaloArray) = size(halo)
+@inline local_axes(halo::ThreadedHaloArray) = map(Base.OneTo, local_size(halo))
+@inline local_axes(halo::ThreadedHaloArray, d::Int) = Base.OneTo(local_size(halo, d))
+@inline interior_size(halo::ThreadedHaloArray) = local_size(halo)
 @inline halo_width(::Type{<:ThreadedHaloArray{T,N,A,Halo}}) where {T,N,A,Halo} = Halo
 @inline halo_width(::ThreadedHaloArray{T,N,A,Halo}) where {T,N,A,Halo} = Halo
 @inline tile_size(halo::ThreadedHaloArray) = halo.tile_size
 @inline tile_count(halo::ThreadedHaloArray) = length(parent(halo))
 @inline tile_parent(halo::ThreadedHaloArray, tile_id::Integer) = parent(halo)[tile_id]
 @inline tile_coordinates(halo::ThreadedHaloArray, tile_id::Integer) = tile_coordinates(halo.topology, tile_id)
-@inline global_size(halo::ThreadedHaloArray) = size(halo)
+@inline global_size(halo::ThreadedHaloArray) = local_size(halo)
 @inline isactive(::ThreadedHaloArray) = true
 @inline get_comm(::ThreadedHaloArray) = nothing
 

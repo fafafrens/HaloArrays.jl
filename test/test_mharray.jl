@@ -52,6 +52,11 @@ end
     @test from_bcs isa MultiHaloArray
     @test from_bcs[:rho] isa HaloArray
     @test size(from_bcs) == (2, 3, 2)
+    @test size(from_bcs) == global_size(from_bcs)
+    @test axes(from_bcs) == map(Base.OneTo, global_size(from_bcs))
+    @test local_axes(from_bcs) == map(Base.OneTo, local_size(from_bcs))
+    @test local_size(from_bcs) == (2, 3, 2)
+    @test global_size(from_bcs) == (2, 3, 2)
     @test eltype(from_bcs) === Float64
 
     local_fields = MultiHaloArray(LocalHaloArray, Int, (3,), 1;
@@ -62,6 +67,9 @@ end
     @test local_fields isa MultiHaloArray
     @test local_fields[:rho] isa LocalHaloArray
     @test size(local_fields) == (2, 3)
+    @test size(local_fields) == global_size(local_fields)
+    @test local_axes(local_fields) == map(Base.OneTo, local_size(local_fields))
+    @test local_size(local_fields) == (2, 3)
 
     shifted_local = local_fields .+ 4
     @test shifted_local isa MultiHaloArray
@@ -89,6 +97,9 @@ end
     @test threaded_fields isa MultiHaloArray
     @test threaded_fields[:rho] isa ThreadedHaloArray
     @test size(threaded_fields) == (2, 6)
+    @test size(threaded_fields) == global_size(threaded_fields)
+    @test local_axes(threaded_fields) == map(Base.OneTo, local_size(threaded_fields))
+    @test local_size(threaded_fields) == (2, 6)
 
     shifted_threaded = threaded_fields .+ 3
     @test shifted_threaded isa MultiHaloArray
@@ -125,7 +136,10 @@ end
     @test nested_fields isa MultiHaloArray
     @test ndims(nested_fields) == 2
     @test size(nested_fields) == (2, 3, 2)
+    @test size(nested_fields) == global_size(nested_fields)
+    @test local_size(nested_fields) == (2, 3, 2)
     @test interior_size(nested_fields) == (2, 3, 2)
+    @test global_size(nested_fields) == (2, 3, 2)
     @test full_size(nested_fields) == (2, 5, 4)
     @test halo_width(nested_fields) == 1
     @test nested_fields[:q] === q

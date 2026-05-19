@@ -19,14 +19,16 @@ function LocalHaloArray(local_inner_size::NTuple{N,Int}, halo::Int; boundary_con
 end
 
 @inline Base.length(halo::LocalHaloArray) = length(interior_view(halo))
-@inline Base.size(halo::LocalHaloArray) = interior_size(halo)
-@inline Base.size(halo::LocalHaloArray, i::Int) = interior_size(halo)[i]
+@inline Base.size(halo::LocalHaloArray) = global_size(halo)
+@inline Base.size(halo::LocalHaloArray, i::Int) = size(halo)[i]
 @inline Base.eltype(::LocalHaloArray{T}) where {T} = T
 @inline Base.ndims(::LocalHaloArray{T,N}) where {T,N} = N
 @inline Base.ndims(::Type{<:LocalHaloArray{T,N}}) where {T,N} = N
 @inline Base.parent(halo::LocalHaloArray) = halo.data
-@inline Base.axes(halo::LocalHaloArray) = axes(interior_view(halo))
-@inline Base.axes(halo::LocalHaloArray, d::Int) = axes(interior_view(halo), d)
+@inline Base.axes(halo::LocalHaloArray) = map(Base.OneTo, size(halo))
+@inline Base.axes(halo::LocalHaloArray, d::Int) = Base.OneTo(size(halo, d))
+@inline local_axes(halo::LocalHaloArray) = axes(interior_view(halo))
+@inline local_axes(halo::LocalHaloArray, d::Int) = axes(interior_view(halo), d)
 @inline Base.eachindex(halo::LocalHaloArray) = eachindex(interior_view(halo))
 @inline Base.iterate(halo::LocalHaloArray) = iterate(interior_view(halo))
 @inline Base.iterate(halo::LocalHaloArray, state) = iterate(interior_view(halo), state)
@@ -71,7 +73,7 @@ end
 @inline versors(::LocalHaloArray{T,N}) where {T,N} = versors(Val(N))
 
 function Base.similar(halo::LocalHaloArray{T,N,A,Halo,BCondition}, element_type=eltype(halo),
-        dims::NTuple{M,Int}=interior_size(halo)) where {T,N,A,Halo,BCondition,M}
+        dims::NTuple{M,Int}=local_size(halo)) where {T,N,A,Halo,BCondition,M}
     M == N || throw(DimensionMismatch("LocalHaloArray similar dims must have $N dimensions"))
     fullsize = ntuple(i -> dims[i] + 2 * halo_width(halo), Val(N))
     data = similar(parent(halo), element_type, fullsize)
@@ -156,11 +158,11 @@ end
 
 local_to_global_index(::LocalHaloArray, local_idx::NTuple{N,Int}) where {N} = local_idx
 global_to_local_index(halo::LocalHaloArray, global_idx::NTuple{N,Int}) where {N} =
-    all(i -> 1 <= global_idx[i] <= size(halo, i), 1:N) ? ntuple(i -> global_idx[i] + halo_width(halo), Val(N)) : nothing
-global_size(halo::LocalHaloArray) = interior_size(halo)
+    all(i -> 1 <= global_idx[i] <= local_size(halo, i), 1:N) ? ntuple(i -> global_idx[i] + halo_width(halo), Val(N)) : nothing
+global_size(halo::LocalHaloArray) = local_size(halo)
 
 function Base.show(io::IO, obj::LocalHaloArray)
-    print(io, "LocalHaloArray of size ", size(obj), " (full size: ", full_size(obj), "), halo width: ", halo_width(obj), "\n")
+    print(io, "LocalHaloArray of global size ", size(obj), " (local size: ", local_size(obj), ", full size: ", full_size(obj), "), halo width: ", halo_width(obj), "\n")
     print(io, "  eltype: ", eltype(obj), "\n")
     print(io, "  boundary_condition: ", obj.boundary_condition, "\n")
 end

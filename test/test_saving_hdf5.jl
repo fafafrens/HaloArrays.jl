@@ -16,7 +16,7 @@ function _remove_on_root(path, comm)
 end
 
 function _owned_hdf5_slices(halo)
-    local_size = size(halo)
+    local_size = HaloArrays.local_size(halo)
     coords = halo.topology.cart_coords
     return ntuple(d -> (coords[d] * local_size[d] + 1):((coords[d] + 1) * local_size[d]), Val(ndims(halo)))
 end

@@ -82,10 +82,17 @@ end
     halo.topology.cart_comm
 end
 
-@inline Base.length(halo::HaloArray) = length(interior_view(halo))
-@inline Base.size(halo::HaloArray) = interior_size(halo)
-@inline Base.size(halo::HaloArray, i::Int) = interior_size(halo)[i]
+@inline Base.length(halo::HaloArray) = prod(size(halo))
+@inline Base.size(halo::HaloArray) = global_size(halo)
+@inline Base.size(halo::HaloArray, i::Int) = size(halo)[i]
 @inline Base.eltype(ha::HaloArray{T,N,A,Halo,B,BCondition}) where {T,N,A,Halo,B,BCondition} = T
+@inline Base.axes(halo::HaloArray) = map(Base.OneTo, size(halo))
+@inline Base.axes(halo::HaloArray, i::Int) = Base.OneTo(size(halo, i))
+@inline local_axes(halo::HaloArray) = axes(interior_view(halo))
+@inline local_axes(halo::HaloArray, i::Int) = axes(interior_view(halo), i)
+@inline Base.eachindex(halo::HaloArray) = eachindex(interior_view(halo))
+@inline Base.iterate(halo::HaloArray) = iterate(interior_view(halo))
+@inline Base.iterate(halo::HaloArray, state) = iterate(interior_view(halo), state)
 
 @inline function interior_size(halo::HaloArray{T,N,A,Halo,B,BCondition}) where {T,N,A,Halo,B,BCondition}
     h = halo_width(halo)
@@ -175,7 +182,7 @@ end
 
 
 function Base.similar(halo::HaloArray{T, N, A, Halo, B, BCondition}, element_type=eltype(halo) ,
-    dims::NTuple{M,Int64}=interior_size(halo)
+    dims::NTuple{M,Int64}=local_size(halo)
     ) where {T, N, A, Halo, B, BCondition, M}    ## Create a new HaloArray with given interior dims, preserving halo_width and topology
     #HaloArray(element_type, dims ,halo_width(halo), halo.topology; boundary_condition=halo.boundary_condition)
 
@@ -497,7 +504,7 @@ end
 
 # 2-argument show, used by Array show, print(obj) and repr(obj), keep it short
 function Base.show(io::IO, obj::HaloArray)
-    print(io, "HaloArray of size ", size(obj), " (full size: ", full_size(obj), "), halo width: ", halo_width(obj), "\n")
+    print(io, "HaloArray of global size ", size(obj), " (local size: ", local_size(obj), ", full size: ", full_size(obj), "), halo width: ", halo_width(obj), "\n")
     print(io, "  eltype: ", eltype(obj), "\n")
     print(io, "  topology: ", obj.topology, "\n")
     print(io, "  boundary_condition: ", obj.boundary_condition, "\n")
@@ -517,7 +524,7 @@ end
 
 function global_size(halo::HaloArray)
     N = ndims(halo)
-    local_interior = interior_size(halo)  # Tuple with local interior sizes per dimension
+    local_interior = local_size(halo)     # Tuple with local interior sizes per dimension
     dims = halo.topology.dims             # Tuple with number of processes per dimension
     
     return ntuple(i -> local_interior[i] * dims[i], Val(N))

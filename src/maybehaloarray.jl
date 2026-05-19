@@ -9,7 +9,14 @@ MaybeHaloArray(a) = MaybeHaloArray{typeof(a)}(a, isactive(a))
 
 
 # delegazioni di funzioni comunemente usate (inoltrate a data quando active)
-Base.size(m::MaybeHaloArray) = size(m.data)
+Base.size(m::MaybeHaloArray) = global_size(m)
+local_size(m::MaybeHaloArray) = local_size(m.data)
+local_axes(m::MaybeHaloArray) = local_axes(m.data)
+interior_size(m::MaybeHaloArray) = interior_size(m.data)
+global_size(m::MaybeHaloArray) = global_size(m.data)
+full_size(m::MaybeHaloArray) = full_size(m.data)
+Base.axes(m::MaybeHaloArray) = axes(m.data)
+Base.axes(m::MaybeHaloArray, i::Int) = axes(m.data, i)
 
 # ndims sul tipo MaybeHaloArray: delega al tipo interno A
 Base.ndims(::Type{<:MaybeHaloArray{A}}) where {A} = ndims(A)
@@ -93,9 +100,6 @@ function Base.copy(m::MaybeHaloArray)
     newdata = copy(m.data)
     return MaybeHaloArray(newdata, m.active)
 end
-
-
-
 
 
 

@@ -9,7 +9,7 @@ end
 
 function _check_owned_face_update_compatible(du, u, dim::Int)
     ndims(du) == ndims(u) || throw(DimensionMismatch("du and u must have the same number of dimensions"))
-    size(du) == size(u) || throw(DimensionMismatch("du and u must have the same interior size"))
+    local_size(du) == local_size(u) || throw(DimensionMismatch("du and u must have the same local interior size"))
     halo_width(du) == halo_width(u) || throw(DimensionMismatch("du and u must have the same halo width"))
     _check_face_dim(u, dim)
     return nothing

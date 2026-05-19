@@ -136,7 +136,7 @@ Base.ndims(mha::MultiHaloArray{T, N, A}) where {T,N,A} = N
 Base.ndims(::Type{MultiHaloArray{T, N, A}}) where {T,N,A} = N
 
 # Size includes field axis
-@inline Base.size(mha::MultiHaloArray) = (length(mha.arrays), _spatial_size(first(values(mha.arrays)))...)
+@inline Base.size(mha::MultiHaloArray) = global_size(mha)
 
 @inline Base.size(mha::MultiHaloArray, i::Int) = size(mha)[i]
 
@@ -146,6 +146,8 @@ n_field(halos::MultiHaloArray{T,N,A}) where {T,N,A} = length(halos.arrays)
 
 
 @inline interior_size(halos::MultiHaloArray) = (n_field(halos), _spatial_interior_size(first(values(halos.arrays)))...)
+@inline local_size(halos::MultiHaloArray) = (n_field(halos), _spatial_size(first(values(halos.arrays)))...)
+@inline global_size(halos::MultiHaloArray) = (n_field(halos), _spatial_global_size(first(values(halos.arrays)))...)
 @inline full_size(halos::MultiHaloArray) = (n_field(halos), _spatial_full_size(first(values(halos.arrays)))...)
 @inline full_size(halos::MultiHaloArray,i) = full_size(halos)[i]
 @inline halo_width(halo::MultiHaloArray) = halo_width(first(values(halo.arrays)))
@@ -153,6 +155,8 @@ n_field(halos::MultiHaloArray{T,N,A}) where {T,N,A} = length(halos.arrays)
 @inline Base.parent(halo::MultiHaloArray)  = map(parent,halo.arrays)
 @inline Base.axes(x::MultiHaloArray) = (Base.OneTo(n_field(x)), _spatial_axes(first(values(x.arrays)))...)
 @inline Base.axes(x::MultiHaloArray,i) = axes(x)[i]
+@inline local_axes(x::MultiHaloArray) = (Base.OneTo(n_field(x)), _spatial_local_axes(first(values(x.arrays)))...)
+@inline local_axes(x::MultiHaloArray,i) = local_axes(x)[i]
 @inline tile_size(halos::MultiHaloArray) = tile_size(first(values(halos.arrays)))
 @inline tile_count(halos::MultiHaloArray) = tile_count(first(values(halos.arrays)))
 @inline tile_parent(halos::MultiHaloArray, tile_id::Integer) =

@@ -6,16 +6,20 @@ end
 const HaloArrayField = AbstractSingleHaloArray
 
 @inline _spatial_ndims(x) = ndims(x)
-@inline _spatial_size(x) = size(x)
+@inline _spatial_size(x) = local_size(x)
 @inline _spatial_interior_size(x) = interior_size(x)
+@inline _spatial_global_size(x) = global_size(x)
 @inline _spatial_full_size(x) = full_size(x)
 @inline _spatial_axes(x) = axes(x)
+@inline _spatial_local_axes(x) = local_axes(x)
 
 @inline _spatial_ndims(::ArrayOfHaloArray{T,N}) where {T,N} = N
-@inline _spatial_size(x::ArrayOfHaloArray) = size(first(parent(x)))
+@inline _spatial_size(x::ArrayOfHaloArray) = local_size(first(parent(x)))
 @inline _spatial_interior_size(x::ArrayOfHaloArray) = interior_size(first(parent(x)))
+@inline _spatial_global_size(x::ArrayOfHaloArray) = global_size(first(parent(x)))
 @inline _spatial_full_size(x::ArrayOfHaloArray) = full_size(first(parent(x)))
 @inline _spatial_axes(x::ArrayOfHaloArray) = axes(first(parent(x)))
+@inline _spatial_local_axes(x::ArrayOfHaloArray) = local_axes(first(parent(x)))
 
 function _check_array_fields(arrays::AbstractArray)
     isempty(arrays) && throw(ArgumentError("ArrayOfHaloArray requires at least one field"))
@@ -126,7 +130,7 @@ Base.ndims(::Type{<:ArrayOfHaloArray{T,N,Shape}}) where {T,N,Shape} = N + length
 @inline Base.parent(mha::ArrayOfHaloArray) = mha.arrays
 
 @inline function Base.size(mha::ArrayOfHaloArray)
-    return (field_shape(mha)..., size(first(mha.arrays))...)
+    return global_size(mha)
 end
 
 @inline Base.size(mha::ArrayOfHaloArray, i::Int) = size(mha)[i]
@@ -134,9 +138,15 @@ end
 @inline Base.axes(mha::ArrayOfHaloArray) = (map(Base.OneTo, field_shape(mha))..., axes(first(mha.arrays))...)
 @inline Base.axes(mha::ArrayOfHaloArray, i::Int) = axes(mha)[i]
 @inline Base.eachindex(mha::ArrayOfHaloArray) = CartesianIndices(axes(mha))
+@inline local_axes(mha::ArrayOfHaloArray) = (map(Base.OneTo, field_shape(mha))..., local_axes(first(mha.arrays))...)
+@inline local_axes(mha::ArrayOfHaloArray, i::Int) = local_axes(mha)[i]
 
 @inline function interior_size(mha::ArrayOfHaloArray)
     return (field_shape(mha)..., interior_size(first(mha.arrays))...)
+end
+
+@inline function local_size(mha::ArrayOfHaloArray)
+    return (field_shape(mha)..., local_size(first(mha.arrays))...)
 end
 
 @inline function full_size(mha::ArrayOfHaloArray)
@@ -146,7 +156,7 @@ end
 @inline full_size(mha::ArrayOfHaloArray, i::Int) = full_size(mha)[i]
 @inline halo_width(mha::ArrayOfHaloArray) = halo_width(first(mha.arrays))
 @inline halo_width(mha::ArrayOfHaloArray, i) = map(halo_width, mha.arrays)
-@inline global_size(mha::ArrayOfHaloArray) = size(mha)
+@inline global_size(mha::ArrayOfHaloArray) = (field_shape(mha)..., global_size(first(mha.arrays))...)
 
 function Base.getindex(mha::ArrayOfHaloArray{T,N,Shape}, I...) where {T,N,Shape}
     field_ndims = length(Shape)
