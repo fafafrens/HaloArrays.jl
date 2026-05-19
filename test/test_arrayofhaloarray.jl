@@ -39,12 +39,11 @@ end
     @test halo_width(fields) == 1
     @test parent(fields) === arrays
     @test fields[1, 2] === arrays[1, 2]
-    @test fields[1, 2, 3] == interior_view(arrays[1, 2])[3]
+    @test_throws BoundsError fields[1, 2, 3]
     @test isactive(fields)
 
-    fields[1, 2, 3] = -7
-    @test interior_view(arrays[1, 2])[3] == -7
     interior_view(arrays[1, 2])[3] = 123
+    @test_throws MethodError setindex!(fields, -7, 1, 2, 3)
 
     views = interior_view(fields)
     @test size(views) == (2, 2)

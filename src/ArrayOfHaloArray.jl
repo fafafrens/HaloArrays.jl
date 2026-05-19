@@ -1,9 +1,9 @@
 # Multi-field halo container using an AbstractArray to store the fields.
-mutable struct ArrayOfHaloArray{T,N,Shape,A}
+mutable struct ArrayOfHaloArray{T,N,Shape,A} <: AbstractHaloCollection
     arrays::A
 end
 
-const HaloArrayField = Union{HaloArray,LocalHaloArray,ThreadedHaloArray}
+const HaloArrayField = AbstractSingleHaloArray
 
 @inline _spatial_ndims(x) = ndims(x)
 @inline _spatial_size(x) = size(x)
@@ -153,29 +153,6 @@ function Base.getindex(mha::ArrayOfHaloArray{T,N,Shape}, I...) where {T,N,Shape}
 
     if length(I) <= field_ndims
         return getindex(mha.arrays, I...)
-    elseif length(I) == field_ndims + N
-        field_index = ntuple(d -> I[d], Val(field_ndims))
-        halo_index = ntuple(d -> I[field_ndims + d], Val(N))
-        field = mha.arrays[field_index...]
-        field isa ThreadedHaloArray &&
-            throw(ArgumentError("global scalar indexing is not implemented for ThreadedHaloArray fields"))
-        return getindex(interior_view(field), halo_index...)
-    else
-        throw(BoundsError(mha, I))
-    end
-end
-
-function Base.setindex!(mha::ArrayOfHaloArray{T,N,Shape}, value, I...) where {T,N,Shape}
-    field_ndims = length(Shape)
-
-    if length(I) == field_ndims + N
-        field_index = ntuple(d -> I[d], Val(field_ndims))
-        halo_index = ntuple(d -> I[field_ndims + d], Val(N))
-        field = mha.arrays[field_index...]
-        field isa ThreadedHaloArray &&
-            throw(ArgumentError("global scalar indexing is not implemented for ThreadedHaloArray fields"))
-        setindex!(interior_view(field), value, halo_index...)
-        return mha
     else
         throw(BoundsError(mha, I))
     end

@@ -230,13 +230,13 @@
         local_halo = LocalHaloArray(Int, (6,), 1; boundary_condition=:repeating)
 
         @test size(threaded) == size(local_halo)
-        @test_throws Exception threaded .+ local_halo
-        @test_throws Exception local_halo .+ threaded
+        @test_throws ArgumentError threaded .+ local_halo
+        @test_throws ArgumentError local_halo .+ threaded
 
         threaded_dest = similar(threaded)
         local_dest = similar(local_halo)
-        @test_throws Exception threaded_dest .= threaded .+ local_halo
-        @test_throws Exception local_dest .= local_halo .+ threaded
+        @test_throws ArgumentError threaded_dest .= threaded .+ local_halo
+        @test_throws ArgumentError local_dest .= local_halo .+ threaded
 
         threaded_fields = ThreadedMultiHaloArray(
             Int,
@@ -254,13 +254,13 @@
         ))
 
         @test size(threaded_fields) == size(local_fields)
-        @test_throws Exception threaded_fields .+ local_fields
-        @test_throws Exception local_fields .+ threaded_fields
+        @test_throws ArgumentError threaded_fields .+ local_fields
+        @test_throws ArgumentError local_fields .+ threaded_fields
 
         threaded_fields_dest = similar(threaded_fields)
         local_fields_dest = similar(local_fields)
-        @test_throws Exception threaded_fields_dest .= threaded_fields .+ local_fields
-        @test_throws Exception local_fields_dest .= local_fields .+ threaded_fields
+        @test_throws ArgumentError threaded_fields_dest .= threaded_fields .+ local_fields
+        @test_throws ArgumentError local_fields_dest .= local_fields .+ threaded_fields
     end
 
     @testset "threaded multi halo array compatibility checks" begin

@@ -47,14 +47,14 @@ function Broadcast.BroadcastStyle(::ThreadedHaloArrayStyle{N}, ::ThreadedHaloArr
     ThreadedHaloArrayStyle(Val(max(N,M)))
 end
 
-function Broadcast.BroadcastStyle(::ThreadedHaloArrayStyle{N}, ::HaloArrayStyle{M}) where {N,M}
-    ThreadedHaloArrayStyle(Val(max(N,M)))
-end
+_mixed_halo_backend_broadcast_error() =
+    throw(ArgumentError("broadcast between threaded and non-threaded halo containers is not supported"))
 
-function Broadcast.BroadcastStyle(::HaloArrayStyle{N}, ::ThreadedHaloArrayStyle{M}) where {N,M}
-    ThreadedHaloArrayStyle(Val(max(N,M)))
-end
+Broadcast.BroadcastStyle(::ThreadedHaloArrayStyle, ::HaloArrayStyle) =
+    _mixed_halo_backend_broadcast_error()
 
+Broadcast.BroadcastStyle(::HaloArrayStyle, ::ThreadedHaloArrayStyle) =
+    _mixed_halo_backend_broadcast_error()
 
 
 # ------------------------------------------------------------------------------

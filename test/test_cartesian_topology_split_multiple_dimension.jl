@@ -7,7 +7,7 @@ include("haloarrays.jl")
 include("boundary.jl")        # <<-- boundary prima
 include("interior_broadcast.jl")
 include("halo_exchange.jl")
-include("meybehaloarray.jl")
+include("maybehaloarray.jl")
 include("reduction.jl")
 
 MPI.Init()
@@ -193,4 +193,3 @@ end
 
 
 MPI.Barrier(comm)
-

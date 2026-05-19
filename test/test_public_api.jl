@@ -6,6 +6,10 @@ using HaloArrays
     ha = HaloArray(Float64, (5,), 2; boundary_condition=:repeating)
 
     @test ha isa HaloArray
+    @test ha isa AbstractDistributedHaloArray
+    @test ha isa AbstractSingleHaloArray
+    @test ha isa AbstractHaloArray
+    @test !(ha isa AbstractArray)
     @test interior_size(ha) == (5,)
     @test full_size(ha) == (9,)
     @test halo_width(ha) == 2
@@ -34,6 +38,10 @@ using HaloArrays
     @test full_size(resized) == (7,)
 
     local_ha = LocalHaloArray(Float64, (3,), 1; boundary_condition=:repeating)
+    @test local_ha isa AbstractSerialHaloArray
+    @test local_ha isa AbstractSingleHaloArray
+    @test local_ha isa AbstractHaloArray
+    @test !(local_ha isa AbstractArray)
     interior_view(local_ha) .= [1.0, 2.0, 3.0]
     @test start_halo_exchange!(local_ha) === local_ha
     @test finish_halo_exchange!(local_ha) === local_ha

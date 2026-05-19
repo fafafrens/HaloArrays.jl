@@ -1,4 +1,4 @@
-struct MaybeHaloArray{A}
+struct MaybeHaloArray{A<:AbstractHaloArray} <: AbstractHaloArray
     data::A
     active::Bool
 end
@@ -22,11 +22,7 @@ Base.ndims(m::MaybeHaloArray{A}) where {A} = ndims(A)
 @inline halo_width(m::MaybeHaloArray) = halo_width(m.data)
 
 Base.eltype(::Type{MaybeHaloArray{A}}) where {A} = eltype(A)
-#Base.getindex(m::MaybeHaloArray, inds...) = m.active ? getindex(m.data, inds...) : throw(ErrorException("MaybeHaloArray: getindex on inactive"))
-#Base.setindex!(m::MaybeHaloArray, v, inds...) = m.active ? setindex!(m.data, v, inds...) : throw(ErrorException("MaybeHaloArray: setindex! on inactive"))
 Base.length(m::MaybeHaloArray) = m.active ? length(m.data) : 0
-#Base.first(m::MaybeHaloArray, args...) = m.active ? first(m.data, args...) : throw(ErrorException("MaybeHaloArray: first on inactive"))
-#Base.last(m::MaybeHaloArray, args...) = m.active ? last(m.data, args...) : throw(ErrorException("MaybeHaloArray: last on inactive"))
 
 # show
 function Base.show(io::IO, m::MaybeHaloArray)
@@ -97,8 +93,6 @@ function Base.copy(m::MaybeHaloArray)
     newdata = copy(m.data)
     return MaybeHaloArray(newdata, m.active)
 end
-
-
 
 
 

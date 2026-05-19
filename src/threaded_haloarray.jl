@@ -80,7 +80,7 @@ function validate_boundary_condition(topology::ThreadedCartesianTopology{N}, bou
     return true
 end
 
-struct ThreadedHaloArray{T,N,A,Halo,Topo,BCondition}
+struct ThreadedHaloArray{T,N,A,Halo,Topo,BCondition} <: AbstractSerialHaloArray
     data::Vector{A}
     tile_size::NTuple{N,Int}
     topology::Topo

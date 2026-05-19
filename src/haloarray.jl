@@ -26,7 +26,7 @@ struct HaloCommState{N}
 end
 
 
-mutable struct HaloArray{T,N,A,Halo,B,BCondition}  # removed `Size` type parameter
+mutable struct HaloArray{T,N,A,Halo,B,BCondition} <: AbstractDistributedHaloArray
     data::A
     topology::CartesianTopology{N}
     comm_state::HaloCommState{N}
@@ -380,7 +380,6 @@ end
 end
 
 function Base.copyto!(dest::HaloArray, src::HaloArray)
-    @assert size(dest) == size(src) "Incompatible array sizes"
     copyto!(parent(dest), parent(src))
     return dest
 end
@@ -411,7 +410,6 @@ end
 function Base.map!(f,dest::HaloArray,src::HaloArray )
     dest_interior = interior_view(dest)
     src_interior = interior_view(src)
-    @assert size(dest_interior) == size(src_interior) "Incompatible array sizes"
     @views map!(f, dest_interior, src_interior)
     halo_exchange!(dest) # Use @views to avoid unnecessary copies
     return dest
@@ -421,7 +419,6 @@ function Base.map!(f,dest::HaloArray,src::Vararg{ HaloArray,2} )
     dest_interior = interior_view(dest)
     src_interior_1 = interior_view(src[1])
     src_interior_2 = interior_view(src[2])
-    @assert size(dest_interior) == size(src_interior_1) "Incompatible array sizes"
     @views map!(f, dest_interior, src_interior_1, src_interior_2)
     halo_exchange!(dest) # Use @views to avoid unnecessary copies
     return dest
@@ -432,7 +429,6 @@ function Base.map!(f,dest::HaloArray,src::Vararg{ HaloArray,3} )
     src_interior_1 = interior_view(src[1])
     src_interior_2 = interior_view(src[2])
     src_interior_3 = interior_view(src[3])
-    @assert size(dest_interior) == size(src_interior_1) "Incompatible array sizes"
     map!(f, dest_interior, src_interior_1, src_interior_2, src_interior_3)
     halo_exchange!(dest) # Use @views to avoid unnecessary copies
     return dest
@@ -444,7 +440,6 @@ function Base.map!(f, dest::HaloArray, src::Vararg{ HaloArray, N }) where {N}
     src_interiors = map(src) do s
         interior_view(s)
     end
-    @assert all(size(dest_interior) .== map(size, src_interiors)) "Incompatible array sizes"
     map!(f, dest_interior, src_interiors...)
     halo_exchange!(dest) # Use @views to avoid unnecessary copies
     return dest
@@ -481,7 +476,6 @@ end
 function fill_from_global_indices!(f,halo::HaloArray)
     h = halo_width(halo)
     local_shape =interior_range(halo)
-    #@assert length(local_shape) == ndims(halo)
 
     for local_I in CartesianIndices(local_shape)
         global_I = local_to_global_index(halo, Tuple(local_I))

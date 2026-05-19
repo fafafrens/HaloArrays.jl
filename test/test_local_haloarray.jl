@@ -18,9 +18,8 @@ using HaloArrays
         @test axes(ha) == (Base.OneTo(4),)
         @test collect(eachindex(ha)) == collect(eachindex(interior_view(ha)))
         @test collect(ha) == [10, 20, 30, 40]
-        ha[2] = 25
-        @test interior_view(ha)[2] == 25
-        interior_view(ha)[2] = 20
+        @test_throws MethodError ha[2]
+        @test_throws MethodError setindex!(ha, 25, 2)
         @test parent(ha)[1:2] == [10, 10]
         @test parent(ha)[3:6] == [10, 20, 30, 40]
         @test parent(ha)[7:8] == [40, 30]

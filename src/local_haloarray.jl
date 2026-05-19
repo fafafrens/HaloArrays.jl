@@ -1,4 +1,4 @@
-mutable struct LocalHaloArray{T,N,A,Halo,BCondition}
+mutable struct LocalHaloArray{T,N,A,Halo,BCondition} <: AbstractSerialHaloArray
     data::A
     boundary_condition::BCondition
 end
@@ -30,8 +30,6 @@ end
 @inline Base.eachindex(halo::LocalHaloArray) = eachindex(interior_view(halo))
 @inline Base.iterate(halo::LocalHaloArray) = iterate(interior_view(halo))
 @inline Base.iterate(halo::LocalHaloArray, state) = iterate(interior_view(halo), state)
-@inline Base.getindex(halo::LocalHaloArray, I...) = getindex(interior_view(halo), I...)
-@inline Base.setindex!(halo::LocalHaloArray, value, I...) = setindex!(interior_view(halo), value, I...)
 
 isactive(::LocalHaloArray) = true
 get_comm(::LocalHaloArray) = nothing
@@ -81,7 +79,6 @@ function Base.similar(halo::LocalHaloArray{T,N,A,Halo,BCondition}, element_type=
 end
 
 function Base.copyto!(dest::LocalHaloArray, src::LocalHaloArray)
-    @assert size(dest) == size(src) "Incompatible array sizes"
     copyto!(parent(dest), parent(src))
     return dest
 end
@@ -111,7 +108,6 @@ end
 function Base.map!(f, dest::LocalHaloArray, src::Vararg{LocalHaloArray,N}) where {N}
     dest_interior = interior_view(dest)
     src_interiors = map(interior_view, src)
-    @assert all(size(dest_interior) == size(s) for s in src_interiors) "Incompatible array sizes"
     map!(f, dest_interior, src_interiors...)
     boundary_condition!(dest)
     return dest

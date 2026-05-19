@@ -1,5 +1,5 @@
 # MultiHaloArray using NamedTuple to store fields
-mutable struct MultiHaloArray{T, N, A } #<: AbstractArray{T, N}
+mutable struct MultiHaloArray{T, N, A } <: AbstractHaloCollection
     arrays::A  # NamedTuple of HaloArrays
 end
 

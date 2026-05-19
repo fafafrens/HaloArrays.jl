@@ -8,6 +8,7 @@ using OhMyThreads: @tasks, tmap, tmapreduce
 using StaticArrays
 
 # Include library files
+include("abstract_haloarray.jl")
 include("cartesian_topology.jl")
 include("haloarray.jl")
 include("local_haloarray.jl")
@@ -17,8 +18,8 @@ include("threaded_multihaloarray.jl")
 include("multihaloarray.jl")
 include("local_multihaloarray.jl")
 include("face_ranges.jl")
-include("meybe.jl")
-include("meybehaloarray.jl")
+include("maybe.jl")
+include("maybehaloarray.jl")
 include("interior_broadcast.jl")
 include("interior_broadcast_marray.jl")
 include("interior_broadcast_maybe.jl")
@@ -31,6 +32,11 @@ include("save_hdf5.jl")
 
 # Core types
 export HaloArray,
+    AbstractHaloArray,
+    AbstractSingleHaloArray,
+    AbstractDistributedHaloArray,
+    AbstractSerialHaloArray,
+    AbstractHaloCollection,
     LocalHaloArray,
     ThreadedHaloArray,
     ThreadedMultiHaloArray,

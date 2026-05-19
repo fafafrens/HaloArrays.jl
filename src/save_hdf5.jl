@@ -1,135 +1,346 @@
+@inline _hdf5_dataset_dims(halo::AbstractSingleHaloArray) =
+    global_size(halo)
+@inline _hdf5_dataset_dims(halo::ArrayOfHaloArray) =
+    (field_shape(halo)..., _hdf5_dataset_dims(first(parent(halo)))...)
 
-function create_dataset_from_haloarray(g, name::String, halo::HaloArray)
-    local_size = size(halo)
+@inline _hdf5_chunk_dims(halo::HaloArray) = interior_size(halo)
+@inline _hdf5_chunk_dims(halo::AbstractSerialHaloArray) =
+    _hdf5_dataset_dims(halo)
+@inline _hdf5_chunk_dims(halo::ArrayOfHaloArray) =
+    (field_shape(halo)..., _hdf5_chunk_dims(first(parent(halo)))...)
+
+@inline _hdf5_comm(halo::HaloArray) = get_comm(halo)
+@inline _hdf5_comm(::AbstractSerialHaloArray) = nothing
+@inline _hdf5_comm(halo::ArrayOfHaloArray) = _hdf5_comm(first(parent(halo)))
+@inline _hdf5_comm(halo::MultiHaloArray) = _hdf5_comm(first(values(halo.arrays)))
+
+@inline _hdf5_field_name(name::Symbol) = String(name)
+@inline _hdf5_field_name(name) = string(name)
+
+function _hdf5_open_or_create_group(parent, name::String)
+    return haskey(parent, name) ? HDF5.open_group(parent, name) : HDF5.create_group(parent, name)
+end
+
+function _hdf5_snapshot(halo::LocalHaloArray)
+    return Array(interior_view(halo))
+end
+
+function _hdf5_snapshot(halo::ThreadedHaloArray{T,N}) where {T,N}
+    data = Array{T}(undef, global_size(halo))
+    owned_tile_size = tile_size(halo)
+
+    for tile_id in 1:tile_count(halo)
+        coords = tile_coordinates(halo, tile_id)
+        inds = ntuple(Val(N)) do d
+            first_owned = (coords[d] - 1) * owned_tile_size[d] + 1
+            last_owned = coords[d] * owned_tile_size[d]
+            first_owned:last_owned
+        end
+        data[inds...] .= interior_view(halo, tile_id)
+    end
+
+    return data
+end
+
+function _hdf5_snapshot(halo::ArrayOfHaloArray)
+    first(parent(halo)) isa HaloArray &&
+        throw(ArgumentError("snapshot assembly for MPI ArrayOfHaloArray is not supported; write it collectively with append_haloarray! or write_haloarray_timestep!"))
+
+    data = Array{eltype(halo)}(undef, _hdf5_dataset_dims(halo))
+    for I in CartesianIndices(parent(halo))
+        field_data = _hdf5_snapshot(parent(halo)[I])
+        inds = (Tuple(I)..., ntuple(_ -> Colon(), ndims(field_data))...)
+        data[inds...] .= field_data
+    end
+
+    return data
+end
+
+function _hdf5_snapshot(halo::MultiHaloArray)
+    _hdf5_comm(halo) === nothing ||
+        throw(ArgumentError("snapshot assembly for MPI MultiHaloArray is not supported; use gather_and_save_haloarray or write it collectively with append_haloarray!"))
+
+    fields = map(_hdf5_snapshot, values(halo.arrays))
+    return NamedTuple{keys(halo.arrays)}(fields)
+end
+
+function _hdf5_gather_snapshot(halo::HaloArray; root::Int=0)
+    return gather_haloarray(halo; root=root)
+end
+
+function _hdf5_gather_snapshot(halo::AbstractSerialHaloArray; root::Int=0)
+    return _hdf5_snapshot(halo)
+end
+
+function _hdf5_gather_snapshot(halo::ArrayOfHaloArray; root::Int=0)
+    comm = _hdf5_comm(halo)
+    comm === nothing && return _hdf5_snapshot(halo)
+
+    rank = MPI.Comm_rank(comm)
+    data = nothing
+    for I in CartesianIndices(parent(halo))
+        field_data = gather_haloarray(parent(halo)[I]; root=root)
+        if rank == root
+            if data === nothing
+                data = Array{eltype(halo)}(undef, (field_shape(halo)..., size(field_data)...))
+            end
+            inds = (Tuple(I)..., ntuple(_ -> Colon(), ndims(field_data))...)
+            data[inds...] .= field_data
+        end
+    end
+
+    return data
+end
+
+function _hdf5_gather_snapshot(halo::MultiHaloArray; root::Int=0)
+    fields = map(values(halo.arrays)) do field
+        _hdf5_gather_snapshot(field; root=root)
+    end
+    return NamedTuple{keys(halo.arrays)}(fields)
+end
+
+function _hdf5_write_snapshot!(parent, name::String, data::AbstractArray)
+    write(parent, name, data)
+    return nothing
+end
+
+function _hdf5_write_snapshot!(parent, name::String, data::NamedTuple)
+    group = HDF5.create_group(parent, name)
+    for (field_name, field_data) in pairs(data)
+        _hdf5_write_snapshot!(group, _hdf5_field_name(field_name), field_data)
+    end
+    return nothing
+end
+
+function _hdf5_save_snapshot(filename::String, data; dataset::String="dataset")
+    h5open(filename*".h5", "w") do file
+        _hdf5_write_snapshot!(file, dataset, data)
+    end
+    return nothing
+end
+
+function _hdf5_open(filename::String, mode::String, comm)
+    return comm === nothing ? h5open(filename, mode) : h5open(filename, mode, comm, MPI.Info())
+end
+
+function _hdf5_open(f::Function, filename::String, mode::String, comm)
+    fid = _hdf5_open(filename, mode, comm)
+    try
+        return f(fid)
+    finally
+        close(fid)
+    end
+end
+
+function _hdf5_write_timestep!(dset, halo::HaloArray, time_index::Integer)
+    local_data = interior_view(halo)
+    local_dims = size(local_data)
+    coords = halo.topology.cart_coords
+    offset_spatial = ntuple(i -> coords[i] * local_dims[i] + 1, length(coords))
+    slices = (time_index, ntuple(i -> offset_spatial[i]:(offset_spatial[i] + local_dims[i] - 1), length(offset_spatial))...)
+
+    dset[slices...] = local_data
+    return nothing
+end
+
+function _hdf5_write_timestep!(dset, halo::AbstractSerialHaloArray, time_index::Integer)
+    data = _hdf5_snapshot(halo)
+    slices = (time_index, ntuple(_ -> Colon(), ndims(data))...)
+    dset[slices...] = data
+    return nothing
+end
+
+function _hdf5_write_field_timestep!(dset, field::HaloArray, time_index::Integer, field_index)
+    local_data = interior_view(field)
+    local_dims = size(local_data)
+    coords = field.topology.cart_coords
+    offset_spatial = ntuple(i -> coords[i] * local_dims[i] + 1, length(coords))
+    spatial_slices = ntuple(i -> offset_spatial[i]:(offset_spatial[i] + local_dims[i] - 1), length(offset_spatial))
+    slices = (time_index, field_index..., spatial_slices...)
+
+    dset[slices...] = local_data
+    return nothing
+end
+
+function _hdf5_write_field_timestep!(dset, field::AbstractSerialHaloArray, time_index::Integer, field_index)
+    field_data = _hdf5_snapshot(field)
+    slices = (time_index, field_index..., ntuple(_ -> Colon(), ndims(field_data))...)
+    dset[slices...] = field_data
+    return nothing
+end
+
+function _hdf5_write_timestep!(dset, halo::ArrayOfHaloArray, time_index::Integer)
+    for I in CartesianIndices(parent(halo))
+        _hdf5_write_field_timestep!(dset, parent(halo)[I], time_index, Tuple(I))
+    end
+    return nothing
+end
+
+function _hdf5_write_timestep!(group::HDF5.Group, halo::MultiHaloArray, time_index::Integer)
+    for (field_name, field) in pairs(halo.arrays)
+        child = group[_hdf5_field_name(field_name)]
+        _hdf5_write_timestep!(child, field, time_index)
+    end
+    return nothing
+end
+
+function _create_hdf5_dataset_from_haloarray(g, name::String, halo)
     T = eltype(halo)
-    N = ndims(halo)
-    global_dims = global_size(halo)
+    global_dims = _hdf5_dataset_dims(halo)
 
-    # Dataset dimensions: (time, global_dims...)
     initial_size = (0, global_dims...)
     max_size = (-1, global_dims...)
-    chunk = (1, local_size...)
+    chunk = (1, _hdf5_chunk_dims(halo)...)
 
-    # Create dataspace from dims
-    
     dspace = dataspace(initial_size; max_dims=max_size)
-    
+
     if haskey(g, name)
-        # Open existing dataset
         return HDF5.open_dataset(g, name)
     end
-    # Create dataset and specify chunk size as a keyword argument
-    dset = HDF5.create_dataset(g, name, T, dspace; chunk=chunk)
 
+    dset = HDF5.create_dataset(g, name, T, dspace; chunk=chunk)
     return dset
 end
 
+function create_dataset_from_haloarray(g, name::String, halo::AbstractSingleHaloArray)
+    return _create_hdf5_dataset_from_haloarray(g, name, halo)
+end
 
-function append_haloarray!(dset::HDF5.Dataset, halo::HaloArray)
-    global_dims = global_size(halo)
-    local_data = interior_view(halo)
-    local_dims = size(local_data)
+function create_dataset_from_haloarray(g, name::String, halo::ArrayOfHaloArray)
+    return _create_hdf5_dataset_from_haloarray(g, name, halo)
+end
 
-    # Current dataset size (dims)
+function create_dataset_from_haloarray(g, name::String, halo::MultiHaloArray)
+    group = _hdf5_open_or_create_group(g, name)
+    for (field_name, field) in pairs(halo.arrays)
+        create_dataset_from_haloarray(group, _hdf5_field_name(field_name), field)
+    end
+    return group
+end
+
+function create_dataset_from_haloarray(g, name::String, halo::MaybeHaloArray)
+    isactive(halo) || return nothing
+    return create_dataset_from_haloarray(g, name, getdata(halo))
+end
+
+function _append_hdf5_dataset!(dset::HDF5.Dataset, halo)
     curr_dims = size(dset)
-
-    # New size after appending one time slice
     new_dims = (curr_dims[1] + 1, curr_dims[2:end]...)
-
-    # Extend the dataset along the time dimension
     HDF5.set_extent_dims(dset, new_dims)
 
-    # Compute the offset index in the dataset for this rank (process)
-    coords = halo.topology.cart_coords
-    offset_spatial = ntuple(i -> coords[i] * local_dims[i] + 1, length(coords))
-
-    # Hyperslab slices for new timestep = last index of first dimension
-    timestep_index = new_dims[1]
-    slices = (timestep_index, ntuple(i -> offset_spatial[i]:(offset_spatial[i] + local_dims[i] - 1), length(offset_spatial))...)
-
-    # Write local data into the hyperslab
-    dset[slices...] = local_data
-
+    _hdf5_write_timestep!(dset, halo, new_dims[1])
     return nothing
 end
 
+function append_haloarray!(dset::HDF5.Dataset, halo::AbstractSingleHaloArray)
+    return _append_hdf5_dataset!(dset, halo)
+end
 
+function append_haloarray!(dset::HDF5.Dataset, halo::ArrayOfHaloArray)
+    return _append_hdf5_dataset!(dset, halo)
+end
 
-function append_haloarray_to_file!(file::String, dataset_name::String, halo::HaloArray)
-
-    file *= ".h5"
-    # Ensure the file exists and is opened with the correct communicator
-    if !isfile(file)
-        h5open(file, "w") do _ end  # Create an empty file if it doesn't exist
+function append_haloarray!(group::HDF5.Group, halo::MultiHaloArray)
+    for (field_name, field) in pairs(halo.arrays)
+        child_name = _hdf5_field_name(field_name)
+        child = haskey(group, child_name) ? group[child_name] :
+            create_dataset_from_haloarray(group, child_name, field)
+        append_haloarray!(child, field)
     end
+    return nothing
+end
 
-    comm = get_comm(halo)
+function append_haloarray!(dset::HDF5.Dataset, halo::MaybeHaloArray)
+    isactive(halo) || return nothing
+    return append_haloarray!(dset, getdata(halo))
+end
 
-    h5open(file, "r+", comm) do fid
+function append_haloarray!(group::HDF5.Group, halo::MaybeHaloArray)
+    isactive(halo) || return nothing
+    return append_haloarray!(group, getdata(halo))
+end
 
-    # Create or open the dataset
+function append_haloarray_to_file!(file::String, dataset_name::String, halo::AbstractHaloArray)
+    file *= ".h5"
+    comm = _hdf5_comm(halo)
+    mode = isfile(file) ? "r+" : "w"
+
+    _hdf5_open(file, mode, comm) do fid
         dset = haskey(fid, dataset_name) ? fid[dataset_name] :
             create_dataset_from_haloarray(fid, dataset_name, halo)
 
-    # Append the current interior halo data to the dataset
         append_haloarray!(dset, halo)
-
-    end 
+    end
 
     return nothing
 end
 
+function append_haloarray_to_file!(file::String, dataset_name::String, halo::MaybeHaloArray)
+    isactive(halo) || return nothing
+    return append_haloarray_to_file!(file, dataset_name, getdata(halo))
+end
 
-
-function create_fixedsize_dataset_from_haloarray(g, name::String, halo, num_timesteps::Int)
-    local_size = size(halo)
+function _create_fixedsize_hdf5_dataset_from_haloarray(g, name::String, halo, num_timesteps::Int)
     T = eltype(halo)
-    global_dims = global_size(halo)
+    global_dims = _hdf5_dataset_dims(halo)
 
     initial_size = (num_timesteps, global_dims...)
-    max_size = initial_size  # fixed size, no extension
-    chunk = (1, local_size...)
+    max_size = initial_size
+    chunk = (1, _hdf5_chunk_dims(halo)...)
 
     dspace = HDF5.dataspace(initial_size; max_dims=max_size)
     dset = HDF5.create_dataset(g, name, T, dspace; chunk=chunk)
     return dset
 end
 
+function create_fixedsize_dataset_from_haloarray(g, name::String, halo::AbstractSingleHaloArray, num_timesteps::Int)
+    return _create_fixedsize_hdf5_dataset_from_haloarray(g, name, halo, num_timesteps)
+end
 
+function create_fixedsize_dataset_from_haloarray(g, name::String, halo::ArrayOfHaloArray, num_timesteps::Int)
+    return _create_fixedsize_hdf5_dataset_from_haloarray(g, name, halo, num_timesteps)
+end
 
-function write_haloarray_timestep!(dset, halo, timestep)
-    local_data = interior_view(halo)
-    local_dims = size(local_data)
+function create_fixedsize_dataset_from_haloarray(g, name::String, halo::MultiHaloArray, num_timesteps::Int)
+    group = _hdf5_open_or_create_group(g, name)
+    for (field_name, field) in pairs(halo.arrays)
+        create_fixedsize_dataset_from_haloarray(group, _hdf5_field_name(field_name), field, num_timesteps)
+    end
+    return group
+end
 
-    coords = halo.topology.cart_coords
-    offset_spatial = ntuple(i -> coords[i] * local_dims[i] + 1, length(coords))
-    slices = (timestep + 1, ntuple(i -> offset_spatial[i]:(offset_spatial[i] + local_dims[i] - 1), length(offset_spatial))...)
+function create_fixedsize_dataset_from_haloarray(g, name::String, halo::MaybeHaloArray, num_timesteps::Int)
+    isactive(halo) || return nothing
+    return create_fixedsize_dataset_from_haloarray(g, name, getdata(halo), num_timesteps)
+end
 
-    dset[slices...] = local_data
+function write_haloarray_timestep!(dset, halo::AbstractHaloArray, timestep)
+    _hdf5_write_timestep!(dset, halo, timestep + 1)
     return nothing
 end
 
+function write_haloarray_timestep!(dset, halo::MaybeHaloArray, timestep)
+    isactive(halo) || return nothing
+    return write_haloarray_timestep!(dset, getdata(halo), timestep)
+end
 
 function create_haloarray_output_file(filename::String, dataset_name::String,
-                                      halo::HaloArray, num_timesteps::Int)
-    comm = get_comm(halo)
-    rank = MPI.Comm_rank(comm)
+                                      halo::AbstractHaloArray, num_timesteps::Int)
+    comm = _hdf5_comm(halo)
+    mode = isfile(filename) ? "r+" : "w"
+    fid = _hdf5_open(filename, mode, comm)
 
-    # Rank 0 creates the file (if not existing)
-    if rank == 0 && !isfile(filename)
-        h5open(filename, "w",comm) do _ end
-    end
-    #MPI.Barrier(comm)  # Synchronize all ranks before proceeding
-
-    # Open the file in parallel mode
-    fid = h5open(filename, "r+",comm)
-
-    # Create dataset if it doesn't already exist
     dset = haskey(fid, dataset_name) ?
             fid[dataset_name] :
             create_fixedsize_dataset_from_haloarray(fid, dataset_name, halo, num_timesteps)
 
     return fid, dset
+end
+
+function create_haloarray_output_file(filename::String, dataset_name::String,
+                                      halo::MaybeHaloArray, num_timesteps::Int)
+    isactive(halo) || return nothing, nothing
+    return create_haloarray_output_file(filename, dataset_name, getdata(halo), num_timesteps)
 end
 
 
@@ -147,34 +358,65 @@ function save_array_hdf5(filename::String, data, comm::MPI.Comm; root::Int=0)
         end
         println("Rank $rank wrote data to $filename")
     else
-        # Non-root ranks do nothing
         nothing
     end
 end
 
+function save_array_hdf5(filename::String, data; dataset::String="dataset")
+    return _hdf5_save_snapshot(filename, data; dataset=dataset)
+end
+
 function gather_and_save_haloarray(filename::String, halo::HaloArray; root::Int=0)
     comm = halo.topology.cart_comm
-    gathered = gather_haloarray(halo; root=root)
+    gathered = _hdf5_gather_snapshot(halo; root=root)
     if MPI.Comm_rank(comm) == root
         save_array_hdf5(filename, gathered, comm; root=root)
     end
 end
 
+function gather_and_save_haloarray(filename::String, halo::AbstractSerialHaloArray; root::Int=0)
+    gathered = _hdf5_gather_snapshot(halo; root=root)
+    save_array_hdf5(filename, gathered)
+    return nothing
+end
+
+function gather_and_save_haloarray(filename::String, halo::ArrayOfHaloArray; root::Int=0)
+    comm = _hdf5_comm(halo)
+    gathered = _hdf5_gather_snapshot(halo; root=root)
+    if comm === nothing || MPI.Comm_rank(comm) == root
+        save_array_hdf5(filename, gathered)
+    end
+    comm === nothing || MPI.Barrier(comm)
+    return nothing
+end
+
+function gather_and_save_haloarray(filename::String, halo::MultiHaloArray; root::Int=0)
+    comm = _hdf5_comm(halo)
+    gathered = _hdf5_gather_snapshot(halo; root=root)
+    if comm === nothing || MPI.Comm_rank(comm) == root
+        _hdf5_save_snapshot(filename, gathered)
+    end
+    comm === nothing || MPI.Barrier(comm)
+    return nothing
+end
+
+function gather_and_save_haloarray(filename::String, halo::MaybeHaloArray; root::Int=0)
+    isactive(halo) || return nothing
+    return gather_and_save_haloarray(filename, getdata(halo); root=root)
+end
 
 """
-    gather_and_append_haloarray!(filename::String, dataset::String, halo::HaloArray, comm::MPI.Comm; root::Int=0)
+    gather_and_append_haloarray!(filename::String, dataset::String, halo::HaloArray; root::Int=0)
 
-Effettua il gather del `HaloArray` sul root e lo aggiunge come nuovo timestep al dataset HDF5, indipendentemente dalla dimensione.
+Gather `halo` on `root` and append it as a new timestep in `dataset`.
 """
 function gather_and_append_haloarray!(filename::String, dataset::String, halo::HaloArray; root::Int=0)
-    comm= halo.topology.cart_comm
+    comm = halo.topology.cart_comm
     rank = MPI.Comm_rank(comm)
-    gathered = gather_haloarray(halo; root=root)
-    #@show sum(gathered) ,size(gathered)
+    gathered = _hdf5_gather_snapshot(halo; root=root)
     filename_h5 = filename * ".h5"
-    
-    if rank == root
 
+    if rank == root
         if !isfile(filename_h5)
             h5open(filename_h5, "w") do _ end
         end
@@ -185,27 +427,28 @@ function gather_and_append_haloarray!(filename::String, dataset::String, halo::H
                 curr_dims = size(dset)
                 new_dims = (curr_dims[1] + 1, curr_dims[2:end]...)
                 HDF5.set_extent_dims(dset, new_dims)
-                # Costruisci la tupla di indici: (nuovo_t, :, :, ...)
-                #@show new_dims 
                 inds = (new_dims[1], ntuple(_ -> Colon(), ndims(gathered))...)
-                #@show inds
-                #@show inds
-                #@show dset[inds...], gathered
                 dset[inds...] = gathered
-                #@show dset[inds...] , gathered
             else
-                # Crea dataset con dimensione temporale estendibile
                 global_dims = size(gathered)
                 dspace = HDF5.dataspace((1, global_dims...); max_dims=(-1, global_dims...))
                 dset = HDF5.create_dataset(file, dataset, eltype(gathered), dspace; chunk=(1, global_dims...))
-                
                 inds = (1, ntuple(_ -> Colon(), ndims(gathered))...)
-                #@show inds
-                #@show dset[inds...], gathered
                 dset[inds...] = gathered
-                #@show dset[inds...] , gathered
             end
         end
     end
+
     MPI.Barrier(comm)
+    return nothing
+end
+
+function gather_and_append_haloarray!(filename::String, dataset::String, halo::AbstractHaloArray; root::Int=0)
+    append_haloarray_to_file!(filename, dataset, halo)
+    return nothing
+end
+
+function gather_and_append_haloarray!(filename::String, dataset::String, halo::MaybeHaloArray; root::Int=0)
+    isactive(halo) || return nothing
+    return gather_and_append_haloarray!(filename, dataset, getdata(halo); root=root)
 end
