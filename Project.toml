@@ -7,12 +7,14 @@ authors = ["Eduardo Grossi"]
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 MPI = "da04e1cc-30fd-572f-bb4f-1f8673147195"
 HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
+OhMyThreads = "67456a42-1dca-4109-a031-0a68de7e3ad5"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [compat]
 julia = "1.10"
 MPI = "0.20, 0.21"
 HDF5 = "0.16, 0.17"
+OhMyThreads = "0.8"
 StaticArrays = "1"
 
 [weakdeps]

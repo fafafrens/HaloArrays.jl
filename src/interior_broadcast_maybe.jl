@@ -25,6 +25,22 @@ end
 Broadcast.BroadcastStyle(::MaybeHaloArrayStyle{Ndim}, ::MaybeHaloArrayStyle{Mdim}) where {Ndim,Mdim} =
     MaybeHaloArrayStyle(Val(max(Ndim, Mdim)))
 
+_mixed_maybe_broadcast_error() =
+    throw(ArgumentError("broadcast between MaybeHaloArray and non-Maybe halo containers is not supported; wrap all halo operands in MaybeHaloArray or unwrap first"))
+
+Broadcast.BroadcastStyle(::MaybeHaloArrayStyle, ::HaloArrayStyle) =
+    _mixed_maybe_broadcast_error()
+Broadcast.BroadcastStyle(::HaloArrayStyle, ::MaybeHaloArrayStyle) =
+    _mixed_maybe_broadcast_error()
+Broadcast.BroadcastStyle(::MaybeHaloArrayStyle, ::ThreadedHaloArrayStyle) =
+    _mixed_maybe_broadcast_error()
+Broadcast.BroadcastStyle(::ThreadedHaloArrayStyle, ::MaybeHaloArrayStyle) =
+    _mixed_maybe_broadcast_error()
+Broadcast.BroadcastStyle(::MaybeHaloArrayStyle, ::MultiHaloArrayStyle) =
+    _mixed_maybe_broadcast_error()
+Broadcast.BroadcastStyle(::MultiHaloArrayStyle, ::MaybeHaloArrayStyle) =
+    _mixed_maybe_broadcast_error()
+
 # rendi MaybeHaloArray broadcastable
 Broadcast.broadcastable(x::MaybeHaloArray) = x
 
@@ -95,6 +111,5 @@ function Base.similar(bc::Broadcasted{<:MaybeHaloArrayStyle})
     ha = find_maybe(bc)
     return similar(ha)
 end
-
 
 

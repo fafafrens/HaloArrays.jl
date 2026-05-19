@@ -195,7 +195,7 @@ end
 end
 
 function halo_exchange!(halo::ThreadedHaloArray)
-    Threads.@threads for tile_id in eachindex(parent(halo))
+    @tasks for tile_id in eachindex(parent(halo))
         @inbounds for dim in 1:ndims(halo), side in 1:2
             neighbor_id = neighbor_tile_id(halo, tile_id, dim, side)
             if neighbor_id != 0
@@ -309,7 +309,7 @@ function boundary_condition!(halo::ThreadedHaloArray, tile_id::Integer, s::Side,
 end
 
 function boundary_condition!(halo::ThreadedHaloArray)
-    Threads.@threads for tile_id in eachindex(parent(halo))
+    @tasks for tile_id in eachindex(parent(halo))
         ntuple(Val(ndims(halo))) do D
             ntuple(Val(2)) do S
                 boundary_condition!(halo, tile_id, Side(S), Dim(D))
@@ -329,14 +329,14 @@ start_halo_exchange!(halo::ThreadedHaloArray) = halo_exchange!(halo)
 finish_halo_exchange!(halo::ThreadedHaloArray) = halo
 
 function fill_interior(halo::ThreadedHaloArray, value)
-    for tile_id in eachindex(parent(halo))
+    @tasks for tile_id in eachindex(parent(halo))
         fill!(interior_view(halo, tile_id), value)
     end
     return halo
 end
 
 function Base.fill!(halo::ThreadedHaloArray, value)
-    for tile in parent(halo)
+    @tasks for tile in parent(halo)
         fill!(tile, value)
     end
     return halo
@@ -360,7 +360,7 @@ end
 
 function Base.copy(halo::ThreadedHaloArray)
     copied = similar(halo)
-    for tile_id in eachindex(parent(halo))
+    @tasks for tile_id in eachindex(parent(halo))
         copyto!(tile_parent(copied, tile_id), tile_parent(halo, tile_id))
     end
     return copied

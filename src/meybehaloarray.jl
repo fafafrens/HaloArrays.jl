@@ -4,9 +4,7 @@ struct MaybeHaloArray{A}
 end
 
 
-MaybeHaloArray(a::HaloArray) = MaybeHaloArray{typeof(a)}(a, isactive(a))
-# convenience constructor per MultiHaloArray: active = true se almeno un campo è active
-MaybeHaloArray(a::MultiHaloArray) = MaybeHaloArray{typeof(a)}(a, isactive(a))
+MaybeHaloArray(a) = MaybeHaloArray{typeof(a)}(a, isactive(a))
 
 
 
@@ -21,7 +19,7 @@ Base.ndims(m::MaybeHaloArray{A}) where {A} = ndims(A)
 
 @inline halo_width(::Type{<:MaybeHaloArray{A}}) where {A} = halo_width(A)
 
-@inline halo_width(m::MaybeHaloArray{A}) where A = halo_width(A)
+@inline halo_width(m::MaybeHaloArray) = halo_width(m.data)
 
 Base.eltype(::Type{MaybeHaloArray{A}}) where {A} = eltype(A)
 #Base.getindex(m::MaybeHaloArray, inds...) = m.active ? getindex(m.data, inds...) : throw(ErrorException("MaybeHaloArray: getindex on inactive"))
@@ -99,7 +97,6 @@ function Base.copy(m::MaybeHaloArray)
     newdata = copy(m.data)
     return MaybeHaloArray(newdata, m.active)
 end
-
 
 
 
