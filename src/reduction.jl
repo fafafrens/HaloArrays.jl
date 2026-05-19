@@ -38,7 +38,62 @@ function Base.all(f::F, u::HaloArray) where {F }
     MPI.Allreduce(xlocal, &, get_comm(u))
 end
 
+function _combine_threaded_reduction(op, values)
+    result = first(values)
+    for i in 2:length(values)
+        result = op(result, values[i])
+    end
+    return result
+end
 
+for func in (:mapreduce, :mapfoldl, :mapfoldr)
+    @eval function Base.$func(
+            f::F, op::OP, halo::LocalHaloArray, etc::Vararg{LocalHaloArray}; kws...,
+        ) where {F, OP}
+        interiors = map(interior_view, (halo, etc...))
+        return $func(f, op, interiors...; kws...)
+    end
+
+    @eval function Base.$func(
+            f::F, op::OP, z::Iterators.Zip{<:Tuple{Vararg{LocalHaloArray}}}; kws...,
+        ) where {F, OP}
+        g(args...) = f(args)
+        return $func(g, op, z.is...; kws...)
+    end
+
+    @eval function Base.$func(
+            f::F, op::OP, halo::ThreadedHaloArray, etc::Vararg{ThreadedHaloArray}; kws...,
+        ) where {F, OP}
+        tile_results = tmap(1:tile_count(halo)) do tile_id
+            interiors = map(h -> interior_view(h, tile_id), (halo, etc...))
+            $func(f, op, interiors...; kws...)
+        end
+        return _combine_threaded_reduction(op, tile_results)
+    end
+
+    @eval function Base.$func(
+            f::F, op::OP, z::Iterators.Zip{<:Tuple{Vararg{ThreadedHaloArray}}}; kws...,
+        ) where {F, OP}
+        g(args...) = f(args)
+        return $func(g, op, z.is...; kws...)
+    end
+end
+
+function Base.any(f::F, u::LocalHaloArray) where {F}
+    return any(f, interior_view(u))
+end
+
+function Base.all(f::F, u::LocalHaloArray) where {F}
+    return all(f, interior_view(u))
+end
+
+function Base.any(f::F, u::ThreadedHaloArray) where {F}
+    return tmapreduce(tile_id -> any(f, interior_view(u, tile_id)), |, 1:tile_count(u))
+end
+
+function Base.all(f::F, u::ThreadedHaloArray) where {F}
+    return tmapreduce(tile_id -> all(f, interior_view(u, tile_id)), &, 1:tile_count(u))
+end
 
 for (func, commutative) in [:mapreduce => true, :mapfoldl => false, :mapfoldr => false]
     @eval function Base.$func(

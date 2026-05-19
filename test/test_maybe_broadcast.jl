@@ -14,6 +14,7 @@ using HaloArrays
     @test isactive(maybe)
     @test length(maybe) == 4
     @test unwrap(maybe) === ha
+    @test halo_width(maybe) == 1
 
     shifted = maybe .+ 10
     @test shifted isa MaybeHaloArray
@@ -40,6 +41,7 @@ using HaloArrays
     v .= 10 .* v
     multi = MultiHaloArray((; u, v))
     maybe_multi = MaybeHaloArray(multi)
+    @test halo_width(maybe_multi) == 1
 
     shifted_multi = maybe_multi .+ 5
     @test shifted_multi isa MaybeHaloArray
@@ -47,6 +49,25 @@ using HaloArrays
     shifted_fields = unwrap(shifted_multi)
     @test collect(interior_view(shifted_fields.arrays.u)) == [i + 5 for i in 1:4]
     @test collect(interior_view(shifted_fields.arrays.v)) == [10 * i + 5 for i in 1:4]
+
+    local_ha = LocalHaloArray(Int, (4,), 1; boundary_condition=:repeating)
+    maybe_local = MaybeHaloArray(local_ha)
+    @test isactive(maybe_local)
+    @test halo_width(maybe_local) == 1
+
+    threaded_ha = ThreadedHaloArray(Int, (2,), 1; dims=(2,), boundary_condition=:repeating)
+    maybe_threaded = MaybeHaloArray(threaded_ha)
+    @test isactive(maybe_threaded)
+    @test halo_width(maybe_threaded) == 1
+
+    @test_throws ArgumentError maybe .+ ha
+    @test_throws ArgumentError ha .+ maybe
+    @test_throws ArgumentError maybe_local .+ local_ha
+    @test_throws ArgumentError local_ha .+ maybe_local
+    @test_throws ArgumentError maybe_threaded .+ threaded_ha
+    @test_throws ArgumentError threaded_ha .+ maybe_threaded
+    @test_throws ArgumentError maybe_multi .+ multi
+    @test_throws ArgumentError multi .+ maybe_multi
 
     active_value = active(7)
     inactive_value = inactive(7)

@@ -4,6 +4,7 @@ module HaloArrays
 using MPI
 using HDF5
 using LinearAlgebra
+using OhMyThreads: @tasks, tmap, tmapreduce
 using StaticArrays
 
 # Include library files

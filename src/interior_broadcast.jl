@@ -139,7 +139,7 @@ end
 
 @inline function Base.copyto!(dest::ThreadedHaloArray, bc::Broadcasted{<:ThreadedHaloArrayStyle})
     bc_flat = Broadcast.flatten(bc)
-    Threads.@threads for tile_id in eachindex(parent(dest))
+    @tasks for tile_id in eachindex(parent(dest))
         copyto!(interior_view(dest, tile_id), unpack_ha_tile(bc_flat, tile_id))
     end
     return dest
@@ -173,7 +173,7 @@ end
 
 function Broadcast.materialize!(dest::ThreadedHaloArray, bc::Broadcasted)
     bc_flat = Broadcast.flatten(bc)
-    Threads.@threads for tile_id in eachindex(parent(dest))
+    @tasks for tile_id in eachindex(parent(dest))
         Broadcast.materialize!(interior_view(dest, tile_id), unpack_ha_tile(bc_flat, tile_id))
     end
     return dest

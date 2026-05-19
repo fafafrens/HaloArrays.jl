@@ -35,6 +35,7 @@ end
         include_test("test_mharray.jl")
         include_test("test_arrayofhaloarray.jl")
         include_test("test_maybe_broadcast.jl")
+        include_test("test_local_threaded_reduction.jl")
     else
         @info "Skipping unit tests (set HALOARRAYS_RUN_UNIT_TESTS=true to enable)"
     end
