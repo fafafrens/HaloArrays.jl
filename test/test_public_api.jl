@@ -21,9 +21,21 @@ using HaloArrays
     @test length(axes(ha, 1)) == size(ha, 1)
     @test length(local_axes(ha, 1)) == local_size(ha, 1)
     @test length(ha) == prod(global_size(ha))
+    owned_first = ha.topology.cart_coords[1] * local_size(ha, 1) + 1
+    owned_last = owned_first + local_size(ha, 1) - 1
+    @test local_to_global_index(ha, (1,)) == (owned_first,)
+    @test local_to_global_index(ha, (5,)) == (owned_last,)
+    @test global_to_local_index(ha, (owned_first,)) == (3,)
+    @test global_to_local_index(ha, (owned_last,)) == (7,)
+    @test_throws BoundsError local_to_global_index(ha, (0,))
 
     fill_interior(ha, 3.0)
     @test all(interior_view(ha) .== 3.0)
+
+    fill_from_global_indices!(ha) do I
+        I[1]
+    end
+    @test collect(interior_view(ha)) == collect(owned_first:owned_last)
 
     interior_view(ha)[1] = 4.0
     @test interior_view(ha)[1] == 4.0
@@ -34,7 +46,7 @@ using HaloArrays
         @test parent(ha)[1:2] == [4.0, 4.0]
     end
     if ha.topology.neighbors[1][2] == MPI.PROC_NULL
-        @test parent(ha)[8:9] == [3.0, 3.0]
+        @test parent(ha)[8:9] == [owned_last, owned_last]
     end
 
     resized_global_size = ntuple(d -> 3 * ha.topology.dims[d], Val(ndims(ha)))

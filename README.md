@@ -29,7 +29,15 @@ MPI-backed features require an MPI runtime (OpenMPI or MPICH).
 - `LocalMultiHaloArray`: named collection of local halo fields.
 - `CartesianTopology`: MPI Cartesian topology helper.
 
-`HaloArray` intentionally does not behave like a global Julia array for indexing. Use `interior_view`, `parent`, `local_to_global_index`, and `global_to_local_index` for explicit local/global behavior. `LocalHaloArray` supports array-like indexing over its interior.
+`size(u)` and `axes(u)` describe the global logical domain for every halo
+container. Local owned data is accessed through `local_size(u)`, `local_axes(u)`,
+and `interior_view(u)`.
+
+Scalar indexing on `HaloArray` uses global indices, but it is local-only: it
+works only for global cells owned by the current MPI rank and throws otherwise.
+It is intended for diagnostics and setup, not stencil kernels or hot loops. Use
+`interior_view`, `parent`, `local_to_global_index`, and `global_to_local_index`
+when you need explicit local/global behavior.
 
 ## Typical Workflow
 
@@ -40,6 +48,20 @@ Most stencil updates follow this sequence:
 3. Repeat for each time step.
 
 This keeps interior ownership explicit and halo validity predictable.
+
+## Global and Local Semantics
+
+The package separates logical array shape from owned storage:
+
+- `size(u)` / `axes(u)`: global logical array shape.
+- `local_size(u)` / `local_axes(u)`: cells owned by this rank or local backend.
+- `interior_view(u)`: writable owned cells, excluding halos.
+- `parent(u)`: raw storage including halos.
+- `full_size(u)`: raw storage size including halos.
+
+For MPI-backed `HaloArray`, scalar `u[I...]` does not communicate. If `I` is not
+owned by the current rank, it errors. This keeps expensive communication out of
+generic indexing and makes performance-critical code use local views explicitly.
 
 ## Halo Exchange
 
@@ -178,6 +200,10 @@ Keep independent arrays when fields require different halo widths, different gri
 - Data movement and reduction: `gather_haloarray`, `mapreduce_haloarray_dims`
 - HDF5 helpers: `create_haloarray_output_file`, `write_haloarray_timestep!`, `gather_and_save_haloarray`
 
+`local_to_global_index(u, I)` expects a local interior index, excluding halo
+offsets. `global_to_local_index(u, I)` returns the full parent-storage index for
+owned global cells and `nothing` for cells owned by another rank.
+
 ## Examples
 
 Local heat-diffusion examples:
@@ -197,6 +223,14 @@ mpiexec -n 4 julia --project=. examples/tes_heat_3d.jl
 ```
 
 The local examples share their finite-difference update in `examples/heat_diffusion_common.jl`.
+
+DiffEq/OrdinaryDiffEq example:
+
+```bash
+julia --project=/tmp/haloarrays-ode-example -e 'using Pkg; Pkg.develop(path=pwd()); Pkg.add(["DiffEqBase", "OrdinaryDiffEq"])'
+julia --project=/tmp/haloarrays-ode-example examples/ode_diffeq.jl
+mpiexec -n 2 julia --project=/tmp/haloarrays-ode-example examples/ode_diffeq.jl
+```
 
 On machines with fewer cores than ranks, use `--oversubscribe`:
 

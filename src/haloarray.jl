@@ -336,7 +336,9 @@ Convert a local interior index (excluding halo) to global index (1-based).
 function local_to_global_index(halo::HaloArray{T,N,A,Halo,B,BCondition}, local_idx::NTuple{N,<:Integer}) where {T,N,A,Halo,B,BCondition}
     coords = halo.topology.cart_coords
     size_local = interior_size(halo)
-    global_idx = ntuple(i -> coords[i] * size_local[i] + local_idx[i]-halo_width(halo), Val(N))
+    all(i -> 1 <= local_idx[i] <= size_local[i], 1:N) ||
+        throw(BoundsError(halo, local_idx))
+    global_idx = ntuple(i -> coords[i] * size_local[i] + local_idx[i], Val(N))
     return global_idx
 end
 
@@ -384,14 +386,16 @@ end
 
 @inline function is_in_rank(halo::HaloArray, global_idx::NTuple{N,<:Integer}) where {N}
     coords = halo.topology.cart_coords
-    owner_coords = owner_coordinares(halo,global_idx)
+    owner_coords = owner_coordinates(halo, global_idx)
     return (owner_coords == coords)
-end 
+end
 
-@inline function owner_coordinares(halo::HaloArray, global_idx::NTuple{N,<:Integer}) where {N}
+@inline function owner_coordinates(halo::HaloArray, global_idx::NTuple{N,<:Integer}) where {N}
     size_local = interior_size(halo)
     ntuple(i -> (global_idx[i] - 1) ÷ size_local[i], Val(N))
-end 
+end
+
+const owner_coordinares = owner_coordinates
 
 #function local_offset(halo::HaloArray)
 #    size_local =interior_size(halo)
@@ -526,7 +530,9 @@ function fill_from_global_indices!(f,halo::HaloArray)
     local_shape =interior_range(halo)
 
     for local_I in CartesianIndices(local_shape)
-        global_I = local_to_global_index(halo, Tuple(local_I))
+        full_I = Tuple(local_I)
+        local_interior_I = ntuple(i -> full_I[i] - h, Val(ndims(halo)))
+        global_I = local_to_global_index(halo, local_interior_I)
         halo.data[local_I] = f(global_I)
     end
 
