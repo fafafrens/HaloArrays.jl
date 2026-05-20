@@ -9,6 +9,13 @@ Local no-MPI examples
   - 3D: julia --project=. examples/heat_diffusion_local_3d.jl
 - The finite-difference update is shared in `examples/heat_diffusion_common.jl`, so the same stencil can be used by local arrays and MPI-backed `HaloArray`s.
 
+DiffEq example
+- `examples/ode_diffeq.jl` solves `du/dt = -0.1u` with `OrdinaryDiffEq.Tsit5()` for `LocalHaloArray`, `ThreadedHaloArray`, and MPI-backed `HaloArray`.
+- The solver packages are optional example dependencies, not package dependencies:
+  - julia --project=/tmp/haloarrays-ode-example -e 'using Pkg; Pkg.develop(path=pwd()); Pkg.add(["DiffEqBase", "OrdinaryDiffEq"])'
+  - julia --project=/tmp/haloarrays-ode-example examples/ode_diffeq.jl
+  - mpiexec -n 2 julia --project=/tmp/haloarrays-ode-example examples/ode_diffeq.jl
+
 Run prerequisites
 - Julia with the project instantiated at the repo root:
   - julia --project=. -e 'using Pkg; Pkg.instantiate()'

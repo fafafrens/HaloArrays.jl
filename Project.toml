@@ -19,14 +19,13 @@ StaticArrays = "1"
 
 [weakdeps]
 DiffEqBase = "2b5f629d-d688-5b77-993f-72d75c75574e"
-RecursiveArrayTools = "731186ca-8d62-57ce-b412-fbd966d074cd"
 
 [extensions]
 HaloArraysDiffEqBaseExt = "DiffEqBase"
-HaloArraysRecursiveArrayToolsExt = "RecursiveArrayTools"
 
 [extras]
+DiffEqBase = "2b5f629d-d688-5b77-993f-72d75c75574e"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test"]
+test = ["Test", "DiffEqBase"]

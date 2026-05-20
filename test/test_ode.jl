@@ -69,13 +69,22 @@ end
     topology = _ode_topology(MPI.COMM_WORLD)
     u = _ode_initial_condition(topology)
     local_u = LocalHaloArray(Float64, (3, 4), 1; boundary_condition=:repeating)
+    threaded_u = ThreadedHaloArray(Float64, (3, 4), 1; dims=(2, 1), boundary_condition=:repeating)
+    array_fields = ArrayOfHaloArray(LocalHaloArray, Float64, (3, 4), 1;
+        boundary_conditions=[:repeating, :repeating])
     fields = MultiHaloArray((; u, v=similar(u)); check=true)
     local_fields = LocalMultiHaloArray((; a=local_u, b=similar(local_u)); check=true)
+    maybe_u = MaybeHaloArray(u)
+    maybe_fields = MaybeHaloArray(fields)
 
     @test DiffEqBase.recursive_length(u) == prod(global_size(u))
     @test DiffEqBase.recursive_length(local_u) == prod(size(local_u))
+    @test DiffEqBase.recursive_length(threaded_u) == prod(global_size(threaded_u))
+    @test DiffEqBase.recursive_length(array_fields) == prod(global_size(array_fields))
     @test DiffEqBase.recursive_length(fields) == 2 * prod(global_size(u))
     @test DiffEqBase.recursive_length(local_fields) == 2 * prod(size(local_u))
+    @test DiffEqBase.recursive_length(maybe_u) == DiffEqBase.recursive_length(u)
+    @test DiffEqBase.recursive_length(maybe_fields) == DiffEqBase.recursive_length(fields)
 end
 
 @testset "ODEProblem HaloArray state" begin
@@ -123,4 +132,25 @@ end
         interior_view(w)[1, 1] = NaN
     end
     @test DiffEqBase.ODE_DEFAULT_UNSTABLE_CHECK(nothing, w, nothing, nothing) == true
+end
+
+@testset "DiffEq default checks cover wrappers" begin
+    threaded_u = ThreadedHaloArray(Float64, (3, 4), 1; dims=(2, 1), boundary_condition=:repeating)
+    fields = ArrayOfHaloArray(LocalHaloArray, Float64, (3, 4), 1;
+        boundary_conditions=[:repeating, :repeating])
+    maybe_fields = MaybeHaloArray(fields)
+
+    fill!(threaded_u, 1.0)
+    foreach(field -> fill!(field, 1.0), parent(fields))
+
+    @test DiffEqBase.ODE_DEFAULT_UNSTABLE_CHECK(nothing, threaded_u, nothing, nothing) == false
+    @test DiffEqBase.ODE_DEFAULT_UNSTABLE_CHECK(nothing, fields, nothing, nothing) == false
+    @test DiffEqBase.ODE_DEFAULT_UNSTABLE_CHECK(nothing, maybe_fields, nothing, nothing) == false
+
+    interior_view(threaded_u, 1)[1, 1] = NaN
+    interior_view(fields[1])[1, 1] = NaN
+
+    @test DiffEqBase.ODE_DEFAULT_UNSTABLE_CHECK(nothing, threaded_u, nothing, nothing) == true
+    @test DiffEqBase.ODE_DEFAULT_UNSTABLE_CHECK(nothing, fields, nothing, nothing) == true
+    @test DiffEqBase.ODE_DEFAULT_UNSTABLE_CHECK(nothing, maybe_fields, nothing, nothing) == true
 end

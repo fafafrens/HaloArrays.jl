@@ -14,6 +14,7 @@ const MPI_SIZE = MPI.Comm_size(MPI_COMM)
 const RUN_UNIT_TESTS = !_env_false("HALOARRAYS_RUN_UNIT_TESTS")
 const MPI_TESTS_REQUESTED = _env_true("HALOARRAYS_RUN_MPI_TESTS")
 const RUN_MPI_TESTS = !_env_false("HALOARRAYS_RUN_MPI_TESTS") && (MPI_TESTS_REQUESTED || MPI_SIZE > 1)
+const HAS_DIFFEQ_TEST_DEPS = Base.find_package("DiffEqBase") !== nothing
 
 # Helper to include test files relative to this directory
 function include_test(name)
@@ -37,6 +38,11 @@ end
         include_test("test_maybe_broadcast.jl")
         include_test("test_local_threaded_reduction.jl")
         include_test("test_hdf5_local_threaded.jl")
+        if HAS_DIFFEQ_TEST_DEPS
+            include_test("test_ode.jl")
+        else
+            @info "Skipping DiffEq tests because optional test dependencies are unavailable"
+        end
     else
         @info "Skipping unit tests (set HALOARRAYS_RUN_UNIT_TESTS=true to enable)"
     end
