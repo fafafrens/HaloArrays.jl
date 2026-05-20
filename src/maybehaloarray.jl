@@ -1,10 +1,11 @@
-struct MaybeHaloArray{A<:AbstractHaloArray} <: AbstractHaloArray
+struct MaybeHaloArray{T,N,A<:AbstractHaloArray{T,N}} <: AbstractHaloArray{T,N}
     data::A
     active::Bool
 end
 
 
-MaybeHaloArray(a) = MaybeHaloArray{typeof(a)}(a, isactive(a))
+MaybeHaloArray(a::A) where {T,N,A<:AbstractHaloArray{T,N}} =
+    MaybeHaloArray{T,N,A}(a, isactive(a))
 
 
 
@@ -19,17 +20,28 @@ Base.axes(m::MaybeHaloArray) = axes(m.data)
 Base.axes(m::MaybeHaloArray, i::Int) = axes(m.data, i)
 
 # ndims sul tipo MaybeHaloArray: delega al tipo interno A
-Base.ndims(::Type{<:MaybeHaloArray{A}}) where {A} = ndims(A)
+Base.ndims(::Type{<:MaybeHaloArray{T,N,A}}) where {T,N,A} = N
 
 # ndims sull'istanza MaybeHaloArray delega al tipo
-Base.ndims(m::MaybeHaloArray{A}) where {A} = ndims(A)
+Base.ndims(m::MaybeHaloArray{T,N,A}) where {T,N,A} = N
 
-@inline halo_width(::Type{<:MaybeHaloArray{A}}) where {A} = halo_width(A)
+@inline halo_width(::Type{<:MaybeHaloArray{T,N,A}}) where {T,N,A} = halo_width(A)
 
 @inline halo_width(m::MaybeHaloArray) = halo_width(m.data)
 
-Base.eltype(::Type{MaybeHaloArray{A}}) where {A} = eltype(A)
+Base.eltype(::Type{<:MaybeHaloArray{T,N,A}}) where {T,N,A} = T
 Base.length(m::MaybeHaloArray) = m.active ? length(m.data) : 0
+
+function Base.getindex(m::MaybeHaloArray, I::Vararg{Integer})
+    isactive(m) || throw(ErrorException("MaybeHaloArray: attempt to index inactive value"))
+    return getindex(m.data, I...)
+end
+
+function Base.setindex!(m::MaybeHaloArray, value, I::Vararg{Integer})
+    isactive(m) || throw(ErrorException("MaybeHaloArray: attempt to index inactive value"))
+    setindex!(m.data, value, I...)
+    return m
+end
 
 # show
 function Base.show(io::IO, m::MaybeHaloArray)
@@ -64,7 +76,7 @@ function apply_if_active!(f::Function, m::MaybeHaloArray, args...; kwargs...)
 end
 
 function setactive(m::MaybeHaloArray, flag::Bool)
-    MaybeHaloArray{typeof(m.data)}(m.data, flag)
+    MaybeHaloArray{eltype(m),ndims(m),typeof(m.data)}(m.data, flag)
 end
 
 macro maybe_delegate(funs...)
@@ -88,6 +100,18 @@ function Base.similar(m::MaybeHaloArray, ::Type{T}) where {T}
     return MaybeHaloArray(inner_sim, m.active)
 end
 
+function Base.similar(m::MaybeHaloArray, ::Type{T}, dims::Dims{N}) where {T,N}
+    inner_sim = similar(m.data, T, dims)
+    return MaybeHaloArray(inner_sim, m.active)
+end
+
+Base.similar(m::MaybeHaloArray, ::Type{T}, dims::NTuple{N,<:Integer}) where {T,N} =
+    similar(m, T, ntuple(d -> Int(dims[d]), Val(N)))
+
+Base.similar(m::MaybeHaloArray, dims::Dims{N}) where {N} = similar(m, eltype(m), dims)
+Base.similar(m::MaybeHaloArray, dims::NTuple{N,<:Integer}) where {N} =
+    similar(m, eltype(m), dims)
+
 # similar(m): crea un MaybeHaloArray con inner = similar(m.data)
 # preserva lo stato `active`
 function Base.similar(m::MaybeHaloArray)
@@ -100,6 +124,3 @@ function Base.copy(m::MaybeHaloArray)
     newdata = copy(m.data)
     return MaybeHaloArray(newdata, m.active)
 end
-
-
-

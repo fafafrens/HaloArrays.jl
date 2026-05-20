@@ -1,4 +1,4 @@
-mutable struct LocalHaloArray{T,N,A,Halo,BCondition} <: AbstractSerialHaloArray
+mutable struct LocalHaloArray{T,N,A,Halo,BCondition} <: AbstractSerialHaloArray{T,N}
     data::A
     boundary_condition::BCondition
 end
@@ -22,6 +22,7 @@ end
 @inline Base.size(halo::LocalHaloArray) = global_size(halo)
 @inline Base.size(halo::LocalHaloArray, i::Int) = size(halo)[i]
 @inline Base.eltype(::LocalHaloArray{T}) where {T} = T
+@inline Base.eltype(::Type{<:LocalHaloArray{T}}) where {T} = T
 @inline Base.ndims(::LocalHaloArray{T,N}) where {T,N} = N
 @inline Base.ndims(::Type{<:LocalHaloArray{T,N}}) where {T,N} = N
 @inline Base.parent(halo::LocalHaloArray) = halo.data
@@ -72,13 +73,23 @@ end
 @inline get_recv_view(s, d, array::LocalHaloArray) = get_recv_view(s, d, parent(array), halo_width(array))
 @inline versors(::LocalHaloArray{T,N}) where {T,N} = versors(Val(N))
 
-function Base.similar(halo::LocalHaloArray{T,N,A,Halo,BCondition}, element_type=eltype(halo),
-        dims::NTuple{M,Int}=local_size(halo)) where {T,N,A,Halo,BCondition,M}
+function Base.similar(halo::LocalHaloArray{T,N,A,Halo,BCondition}, ::Type{AA},
+        dims::Dims{M}) where {T,N,A,Halo,BCondition,AA,M}
     M == N || throw(DimensionMismatch("LocalHaloArray similar dims must have $N dimensions"))
-    fullsize = ntuple(i -> dims[i] + 2 * halo_width(halo), Val(N))
-    data = similar(parent(halo), element_type, fullsize)
+    fullsize = ntuple(i -> Int(dims[i]) + 2 * halo_width(halo), Val(N))
+    data = similar(parent(halo), AA, fullsize)
     return LocalHaloArray(data, halo_width(halo), halo.boundary_condition)
 end
+
+Base.similar(halo::LocalHaloArray{T,N,A,Halo,BCondition}, ::Type{AA},
+    dims::NTuple{M,<:Integer}) where {T,N,A,Halo,BCondition,AA,M} =
+    similar(halo, AA, ntuple(d -> Int(dims[d]), Val(M)))
+
+Base.similar(halo::LocalHaloArray) = similar(halo, eltype(halo), size(halo))
+Base.similar(halo::LocalHaloArray, ::Type{AA}) where {AA} = similar(halo, AA, size(halo))
+Base.similar(halo::LocalHaloArray, dims::Dims{M}) where {M} = similar(halo, eltype(halo), dims)
+Base.similar(halo::LocalHaloArray, dims::NTuple{M,<:Integer}) where {M} =
+    similar(halo, eltype(halo), dims)
 
 function Base.copyto!(dest::LocalHaloArray, src::LocalHaloArray)
     copyto!(parent(dest), parent(src))
@@ -156,10 +167,23 @@ function fill_from_global_indices!(f, halo::LocalHaloArray)
     return halo
 end
 
-local_to_global_index(::LocalHaloArray, local_idx::NTuple{N,Int}) where {N} = local_idx
-global_to_local_index(halo::LocalHaloArray, global_idx::NTuple{N,Int}) where {N} =
+local_to_global_index(::LocalHaloArray, local_idx::NTuple{N,<:Integer}) where {N} = local_idx
+global_to_local_index(halo::LocalHaloArray, global_idx::NTuple{N,<:Integer}) where {N} =
     all(i -> 1 <= global_idx[i] <= local_size(halo, i), 1:N) ? ntuple(i -> global_idx[i] + halo_width(halo), Val(N)) : nothing
 global_size(halo::LocalHaloArray) = local_size(halo)
+
+function Base.getindex(halo::LocalHaloArray, I::Vararg{Integer})
+    idx = _check_global_scalar_indices(halo, I)
+    local_idx = global_to_local_index(halo, idx)
+    @inbounds return parent(halo)[local_idx...]
+end
+
+function Base.setindex!(halo::LocalHaloArray, value, I::Vararg{Integer})
+    idx = _check_global_scalar_indices(halo, I)
+    local_idx = global_to_local_index(halo, idx)
+    @inbounds parent(halo)[local_idx...] = value
+    return halo
+end
 
 function Base.show(io::IO, obj::LocalHaloArray)
     print(io, "LocalHaloArray of global size ", size(obj), " (local size: ", local_size(obj), ", full size: ", full_size(obj), "), halo width: ", halo_width(obj), "\n")

@@ -45,12 +45,12 @@ end
     rank = MPI.Comm_rank(comm)
     topology = CartesianTopology(comm, (0, 0); periodic=(true, true))
     halo = 1
-    local_size = (2, 3)
+    local_dims = (2, 3)
 
-    ha = HaloArray(Int, local_size, halo, topology; boundary_condition=_periodic_bc(Val(2)))
+    ha = HaloArray(Int, local_dims, halo, topology; boundary_condition=_periodic_bc(Val(2)))
     fill!(parent(ha), -10_000)
     ha_interior = interior_view(ha)
-    for i in 1:local_size[1], j in 1:local_size[2]
+    for i in 1:local_dims[1], j in 1:local_dims[2]
         ha_interior[i, j] = 1000 * rank + 10 * i + j
     end
 
@@ -59,13 +59,17 @@ end
     if topology.cart_coords[1] == 0
         @test isactive(maybe_reduced)
         reduced = unwrap(maybe_reduced)
-        @test size(reduced) == (local_size[2],)
+        reduced_global_size = (topology.dims[2] * local_dims[2],)
+        reduced_local_size = (local_dims[2],)
+        @test size(reduced) == reduced_global_size
+        @test global_size(reduced) == reduced_global_size
+        @test local_size(reduced) == reduced_local_size
         @test halo_width(reduced) == halo
 
-        expected = zeros(Int, local_size[2])
+        expected = zeros(Int, local_dims[2])
         for x in 0:(topology.dims[1] - 1)
             source_rank = MPI.Cart_rank(topology.cart_comm, (x, topology.cart_coords[2]))
-            for j in 1:local_size[2], i in 1:local_size[1]
+            for j in 1:local_dims[2], i in 1:local_dims[1]
                 expected[j] += 1000 * source_rank + 10 * i + j
             end
         end
@@ -77,7 +81,7 @@ end
     u = copy(ha)
     v = similar(ha)
     v_interior = interior_view(v)
-    for i in 1:local_size[1], j in 1:local_size[2]
+    for i in 1:local_dims[1], j in 1:local_dims[2]
         v_interior[i, j] = 10_000 * rank + 100 * i + j
     end
 
@@ -86,8 +90,12 @@ end
         @test isactive(maybe_fields)
         fields = unwrap(maybe_fields)
         @test fields isa MultiHaloArray
-        @test size(fields.arrays.u) == (local_size[2],)
-        @test size(fields.arrays.v) == (local_size[2],)
+        reduced_global_size = (topology.dims[2] * local_dims[2],)
+        reduced_local_size = (local_dims[2],)
+        @test size(fields.arrays.u) == reduced_global_size
+        @test size(fields.arrays.v) == reduced_global_size
+        @test local_size(fields.arrays.u) == reduced_local_size
+        @test local_size(fields.arrays.v) == reduced_local_size
     else
         @test !isactive(maybe_fields)
     end

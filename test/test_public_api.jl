@@ -9,7 +9,8 @@ using HaloArrays
     @test ha isa AbstractDistributedHaloArray
     @test ha isa AbstractSingleHaloArray
     @test ha isa AbstractHaloArray
-    @test !(ha isa AbstractArray)
+    @test ha isa AbstractArray{Float64,1}
+    @test eltype(typeof(ha)) === Float64
     @test interior_size(ha) == (5,)
     @test local_size(ha) == (5,)
     @test full_size(ha) == (9,)
@@ -36,18 +37,27 @@ using HaloArrays
         @test parent(ha)[8:9] == [3.0, 3.0]
     end
 
-    resized = similar(ha, Float32, (3,))
+    resized_global_size = ntuple(d -> 3 * ha.topology.dims[d], Val(ndims(ha)))
+    resized = similar(ha, Float32, resized_global_size)
     @test resized isa HaloArray
     @test eltype(resized) === Float32
+    @test size(resized) == resized_global_size
     @test size(resized) == global_size(resized)
     @test local_size(resized) == (3,)
     @test full_size(resized) == (7,)
+
+    resized_same_eltype = similar(ha, resized_global_size)
+    @test resized_same_eltype isa HaloArray
+    @test eltype(resized_same_eltype) === Float64
+    @test size(resized_same_eltype) == resized_global_size
+    @test local_size(resized_same_eltype) == (3,)
 
     local_ha = LocalHaloArray(Float64, (3,), 1; boundary_condition=:repeating)
     @test local_ha isa AbstractSerialHaloArray
     @test local_ha isa AbstractSingleHaloArray
     @test local_ha isa AbstractHaloArray
-    @test !(local_ha isa AbstractArray)
+    @test local_ha isa AbstractArray{Float64,1}
+    @test eltype(typeof(local_ha)) === Float64
     @test local_size(local_ha) == (3,)
     @test global_size(local_ha) == local_size(local_ha)
     @test axes(local_ha) == map(Base.OneTo, global_size(local_ha))

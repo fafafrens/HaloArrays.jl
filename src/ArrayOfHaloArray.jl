@@ -1,5 +1,5 @@
 # Multi-field halo container using an AbstractArray to store the fields.
-mutable struct ArrayOfHaloArray{T,N,Shape,A} <: AbstractHaloCollection
+mutable struct ArrayOfHaloArray{T,N,Shape,A,D} <: AbstractHaloCollection{T,D}
     arrays::A
 end
 
@@ -55,7 +55,8 @@ function ArrayOfHaloArray(arrays::AbstractArray; check=nothing)
     T = promote_type(map(eltype, arrays)...)
     N = ndims(first(arrays))
     Shape = size(arrays)
-    return ArrayOfHaloArray{T,N,Shape,typeof(arrays)}(arrays)
+    D = N + length(Shape)
+    return ArrayOfHaloArray{T,N,Shape,typeof(arrays),D}(arrays)
 end
 
 function ArrayOfHaloArray(::Type{T}, local_size::NTuple{N,Int}, halo::Int,
@@ -123,8 +124,9 @@ function ArrayOfHaloArray(::Type{ThreadedHaloArray}, tile_size::NTuple{N,<:Integ
 end
 
 Base.eltype(::ArrayOfHaloArray{T}) where {T} = T
-Base.ndims(::ArrayOfHaloArray{T,N,Shape}) where {T,N,Shape} = N + length(Shape)
-Base.ndims(::Type{<:ArrayOfHaloArray{T,N,Shape}}) where {T,N,Shape} = N + length(Shape)
+Base.eltype(::Type{<:ArrayOfHaloArray{T}}) where {T} = T
+Base.ndims(::ArrayOfHaloArray{T,N,Shape,A,D}) where {T,N,Shape,A,D} = D
+Base.ndims(::Type{<:ArrayOfHaloArray{T,N,Shape,A,D}}) where {T,N,Shape,A,D} = D
 @inline field_shape(::ArrayOfHaloArray{T,N,Shape}) where {T,N,Shape} = Shape
 @inline n_field(mha::ArrayOfHaloArray) = length(mha.arrays)
 @inline Base.parent(mha::ArrayOfHaloArray) = mha.arrays
@@ -163,25 +165,73 @@ function Base.getindex(mha::ArrayOfHaloArray{T,N,Shape}, I...) where {T,N,Shape}
 
     if length(I) <= field_ndims
         return getindex(mha.arrays, I...)
+    elseif length(I) == length(size(mha))
+        field_idx = ntuple(d -> I[d], field_ndims)
+        spatial_idx = ntuple(d -> I[field_ndims + d], N)
+        return getindex(mha.arrays[field_idx...], spatial_idx...)
     else
         throw(BoundsError(mha, I))
     end
 end
 
-function Base.similar(mha::ArrayOfHaloArray{AA,N,Shape,A}, ::Type{T},
-        dims::NTuple{M,Int}) where {AA,N,Shape,A,T,M}
-    arrs = map(a -> similar(a, T, dims), mha.arrays)
-    return ArrayOfHaloArray{T,N,Shape,typeof(arrs)}(arrs)
+Base.getindex(mha::ArrayOfHaloArray, I::CartesianIndex) = getindex(mha, Tuple(I)...)
+
+function Base.setindex!(mha::ArrayOfHaloArray{T,N,Shape}, value, I...) where {T,N,Shape}
+    field_ndims = length(Shape)
+
+    if length(I) == length(size(mha))
+        field_idx = ntuple(d -> I[d], field_ndims)
+        spatial_idx = ntuple(d -> I[field_ndims + d], N)
+        setindex!(mha.arrays[field_idx...], value, spatial_idx...)
+        return mha
+    else
+        throw(BoundsError(mha, I))
+    end
 end
 
-function Base.similar(mha::ArrayOfHaloArray{AA,N,Shape,A}, ::Type{T}) where {AA,N,Shape,A,T}
+Base.setindex!(mha::ArrayOfHaloArray, value, I::CartesianIndex) =
+    setindex!(mha, value, Tuple(I)...)
+
+function Base.similar(mha::ArrayOfHaloArray{AA,N,Shape,A,D}, ::Type{T},
+        dims::Dims{M}) where {AA,N,Shape,A,D,T,M}
+    field_ndims = length(Shape)
+    M == field_ndims + N ||
+        throw(DimensionMismatch("ArrayOfHaloArray similar dims must have $(field_ndims + N) dimensions"))
+
+    new_field_shape = ntuple(d -> Int(dims[d]), Val(field_ndims))
+    spatial_dims = ntuple(d -> Int(dims[field_ndims + d]), Val(N))
+
+    if new_field_shape == field_shape(mha)
+        arrs = map(a -> similar(a, T, spatial_dims), mha.arrays)
+    else
+        ref = first(mha.arrays)
+        prototype = similar(ref, T, spatial_dims)
+        arrs = similar(mha.arrays, typeof(prototype), new_field_shape)
+        for I in CartesianIndices(arrs)
+            arrs[I] = similar(ref, T, spatial_dims)
+        end
+    end
+
+    return ArrayOfHaloArray(arrs)
+end
+
+Base.similar(mha::ArrayOfHaloArray{AA,N,Shape,A,D}, ::Type{T},
+    dims::NTuple{M,<:Integer}) where {AA,N,Shape,A,D,T,M} =
+    similar(mha, T, ntuple(d -> Int(dims[d]), Val(M)))
+
+Base.similar(mha::ArrayOfHaloArray, dims::Dims{M}) where {M} =
+    similar(mha, eltype(mha), dims)
+Base.similar(mha::ArrayOfHaloArray, dims::NTuple{M,<:Integer}) where {M} =
+    similar(mha, eltype(mha), dims)
+
+function Base.similar(mha::ArrayOfHaloArray{AA,N,Shape,A,D}, ::Type{T}) where {AA,N,Shape,A,D,T}
     arrs = map(a -> similar(a, T), mha.arrays)
-    return ArrayOfHaloArray{T,N,Shape,typeof(arrs)}(arrs)
+    return ArrayOfHaloArray{T,N,Shape,typeof(arrs),D}(arrs)
 end
 
-function Base.similar(mha::ArrayOfHaloArray{AA,N,Shape,A}) where {AA,N,Shape,A}
+function Base.similar(mha::ArrayOfHaloArray{AA,N,Shape,A,D}) where {AA,N,Shape,A,D}
     arrs = map(similar, mha.arrays)
-    return ArrayOfHaloArray{AA,N,Shape,typeof(arrs)}(arrs)
+    return ArrayOfHaloArray{AA,N,Shape,typeof(arrs),D}(arrs)
 end
 
 function Base.copyto!(dest::ArrayOfHaloArray, src::ArrayOfHaloArray)
@@ -242,10 +292,10 @@ function isactive(mha::ArrayOfHaloArray)
     return all(isactive, mha.arrays)
 end
 
-function Base.all(f, mha::ArrayOfHaloArray)
+function Base.all(f::F, mha::ArrayOfHaloArray) where {F<:Function}
     return all(field -> all(f, field), mha.arrays)
 end
 
-function Base.any(f, mha::ArrayOfHaloArray)
+function Base.any(f::F, mha::ArrayOfHaloArray) where {F<:Function}
     return any(field -> any(f, field), mha.arrays)
 end

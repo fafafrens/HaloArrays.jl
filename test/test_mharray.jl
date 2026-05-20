@@ -25,11 +25,13 @@ end
     fields = MultiHaloArray((; u, v))
 
     @test fields isa MultiHaloArray
+    @test fields isa AbstractArray{Float64,3}
     @test eltype(fields) === Float64
-    @test ndims(fields) == 2
+    @test ndims(fields) == 3
     @test HaloArrays.n_field(fields) == 2
     @test fields[:u] === u
     @test fields[:v] === v
+    @test eltype(typeof(fields)) === Float64
     @test isactive(fields)
 
     views = interior_view(fields)
@@ -65,11 +67,18 @@ end
     interior_view(local_fields.arrays.mom) .= [10, 20, 30]
 
     @test local_fields isa MultiHaloArray
+    @test local_fields isa AbstractArray{Int,2}
     @test local_fields[:rho] isa LocalHaloArray
     @test size(local_fields) == (2, 3)
     @test size(local_fields) == global_size(local_fields)
     @test local_axes(local_fields) == map(Base.OneTo, local_size(local_fields))
     @test local_size(local_fields) == (2, 3)
+    @test local_fields[1] === local_fields.arrays.rho
+    @test local_fields[1, 2] == 2
+    local_fields[2, 3] = 35
+    @test local_fields[2, 3] == 35
+    @test interior_view(local_fields.arrays.mom)[3] == 35
+    local_fields[2, 3] = 30
 
     shifted_local = local_fields .+ 4
     @test shifted_local isa MultiHaloArray
@@ -81,6 +90,13 @@ end
     local_dest .= 2 .* local_fields .+ shifted_local
     @test collect(interior_view(local_dest.arrays.rho)) == [7, 10, 13]
     @test collect(interior_view(local_dest.arrays.mom)) == [34, 64, 94]
+
+    resized_local = similar(local_fields, Float32, (2, 5))
+    @test resized_local isa MultiHaloArray
+    @test eltype(resized_local) === Float32
+    @test size(resized_local) == (2, 5)
+    @test local_size(resized_local) == (2, 5)
+    @test_throws DimensionMismatch similar(local_fields, Float32, (3, 5))
 
     synchronize_halo!(local_fields)
     @test parent(local_fields.arrays.rho) == [1, 1, 2, 3, 3]
@@ -95,6 +111,7 @@ end
     interior_view(threaded_fields.arrays.mom, 2) .= [40, 50, 60]
 
     @test threaded_fields isa MultiHaloArray
+    @test threaded_fields isa AbstractArray{Int,2}
     @test threaded_fields[:rho] isa ThreadedHaloArray
     @test size(threaded_fields) == (2, 6)
     @test size(threaded_fields) == global_size(threaded_fields)
@@ -116,6 +133,13 @@ end
     @test collect(interior_view(threaded_dest.arrays.mom, 1)) == [23, 43, 63]
     @test collect(interior_view(threaded_dest.arrays.mom, 2)) == [83, 103, 123]
 
+    resized_threaded = similar(threaded_fields, Float32, (2, 8))
+    @test resized_threaded isa MultiHaloArray
+    @test eltype(resized_threaded) === Float32
+    @test size(resized_threaded) == (2, 8)
+    @test tile_size(resized_threaded) == (4,)
+    @test_throws DimensionMismatch similar(threaded_fields, Float32, (3, 8))
+
     synchronize_halo!(threaded_fields)
     @test tile_parent(threaded_fields.arrays.rho, 1) == [1, 1, 2, 3, 4]
     @test tile_parent(threaded_fields.arrays.rho, 2) == [3, 4, 5, 6, 6]
@@ -134,7 +158,7 @@ end
     nested_fields = MultiHaloArray((; rho=u, q))
 
     @test nested_fields isa MultiHaloArray
-    @test ndims(nested_fields) == 2
+    @test ndims(nested_fields) == 3
     @test size(nested_fields) == (2, 3, 2)
     @test size(nested_fields) == global_size(nested_fields)
     @test local_size(nested_fields) == (2, 3, 2)

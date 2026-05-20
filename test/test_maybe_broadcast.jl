@@ -11,6 +11,7 @@ using HaloArrays
     end
 
     maybe = MaybeHaloArray(ha)
+    @test maybe isa AbstractArray{Int,1}
     @test isactive(maybe)
     @test length(maybe) == 4
     @test unwrap(maybe) === ha
@@ -41,6 +42,7 @@ using HaloArrays
     v .= 10 .* v
     multi = MultiHaloArray((; u, v))
     maybe_multi = MaybeHaloArray(multi)
+    @test maybe_multi isa AbstractArray{Int,2}
     @test halo_width(maybe_multi) == 1
 
     shifted_multi = maybe_multi .+ 5
@@ -54,6 +56,18 @@ using HaloArrays
     maybe_local = MaybeHaloArray(local_ha)
     @test isactive(maybe_local)
     @test halo_width(maybe_local) == 1
+    interior_view(local_ha) .= [4, 5, 6, 7]
+    @test eltype(typeof(maybe_local)) === Int
+    @test maybe_local[3] == 6
+    maybe_local[3] = 9
+    @test maybe_local[3] == 9
+
+    maybe_resized = similar(maybe_local, Float32, (6,))
+    @test maybe_resized isa MaybeHaloArray
+    @test isactive(maybe_resized)
+    @test eltype(typeof(maybe_resized)) === Float32
+    @test size(unwrap(maybe_resized)) == (6,)
+    @test full_size(unwrap(maybe_resized)) == (8,)
 
     threaded_ha = ThreadedHaloArray(Int, (2,), 1; dims=(2,), boundary_condition=:repeating)
     maybe_threaded = MaybeHaloArray(threaded_ha)

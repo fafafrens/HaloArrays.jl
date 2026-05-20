@@ -1,10 +1,10 @@
-abstract type AbstractHaloArray end
+abstract type AbstractHaloArray{T,N} <: AbstractArray{T,N} end
 
-abstract type AbstractSingleHaloArray <: AbstractHaloArray end
-abstract type AbstractDistributedHaloArray <: AbstractSingleHaloArray end
-abstract type AbstractSerialHaloArray <: AbstractSingleHaloArray end
+abstract type AbstractSingleHaloArray{T,N} <: AbstractHaloArray{T,N} end
+abstract type AbstractDistributedHaloArray{T,N} <: AbstractSingleHaloArray{T,N} end
+abstract type AbstractSerialHaloArray{T,N} <: AbstractSingleHaloArray{T,N} end
 
-abstract type AbstractHaloCollection <: AbstractHaloArray end
+abstract type AbstractHaloCollection{T,N} <: AbstractHaloArray{T,N} end
 
 """
     local_size(halo)
@@ -28,3 +28,14 @@ looping over data that this process can update directly.
 """
 @inline local_axes(halo::AbstractHaloArray) = map(Base.OneTo, local_size(halo))
 @inline local_axes(halo::AbstractHaloArray, i::Int) = local_axes(halo)[i]
+
+@inline function _check_global_scalar_indices(halo::AbstractHaloArray, I::Tuple)
+    length(I) == ndims(halo) || throw(BoundsError(halo, I))
+    all(d -> first(axes(halo, d)) <= I[d] <= last(axes(halo, d)), eachindex(I)) ||
+        throw(BoundsError(halo, I))
+    return I
+end
+
+Base.getindex(halo::AbstractHaloArray, I::CartesianIndex) = getindex(halo, Tuple(I)...)
+Base.setindex!(halo::AbstractHaloArray, value, I::CartesianIndex) =
+    setindex!(halo, value, Tuple(I)...)

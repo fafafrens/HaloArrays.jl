@@ -26,7 +26,7 @@ struct HaloCommState{N}
 end
 
 
-mutable struct HaloArray{T,N,A,Halo,B,BCondition} <: AbstractDistributedHaloArray
+mutable struct HaloArray{T,N,A,Halo,B,BCondition} <: AbstractDistributedHaloArray{T,N}
     data::A
     topology::CartesianTopology{N}
     comm_state::HaloCommState{N}
@@ -98,6 +98,8 @@ end
     h = halo_width(halo)
     ntuple(i -> size(halo.data, i) - 2 * h, Val(N))
 end
+
+@inline Base.eltype(::Type{<:HaloArray{T}}) where {T} = T
 
 @inline full_size(halo::HaloArray) = size(halo.data)
 @inline full_size(halo::HaloArray, i::Int) = size(halo.data,i)
@@ -181,17 +183,35 @@ end
 
 
 
-function Base.similar(halo::HaloArray{T, N, A, Halo, B, BCondition}, element_type=eltype(halo) ,
-    dims::NTuple{M,Int64}=local_size(halo)
-    ) where {T, N, A, Halo, B, BCondition, M}    ## Create a new HaloArray with given interior dims, preserving halo_width and topology
+function _global_to_owned_dims(halo::HaloArray{T,N}, dims::NTuple{M,<:Integer}) where {T,N,M}
+    M == N || throw(DimensionMismatch("HaloArray similar dims must have $N dimensions"))
+    topo_dims = isactive(halo) ? halo.topology.dims : ntuple(_ -> 1, Val(N))
+    all(d -> Int(dims[d]) % topo_dims[d] == 0, 1:N) ||
+        throw(DimensionMismatch("HaloArray global similar dims $dims are not divisible by topology dims $topo_dims"))
+    return ntuple(d -> Int(dims[d]) ÷ topo_dims[d], Val(N))
+end
+
+function Base.similar(halo::HaloArray{T,N,A,H,B,BCondition}, ::Type{AA},
+        dims::Dims{M}) where {T,N,A,H,B,BCondition,AA,M}    ## Create a new HaloArray with given global dims, preserving halo_width and topology
     #HaloArray(element_type, dims ,halo_width(halo), halo.topology; boundary_condition=halo.boundary_condition)
 
         # crea array fullsize (interior + halo) e costruisci HaloArray riutilizzando
     # topology e boundary_condition esistenti tramite build_haloarray_from_data
-    fullsize = ntuple(i -> dims[i] + 2 * halo_width(halo), Val(N))
-    data = similar(parent(halo), element_type, fullsize)
+    owned_dims = _global_to_owned_dims(halo, dims)
+    fullsize = ntuple(i -> owned_dims[i] + 2 * halo_width(halo), Val(N))
+    data = similar(parent(halo), AA, fullsize)
     return build_haloarray_from_data(data, halo_width(halo), halo.topology, halo.boundary_condition)
 end
+
+Base.similar(halo::HaloArray{T,N,A,H,B,BCondition}, ::Type{AA},
+    dims::NTuple{M,<:Integer}) where {T,N,A,H,B,BCondition,AA,M} =
+    similar(halo, AA, ntuple(d -> Int(dims[d]), Val(M)))
+
+Base.similar(halo::HaloArray) = similar(halo, eltype(halo), size(halo))
+Base.similar(halo::HaloArray, ::Type{AA}) where {AA} = similar(halo, AA, size(halo))
+Base.similar(halo::HaloArray, dims::Dims{M}) where {M} = similar(halo, eltype(halo), dims)
+Base.similar(halo::HaloArray, dims::NTuple{M,<:Integer}) where {M} =
+    similar(halo, eltype(halo), dims)
 
 #this function is to give back a view of a generic array with singleton and on abstract array 
 @inline function get_send_view(::Side{1}, ::Dim{D}, array::AbstractArray, halo::Int) where {D}
@@ -309,18 +329,18 @@ end
 
 
 """
-    local_to_global_index(halo::HaloArray, local_idx::NTuple{N,Int}) -> NTuple{N,Int}
+    local_to_global_index(halo::HaloArray, local_idx::NTuple{N,<:Integer})
 
 Convert a local interior index (excluding halo) to global index (1-based).
 """
-function local_to_global_index(halo::HaloArray{T,N,A,Halo,B,BCondition}, local_idx::NTuple{N,Int}) where {T,N,A,Halo,B,BCondition}
+function local_to_global_index(halo::HaloArray{T,N,A,Halo,B,BCondition}, local_idx::NTuple{N,<:Integer}) where {T,N,A,Halo,B,BCondition}
     coords = halo.topology.cart_coords
     size_local = interior_size(halo)
     global_idx = ntuple(i -> coords[i] * size_local[i] + local_idx[i]-halo_width(halo), Val(N))
     return global_idx
 end
 
-function global_to_local_index(halo::HaloArray, global_idx::NTuple{N,Int}) where {N}
+function global_to_local_index(halo::HaloArray, global_idx::NTuple{N,<:Integer}) where {N}
     size_local = interior_size(halo)
     coords = halo.topology.cart_coords
     h = halo_width(halo)
@@ -341,13 +361,34 @@ function global_to_local_index(halo::HaloArray, global_idx::NTuple{N,Int}) where
     return local_idx
 end
 
-@inline function is_in_rank(halo::HaloArray, global_idx::NTuple{N,Int}) where {N}
+@inline function _owned_global_to_local_index(halo::HaloArray, I)
+    idx = _check_global_scalar_indices(halo, I)
+    local_idx = global_to_local_index(halo, idx)
+    local_idx === nothing &&
+        throw(ArgumentError("Global index $idx is not owned by this MPI rank; HaloArray scalar indexing is local-only and does not communicate."))
+    return local_idx
+end
+
+function Base.getindex(halo::HaloArray, I::Vararg{Integer})
+    @warn "Global scalar getindex on HaloArray is local-only and intended for diagnostics, not hot loops; use interior_view/local_axes for kernels." maxlog=1
+    local_idx = _owned_global_to_local_index(halo, I)
+    @inbounds return parent(halo)[local_idx...]
+end
+
+function Base.setindex!(halo::HaloArray, value, I::Vararg{Integer})
+    @warn "Global scalar setindex! on HaloArray is local-only and intended for diagnostics, not hot loops; use interior_view/local_axes for kernels." maxlog=1
+    local_idx = _owned_global_to_local_index(halo, I)
+    @inbounds parent(halo)[local_idx...] = value
+    return halo
+end
+
+@inline function is_in_rank(halo::HaloArray, global_idx::NTuple{N,<:Integer}) where {N}
     coords = halo.topology.cart_coords
     owner_coords = owner_coordinares(halo,global_idx)
     return (owner_coords == coords)
 end 
 
-@inline function owner_coordinares(halo::HaloArray, global_idx::NTuple{N,Int}) where {N}
+@inline function owner_coordinares(halo::HaloArray, global_idx::NTuple{N,<:Integer}) where {N}
     size_local = interior_size(halo)
     ntuple(i -> (global_idx[i] - 1) ÷ size_local[i], Val(N))
 end 

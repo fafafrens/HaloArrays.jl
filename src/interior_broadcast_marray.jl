@@ -11,9 +11,10 @@ const MultiHaloArrayLike = Union{MultiHaloArray,ArrayOfHaloArray}
 
 # The order is important here. We want to override Base.Broadcast.DefaultArrayStyle to return another Base.Broadcast.DefaultArrayStyle.
 Broadcast.BroadcastStyle(a::MultiHaloArrayStyle, ::Base.Broadcast.DefaultArrayStyle{0}) = a
-Broadcast.BroadcastStyle(::Type{<:MultiHaloArray{T,Ndim,A}}) where {T,Ndim,A} =MultiHaloArrayStyle{Ndim}()
-Broadcast.BroadcastStyle(::Type{<:ArrayOfHaloArray{T,Ndim,Shape,A}}) where {T,Ndim,Shape,A} =
-    MultiHaloArrayStyle{Ndim + length(Shape)}()
+Broadcast.BroadcastStyle(::Type{<:MultiHaloArray{T,N,A,D}}) where {T,N,A,D} =
+    MultiHaloArrayStyle{D}()
+Broadcast.BroadcastStyle(::Type{<:ArrayOfHaloArray{T,N,Shape,A,D}}) where {T,N,Shape,A,D} =
+    MultiHaloArrayStyle{D}()
 
 function Broadcast.BroadcastStyle(::MultiHaloArrayStyle{Ndim},
         a::Base.Broadcast.DefaultArrayStyle{M}) where { Ndim ,M}

@@ -9,7 +9,7 @@
 for (func, commutative) in [:mapreduce => true, :mapfoldl => false, :mapfoldr => false]
     @eval function Base.$func(
             f::F, op::OP, halo::HaloArray, etc::Vararg{HaloArray}; kws...,
-        ) where {F, OP}
+        ) where {F<:Function, OP}
         #foreach(v -> _check_compatible_arrays(u, v), etc)
         comm = get_comm(halo)
         #we create a tuple of view 
@@ -22,18 +22,18 @@ for (func, commutative) in [:mapreduce => true, :mapfoldl => false, :mapfoldr =>
     # Make things work with zip(u::PencilArray, v::PencilArray, ...)
     @eval function Base.$func(
             f::F, op::OP, z::Iterators.Zip{<:Tuple{Vararg{HaloArray}}}; kws...,
-        ) where {F, OP}
+        ) where {F<:Function, OP}
         g(args...) = f(args)
         $func(g, op, z.is...; kws...)
     end
 end
 
-function Base.any(f::F, u::HaloArray) where {F }
+function Base.any(f::F, u::HaloArray) where {F<:Function}
     xlocal = any(f, interior_view(u)) :: Bool
     MPI.Allreduce(xlocal, |, get_comm(u))
 end
 
-function Base.all(f::F, u::HaloArray) where {F }
+function Base.all(f::F, u::HaloArray) where {F<:Function}
     xlocal = all(f, interior_view(u)) :: Bool
     MPI.Allreduce(xlocal, &, get_comm(u))
 end
@@ -49,21 +49,21 @@ end
 for func in (:mapreduce, :mapfoldl, :mapfoldr)
     @eval function Base.$func(
             f::F, op::OP, halo::LocalHaloArray, etc::Vararg{LocalHaloArray}; kws...,
-        ) where {F, OP}
+        ) where {F<:Function, OP}
         interiors = map(interior_view, (halo, etc...))
         return $func(f, op, interiors...; kws...)
     end
 
     @eval function Base.$func(
             f::F, op::OP, z::Iterators.Zip{<:Tuple{Vararg{LocalHaloArray}}}; kws...,
-        ) where {F, OP}
+        ) where {F<:Function, OP}
         g(args...) = f(args)
         return $func(g, op, z.is...; kws...)
     end
 
     @eval function Base.$func(
             f::F, op::OP, halo::ThreadedHaloArray, etc::Vararg{ThreadedHaloArray}; kws...,
-        ) where {F, OP}
+        ) where {F<:Function, OP}
         tile_results = tmap(1:tile_count(halo)) do tile_id
             interiors = map(h -> interior_view(h, tile_id), (halo, etc...))
             $func(f, op, interiors...; kws...)
@@ -73,32 +73,32 @@ for func in (:mapreduce, :mapfoldl, :mapfoldr)
 
     @eval function Base.$func(
             f::F, op::OP, z::Iterators.Zip{<:Tuple{Vararg{ThreadedHaloArray}}}; kws...,
-        ) where {F, OP}
+        ) where {F<:Function, OP}
         g(args...) = f(args)
         return $func(g, op, z.is...; kws...)
     end
 end
 
-function Base.any(f::F, u::LocalHaloArray) where {F}
+function Base.any(f::F, u::LocalHaloArray) where {F<:Function}
     return any(f, interior_view(u))
 end
 
-function Base.all(f::F, u::LocalHaloArray) where {F}
+function Base.all(f::F, u::LocalHaloArray) where {F<:Function}
     return all(f, interior_view(u))
 end
 
-function Base.any(f::F, u::ThreadedHaloArray) where {F}
+function Base.any(f::F, u::ThreadedHaloArray) where {F<:Function}
     return tmapreduce(tile_id -> any(f, interior_view(u, tile_id)), |, 1:tile_count(u))
 end
 
-function Base.all(f::F, u::ThreadedHaloArray) where {F}
+function Base.all(f::F, u::ThreadedHaloArray) where {F<:Function}
     return tmapreduce(tile_id -> all(f, interior_view(u, tile_id)), &, 1:tile_count(u))
 end
 
 for (func, commutative) in [:mapreduce => true, :mapfoldl => false, :mapfoldr => false]
     @eval function Base.$func(
             f::F, op::OP, halo::MultiHaloArray, etc::Vararg{MultiHaloArray}; kws...,
-        ) where {F, OP}
+        ) where {F<:Function, OP}
         
         # Get names (field keys) and bundle all inputs together
         
@@ -121,21 +121,21 @@ for (func, commutative) in [:mapreduce => true, :mapfoldl => false, :mapfoldr =>
     # Make things work with zip(u::PencilArray, v::PencilArray, ...)
     @eval function Base.$func(
             f::F, op::OP, z::Iterators.Zip{<:Tuple{Vararg{MultiHaloArray}}}; kws...,
-        ) where {F, OP}
+        ) where {F<:Function, OP}
         g(args...) = f(args)
         $func(g, op, z.is...; kws...)
     end
 end
 
 
-function Base.all(f::F, mha::MultiHaloArray) where {F}
+function Base.all(f::F, mha::MultiHaloArray) where {F<:Function}
     field_results = map(values(mha.arrays)) do field
         all(f, field)
     end
     return all(field_results)
 end
 
-function Base.any(f::F, mha::MultiHaloArray) where {F}
+function Base.any(f::F, mha::MultiHaloArray) where {F<:Function}
     field_results = map(values(mha.arrays)) do field
         any(f, field)
     end

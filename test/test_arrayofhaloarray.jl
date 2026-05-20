@@ -29,6 +29,7 @@ end
     fields = ArrayOfHaloArray(arrays)
 
     @test fields isa ArrayOfHaloArray
+    @test fields isa AbstractArray{Float64,3}
     @test eltype(fields) === Float64
     @test field_shape(fields) == (2, 2)
     @test HaloArrays.n_field(fields) == 4
@@ -44,11 +45,19 @@ end
     @test halo_width(fields) == 1
     @test parent(fields) === arrays
     @test fields[1, 2] === arrays[1, 2]
-    @test_throws BoundsError fields[1, 2, 3]
+    @test eltype(typeof(fields)) === Float64
+    @test_logs (:warn, r"Global scalar getindex") begin
+        @test fields[1, 2, 3] == 123
+    end
     @test isactive(fields)
 
     interior_view(arrays[1, 2])[3] = 123
-    @test_throws MethodError setindex!(fields, -7, 1, 2, 3)
+    @test_logs (:warn, r"Global scalar setindex!") begin
+        fields[1, 2, 3] = -7
+    end
+    @test fields[1, 2, 3] == -7
+    @test interior_view(arrays[1, 2])[3] == -7
+    fields[1, 2, 3] = 123
 
     views = interior_view(fields)
     @test size(views) == (2, 2)
@@ -85,6 +94,19 @@ end
     @test field_shape(similar_fields) == field_shape(fields)
     @test size(similar_fields) == size(fields)
 
+    resized_fields = similar(fields, Float32, (2, 2, 4))
+    @test resized_fields isa ArrayOfHaloArray
+    @test eltype(resized_fields) === Float32
+    @test field_shape(resized_fields) == (2, 2)
+    @test size(resized_fields) == (2, 2, 4)
+    @test local_size(resized_fields) == (2, 2, 4)
+    @test full_size(resized_fields) == (2, 2, 6)
+
+    reshaped_fields = similar(fields, Float32, (3, 2, 4))
+    @test reshaped_fields isa ArrayOfHaloArray
+    @test field_shape(reshaped_fields) == (3, 2)
+    @test size(reshaped_fields) == (3, 2, 4)
+
     bad_arrays = copy(arrays)
     bad_arrays[2, 2] = HaloArray(Float64, (4,), 1, topology; boundary_condition=:repeating)
     @test_throws DimensionMismatch ArrayOfHaloArray(bad_arrays)
@@ -101,12 +123,18 @@ end
     interior_view(local_fields[2]) .= [10, 20, 30]
 
     @test local_fields isa ArrayOfHaloArray
+    @test local_fields isa AbstractArray{Int,2}
     @test local_fields[1] isa LocalHaloArray
     @test field_shape(local_fields) == (2,)
     @test size(local_fields) == (2, 3)
     @test size(local_fields) == global_size(local_fields)
     @test local_axes(local_fields) == map(Base.OneTo, local_size(local_fields))
     @test local_size(local_fields) == (2, 3)
+    @test local_fields[2, 3] == 30
+    local_fields[2, 3] = 33
+    @test local_fields[2, 3] == 33
+    @test interior_view(local_fields[2])[3] == 33
+    local_fields[2, 3] = 30
 
     shifted_local = local_fields .+ 4
     @test shifted_local isa ArrayOfHaloArray
@@ -118,6 +146,17 @@ end
     local_dest .= 2 .* local_fields .+ shifted_local
     @test collect(interior_view(local_dest[1])) == [7, 10, 13]
     @test collect(interior_view(local_dest[2])) == [34, 64, 94]
+
+    resized_local = similar(local_fields, Float32, (2, 5))
+    @test resized_local isa ArrayOfHaloArray
+    @test eltype(resized_local) === Float32
+    @test field_shape(resized_local) == (2,)
+    @test size(resized_local) == (2, 5)
+    @test full_size(resized_local) == (2, 7)
+
+    reshaped_local = similar(local_fields, Float32, (3, 5))
+    @test field_shape(reshaped_local) == (3,)
+    @test size(reshaped_local) == (3, 5)
 
     synchronize_halo!(local_fields)
     @test parent(local_fields[1]) == [1, 1, 2, 3, 3]
@@ -132,6 +171,7 @@ end
     interior_view(threaded_fields[2], 2) .= [40, 50, 60]
 
     @test threaded_fields isa ArrayOfHaloArray
+    @test threaded_fields isa AbstractArray{Int,2}
     @test threaded_fields[1] isa ThreadedHaloArray
     @test field_shape(threaded_fields) == (2,)
     @test size(threaded_fields) == (2, 6)
@@ -150,6 +190,13 @@ end
     @test collect(interior_view(threaded_dest[1], 2)) == [11, 13, 15]
     @test collect(interior_view(threaded_dest[2], 1)) == [23, 43, 63]
     @test collect(interior_view(threaded_dest[2], 2)) == [83, 103, 123]
+
+    resized_threaded = similar(threaded_fields, Float32, (2, 8))
+    @test resized_threaded isa ArrayOfHaloArray
+    @test eltype(resized_threaded) === Float32
+    @test field_shape(resized_threaded) == (2,)
+    @test size(resized_threaded) == (2, 8)
+    @test tile_size(resized_threaded[1]) == (4,)
 
     synchronize_halo!(threaded_fields)
     @test tile_parent(threaded_fields[1], 1) == [1, 1, 2, 3, 4]

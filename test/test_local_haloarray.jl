@@ -20,8 +20,13 @@ using HaloArrays
         @test local_axes(ha) == axes(interior_view(ha))
         @test collect(eachindex(ha)) == collect(eachindex(interior_view(ha)))
         @test collect(ha) == [10, 20, 30, 40]
-        @test_throws MethodError ha[2]
-        @test_throws MethodError setindex!(ha, 25, 2)
+        @test ha[2] == 20
+        ha[2] = 25
+        @test ha[2] == 25
+        @test parent(ha)[4] == 25
+        ha[2] = 20
+        @test_throws BoundsError ha[0]
+        @test_throws BoundsError setindex!(ha, 25, 5)
         @test parent(ha)[1:2] == [10, 10]
         @test parent(ha)[3:6] == [10, 20, 30, 40]
         @test parent(ha)[7:8] == [40, 30]
@@ -107,6 +112,10 @@ using HaloArrays
         @test size(resized) == (2,)
         @test full_size(resized) == (4,)
 
+        resized_same_eltype = similar(ha, (2,))
+        @test eltype(resized_same_eltype) === Float64
+        @test size(resized_same_eltype) == (2,)
+
         copied = copy(ha)
         interior_view(copied)[1] = -1
         @test interior_view(ha)[1] == 1.0
@@ -128,7 +137,7 @@ end
     @test fields.arrays.u isa LocalHaloArray
     @test fields.arrays.v isa LocalHaloArray
     @test eltype(fields) === Float64
-    @test ndims(fields) == 2
+    @test ndims(fields) == 3
     @test fields[:u] === u
     @test fields[:v] === v
     @test isactive(fields)

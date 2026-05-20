@@ -80,7 +80,7 @@ function validate_boundary_condition(topology::ThreadedCartesianTopology{N}, bou
     return true
 end
 
-struct ThreadedHaloArray{T,N,A,Halo,Topo,BCondition} <: AbstractSerialHaloArray
+struct ThreadedHaloArray{T,N,A,Halo,Topo,BCondition} <: AbstractSerialHaloArray{T,N}
     data::Vector{A}
     tile_size::NTuple{N,Int}
     topology::Topo
@@ -113,6 +113,7 @@ ThreadedHaloArray(tile_size::NTuple{N,<:Integer}, halo::Integer; kwargs...) wher
     ThreadedHaloArray(Float64, tile_size, halo; kwargs...)
 
 @inline Base.eltype(::ThreadedHaloArray{T}) where {T} = T
+@inline Base.eltype(::Type{<:ThreadedHaloArray{T}}) where {T} = T
 @inline Base.ndims(::ThreadedHaloArray{T,N}) where {T,N} = N
 @inline Base.ndims(::Type{<:ThreadedHaloArray{T,N}}) where {T,N} = N
 @inline Base.parent(halo::ThreadedHaloArray) = halo.data
@@ -134,6 +135,26 @@ ThreadedHaloArray(tile_size::NTuple{N,<:Integer}, halo::Integer; kwargs...) wher
 @inline global_size(halo::ThreadedHaloArray) = local_size(halo)
 @inline isactive(::ThreadedHaloArray) = true
 @inline get_comm(::ThreadedHaloArray) = nothing
+
+@inline function _threaded_global_to_tile_index(halo::ThreadedHaloArray{T,N}, I) where {T,N}
+    idx = _check_global_scalar_indices(halo, I)
+    owned_tile_size = tile_size(halo)
+    tile_coord = ntuple(d -> ((idx[d] - 1) ÷ owned_tile_size[d]) + 1, Val(N))
+    tile_local_idx = ntuple(d -> ((idx[d] - 1) % owned_tile_size[d]) + 1 + halo_width(halo), Val(N))
+    tile_id = LinearIndices(halo.topology.dims)[CartesianIndex(tile_coord)]
+    return tile_id, tile_local_idx
+end
+
+function Base.getindex(halo::ThreadedHaloArray, I::Vararg{Integer})
+    tile_id, tile_local_idx = _threaded_global_to_tile_index(halo, I)
+    @inbounds return tile_parent(halo, tile_id)[tile_local_idx...]
+end
+
+function Base.setindex!(halo::ThreadedHaloArray, value, I::Vararg{Integer})
+    tile_id, tile_local_idx = _threaded_global_to_tile_index(halo, I)
+    @inbounds tile_parent(halo, tile_id)[tile_local_idx...] = value
+    return halo
+end
 
 @inline function full_size(halo::ThreadedHaloArray)
     return ntuple(d -> tile_size(halo)[d] + 2 * halo_width(halo), Val(ndims(halo)))
@@ -171,22 +192,22 @@ end
     @views return tile_parent(halo, tile_id)[ranges...]
 end
 
-@inline function get_send_view(::Side{1}, ::Dim{D}, halo::ThreadedHaloArray, tile_id::Integer) where {D}
+@inline function get_send_view(::Side{1}, ::Dim{D}, halo::ThreadedHaloArray, tile_id::Int) where {D}
     return get_send_view(Side(1), Dim(D), tile_parent(halo, tile_id), halo_width(halo))
 end
 
-@inline function get_send_view(::Side{2}, ::Dim{D}, halo::ThreadedHaloArray, tile_id::Integer) where {D}
+@inline function get_send_view(::Side{2}, ::Dim{D}, halo::ThreadedHaloArray, tile_id::Int) where {D}
     return get_send_view(Side(2), Dim(D), tile_parent(halo, tile_id), halo_width(halo))
 end
 
 @inline get_send_view(s::Side, dim::Int, halo::ThreadedHaloArray, tile_id::Integer) =
     get_send_view(s, Dim(dim), halo, tile_id)
 
-@inline function get_recv_view(::Side{1}, ::Dim{D}, halo::ThreadedHaloArray, tile_id::Integer) where {D}
+@inline function get_recv_view(::Side{1}, ::Dim{D}, halo::ThreadedHaloArray, tile_id::Int) where {D}
     return get_recv_view(Side(1), Dim(D), tile_parent(halo, tile_id), halo_width(halo))
 end
 
-@inline function get_recv_view(::Side{2}, ::Dim{D}, halo::ThreadedHaloArray, tile_id::Integer) where {D}
+@inline function get_recv_view(::Side{2}, ::Dim{D}, halo::ThreadedHaloArray, tile_id::Int) where {D}
     return get_recv_view(Side(2), Dim(D), tile_parent(halo, tile_id), halo_width(halo))
 end
 
@@ -345,15 +366,33 @@ function Base.fill!(halo::ThreadedHaloArray, value)
     return halo
 end
 
-function Base.similar(halo::ThreadedHaloArray{T,N,A,Halo,B,BCondition}, element_type=eltype(halo),
-        tile_dims::NTuple{M,Int}=tile_size(halo)) where {T,N,A,Halo,B,BCondition,M}
-    M == N || throw(DimensionMismatch("ThreadedHaloArray similar tile dims must have $N dimensions"))
+function _global_to_tile_dims(halo::ThreadedHaloArray{T,N}, dims::NTuple{M,<:Integer}) where {T,N,M}
+    M == N || throw(DimensionMismatch("ThreadedHaloArray similar dims must have $N dimensions"))
+    topo_dims = halo.topology.dims
+    all(d -> Int(dims[d]) % topo_dims[d] == 0, 1:N) ||
+        throw(DimensionMismatch("ThreadedHaloArray global similar dims $dims are not divisible by topology dims $topo_dims"))
+    return ntuple(d -> Int(dims[d]) ÷ topo_dims[d], Val(N))
+end
+
+function Base.similar(halo::ThreadedHaloArray{T,N,A,Halo,B,BCondition}, ::Type{AA},
+        dims::Dims{M}) where {T,N,A,Halo,B,BCondition,AA,M}
+    tile_dims = _global_to_tile_dims(halo, dims)
     full_tile_size = ntuple(d -> tile_dims[d] + 2 * halo_width(halo), Val(N))
-    data = [similar(tile_parent(halo, 1), element_type, full_tile_size) for _ in 1:tile_count(halo)]
-    return ThreadedHaloArray{element_type,N,typeof(data[1]),Halo,typeof(halo.topology),typeof(halo.boundary_condition)}(
+    data = [similar(tile_parent(halo, 1), AA, full_tile_size) for _ in 1:tile_count(halo)]
+    return ThreadedHaloArray{AA,N,typeof(data[1]),Halo,typeof(halo.topology),typeof(halo.boundary_condition)}(
         data, tile_dims, halo.topology, halo.boundary_condition,
     )
 end
+
+Base.similar(halo::ThreadedHaloArray{T,N,A,Halo,B,BCondition}, ::Type{AA},
+    dims::NTuple{M,<:Integer}) where {T,N,A,Halo,B,BCondition,AA,M} =
+    similar(halo, AA, ntuple(d -> Int(dims[d]), Val(M)))
+
+Base.similar(halo::ThreadedHaloArray) = similar(halo, eltype(halo), size(halo))
+Base.similar(halo::ThreadedHaloArray, ::Type{AA}) where {AA} = similar(halo, AA, size(halo))
+Base.similar(halo::ThreadedHaloArray, dims::Dims{M}) where {M} = similar(halo, eltype(halo), dims)
+Base.similar(halo::ThreadedHaloArray, dims::NTuple{M,<:Integer}) where {M} =
+    similar(halo, eltype(halo), dims)
 
 function Base.zero(halo::ThreadedHaloArray)
     z = similar(halo)

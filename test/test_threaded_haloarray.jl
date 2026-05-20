@@ -15,6 +15,7 @@
         halo = ThreadedHaloArray(Int, (4, 5), 2; dims=(3, 2), boundary_condition=:repeating)
 
         @test tile_size(halo) == (4, 5)
+        @test halo isa AbstractArray{Int,2}
         @test size(halo) == (12, 10)
         @test local_size(halo) == (12, 10)
         @test global_size(halo) == (12, 10)
@@ -27,12 +28,35 @@
         @test size(interior_view(halo, 1)) == (4, 5)
         @test_throws ErrorException ThreadedHaloArray(Int, (4,), 1; dims=(2,),
             boundary_condition=((Periodic(), Repeating()),))
+
+        resized = similar(halo, Float32, (15, 12))
+        @test resized isa ThreadedHaloArray
+        @test eltype(resized) === Float32
+        @test size(resized) == (15, 12)
+        @test tile_size(resized) == (5, 6)
+        @test full_size(resized) == (9, 10)
+        @test_throws DimensionMismatch similar(halo, Float32, (14, 12))
+
+        resized_same_eltype = similar(halo, (15, 12))
+        @test eltype(resized_same_eltype) === Int
+        @test size(resized_same_eltype) == (15, 12)
+        @test tile_size(resized_same_eltype) == (5, 6)
     end
 
     @testset "nonperiodic tile exchange and physical boundaries" begin
         halo = ThreadedHaloArray(Int, (3,), 1; dims=(2,), boundary_condition=:repeating)
         interior_view(halo, 1) .= [11, 12, 13]
         interior_view(halo, 2) .= [21, 22, 23]
+
+        @test eltype(typeof(halo)) === Int
+        @test halo[1] == 11
+        @test halo[4] == 21
+        halo[5] = 99
+        @test halo[5] == 99
+        @test interior_view(halo, 2)[2] == 99
+        halo[5] = 22
+        @test_throws BoundsError halo[0]
+        @test_throws BoundsError setindex!(halo, 1, 7)
 
         synchronize_halo!(halo)
 
@@ -172,6 +196,13 @@
         similar_fields = similar(fields, Float64)
         @test eltype(similar_fields) == Float64
         @test tile_size(similar_fields) == tile_size(fields)
+
+        resized_fields = similar(fields, Float32, (2, 8))
+        @test resized_fields isa MultiHaloArray
+        @test eltype(resized_fields) === Float32
+        @test size(resized_fields) == (2, 8)
+        @test tile_size(resized_fields) == (4,)
+        @test_throws DimensionMismatch similar(fields, Float32, (3, 8))
     end
 
     @testset "threaded halo array broadcast" begin

@@ -719,6 +719,32 @@ function _check_multihaloarray_flux_contribution_exchange()
     return nothing
 end
 
+function _check_haloarray_scalar_indexing()
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+    nranks = MPI.Comm_size(comm)
+
+    @test nranks > 1
+
+    topology = CartesianTopology(comm, (0,); periodic=(true,))
+    local_cells = 4
+    ha = HaloArray(Int, (local_cells,), 1, topology; boundary_condition=:periodic)
+    _fill_rank_pattern!(ha, rank)
+
+    coord = topology.cart_coords[1]
+    owned_global = coord * local_cells + 2
+    remote_coord = mod(coord + 1, topology.dims[1])
+    remote_global = remote_coord * local_cells + 1
+
+    @test ha[owned_global] == 100 * rank + 2
+    setindex!(ha, -rank - 1, owned_global)
+    @test interior_view(ha)[2] == -rank - 1
+    @test_throws ArgumentError ha[remote_global]
+    @test_throws BoundsError ha[0]
+
+    return nothing
+end
+
 @testset "MPI halo exchange across ranks" begin
     for (name, exchange!) in pairs(EXCHANGE_IMPLEMENTATIONS)
         @testset "1D $name" begin
@@ -744,6 +770,10 @@ end
     _check_multihaloarray_broadcast()
     _check_arrayofhaloarray_broadcast()
     _check_nested_multihaloarray_broadcast()
+end
+
+@testset "MPI HaloArray scalar indexing" begin
+    _check_haloarray_scalar_indexing()
 end
 
 @testset "MPI flux contribution exchange across ranks" begin
