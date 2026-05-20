@@ -11,8 +11,8 @@ function gather_haloarray(halo::HaloArray; root::Int=0)
 
     local_data = interior_view(halo)
 
-    local_size = size(local_data)
-    local_len = prod(local_size)
+    owned_shape = size(local_data)
+    local_len = prod(owned_shape)
 
     # Gather all buffers as flat arrays
     sendbuf = collect(vec(local_data))# Array(local_data)
@@ -27,16 +27,16 @@ function gather_haloarray(halo::HaloArray; root::Int=0)
 
     # Reconstruct the full array at the root
     if rank == root
-        global_size = ntuple(i -> dims[i] * local_size[i], Val(N))
+        global_size = ntuple(i -> dims[i] * owned_shape[i], Val(N))
         global_array = Array{T}(undef, global_size)
 
         for r in 0:nproc-1
             coords_r = MPI.Cart_coords(comm, r) |> Tuple
-            offset = ntuple(i -> coords_r[i] * local_size[i], Val(N))
-            inds = ntuple(i -> (offset[i]+1):(offset[i]+local_size[i]), Val(N))
+            offset = ntuple(i -> coords_r[i] * owned_shape[i], Val(N))
+            inds = ntuple(i -> (offset[i]+1):(offset[i]+owned_shape[i]), Val(N))
 
             flat_offset = r * local_len + 1
-            subarray = reshape(view( recvbuf,flat_offset : flat_offset + local_len - 1), local_size...)
+            subarray = reshape(view( recvbuf,flat_offset : flat_offset + local_len - 1), owned_shape...)
             @views global_array[inds...] .= subarray
         end
 

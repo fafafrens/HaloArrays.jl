@@ -11,11 +11,11 @@ MaybeHaloArray(a::A) where {T,N,A<:AbstractHaloArray{T,N}} =
 
 # delegazioni di funzioni comunemente usate (inoltrate a data quando active)
 Base.size(m::MaybeHaloArray) = global_size(m)
-local_size(m::MaybeHaloArray) = local_size(m.data)
-local_axes(m::MaybeHaloArray) = local_axes(m.data)
+owned_size(m::MaybeHaloArray) = owned_size(m.data)
+owned_axes(m::MaybeHaloArray) = owned_axes(m.data)
 interior_size(m::MaybeHaloArray) = interior_size(m.data)
 global_size(m::MaybeHaloArray) = global_size(m.data)
-full_size(m::MaybeHaloArray) = full_size(m.data)
+storage_size(m::MaybeHaloArray) = storage_size(m.data)
 Base.axes(m::MaybeHaloArray) = axes(m.data)
 Base.axes(m::MaybeHaloArray, i::Int) = axes(m.data, i)
 

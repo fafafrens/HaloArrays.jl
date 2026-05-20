@@ -50,58 +50,58 @@ function MultiHaloArray(arrs::NamedTuple; check=nothing)
 end
 
 
-function MultiHaloArray(::Type{<:HaloArray}, ::Type{T}, local_size::NTuple{N,Int},
+function MultiHaloArray(::Type{<:HaloArray}, ::Type{T}, owned_dims::NTuple{N,Int},
         halo::Int, topology::CartesianTopology{N};
         boundary_conditions::NamedTuple{names,<:Tuple}) where {T,N,names}
     arrays = NamedTuple{names}(map(boundary_conditions) do bc
-        HaloArray(T, local_size, halo, topology; boundary_condition=bc)
+        HaloArray(T, owned_dims, halo, topology; boundary_condition=bc)
     end)
     return MultiHaloArray(arrays)
 end
 
-function MultiHaloArray(::Type{<:HaloArray}, ::Type{T}, local_size::NTuple{N,Int},
+function MultiHaloArray(::Type{<:HaloArray}, ::Type{T}, owned_dims::NTuple{N,Int},
         halo::Int; boundary_conditions::NamedTuple{names,<:Tuple}) where {T,N,names}
     arrays = NamedTuple{names}(map(boundary_conditions) do bc
-        HaloArray(T, local_size, halo; boundary_condition=bc)
+        HaloArray(T, owned_dims, halo; boundary_condition=bc)
     end)
     return MultiHaloArray(arrays)
 end
 
-function MultiHaloArray(::Type{<:HaloArray}, local_size::NTuple{N,Int},
+function MultiHaloArray(::Type{<:HaloArray}, owned_dims::NTuple{N,Int},
         halo::Int; boundary_conditions::NamedTuple{names,<:Tuple}) where {N,names}
-    return MultiHaloArray(HaloArray, Float64, local_size, halo;
+    return MultiHaloArray(HaloArray, Float64, owned_dims, halo;
         boundary_conditions=boundary_conditions)
 end
 
-function MultiHaloArray(::Type{T}, local_size::NTuple{N,Int}, halo::Int,
+function MultiHaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int,
         topology::CartesianTopology{N}; boundary_conditions::NamedTuple{names,<:Tuple}) where {T,N,names}
-    return MultiHaloArray(HaloArray, T, local_size, halo, topology;
+    return MultiHaloArray(HaloArray, T, owned_dims, halo, topology;
         boundary_conditions=boundary_conditions)
 end
 
-function MultiHaloArray(::Type{T}, local_size::NTuple{N,Int}, halo::Int;
+function MultiHaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int;
         boundary_conditions::NamedTuple{names,<:Tuple}) where {T,N,names}
-    return MultiHaloArray(HaloArray, T, local_size, halo;
+    return MultiHaloArray(HaloArray, T, owned_dims, halo;
         boundary_conditions=boundary_conditions)
 end
 
-function MultiHaloArray(local_size::NTuple{N,Int}, halo::Int,
+function MultiHaloArray(owned_dims::NTuple{N,Int}, halo::Int,
         boundary_conditions::NamedTuple{names,<:Tuple}) where {N,names}
-    return MultiHaloArray(Float64, local_size, halo;
+    return MultiHaloArray(Float64, owned_dims, halo;
         boundary_conditions=boundary_conditions)
 end
 
-function MultiHaloArray(::Type{<:LocalHaloArray}, ::Type{T}, local_size::NTuple{N,Int},
+function MultiHaloArray(::Type{<:LocalHaloArray}, ::Type{T}, owned_dims::NTuple{N,Int},
         halo::Int; boundary_conditions::NamedTuple{names,<:Tuple}) where {T,N,names}
     arrays = NamedTuple{names}(map(boundary_conditions) do bc
-        LocalHaloArray(T, local_size, halo; boundary_condition=bc)
+        LocalHaloArray(T, owned_dims, halo; boundary_condition=bc)
     end)
     return MultiHaloArray(arrays)
 end
 
-function MultiHaloArray(::Type{<:LocalHaloArray}, local_size::NTuple{N,Int},
+function MultiHaloArray(::Type{<:LocalHaloArray}, owned_dims::NTuple{N,Int},
         halo::Int; boundary_conditions::NamedTuple{names,<:Tuple}) where {N,names}
-    return MultiHaloArray(LocalHaloArray, Float64, local_size, halo;
+    return MultiHaloArray(LocalHaloArray, Float64, owned_dims, halo;
         boundary_conditions=boundary_conditions)
 end
 
@@ -148,17 +148,17 @@ n_field(halos::MultiHaloArray{T,N,A,D}) where {T,N,A,D} = length(halos.arrays)
 
 
 @inline interior_size(halos::MultiHaloArray) = (n_field(halos), _spatial_interior_size(first(values(halos.arrays)))...)
-@inline local_size(halos::MultiHaloArray) = (n_field(halos), _spatial_size(first(values(halos.arrays)))...)
+@inline owned_size(halos::MultiHaloArray) = (n_field(halos), _spatial_owned_size(first(values(halos.arrays)))...)
 @inline global_size(halos::MultiHaloArray) = (n_field(halos), _spatial_global_size(first(values(halos.arrays)))...)
-@inline full_size(halos::MultiHaloArray) = (n_field(halos), _spatial_full_size(first(values(halos.arrays)))...)
-@inline full_size(halos::MultiHaloArray,i) = full_size(halos)[i]
+@inline storage_size(halos::MultiHaloArray) = (n_field(halos), _spatial_storage_size(first(values(halos.arrays)))...)
+@inline storage_size(halos::MultiHaloArray,i) = storage_size(halos)[i]
 @inline halo_width(halo::MultiHaloArray) = halo_width(first(values(halo.arrays)))
 @inline halo_width(halo::MultiHaloArray,i)= map(halo_width,halo.arrays)
 @inline Base.parent(halo::MultiHaloArray)  = map(parent,halo.arrays)
 @inline Base.axes(x::MultiHaloArray) = (Base.OneTo(n_field(x)), _spatial_axes(first(values(x.arrays)))...)
 @inline Base.axes(x::MultiHaloArray,i) = axes(x)[i]
-@inline local_axes(x::MultiHaloArray) = (Base.OneTo(n_field(x)), _spatial_local_axes(first(values(x.arrays)))...)
-@inline local_axes(x::MultiHaloArray,i) = local_axes(x)[i]
+@inline owned_axes(x::MultiHaloArray) = (Base.OneTo(n_field(x)), _spatial_owned_axes(first(values(x.arrays)))...)
+@inline owned_axes(x::MultiHaloArray,i) = owned_axes(x)[i]
 @inline tile_size(halos::MultiHaloArray) = tile_size(first(values(halos.arrays)))
 @inline tile_count(halos::MultiHaloArray) = tile_count(first(values(halos.arrays)))
 @inline tile_parent(halos::MultiHaloArray, tile_id::Integer) =

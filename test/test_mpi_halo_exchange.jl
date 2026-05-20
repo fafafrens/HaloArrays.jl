@@ -74,7 +74,7 @@ function _check_periodic_1d_halo_exchange!(exchange!)
 end
 
 function _fill_2d_rank_pattern!(ha, rank)
-    nx, ny = local_size(ha)
+    nx, ny = owned_size(ha)
     interior = interior_view(ha)
     for i in 1:nx, j in 1:ny
         interior[i, j] = 1000 * rank + 100 * i + j
@@ -91,10 +91,10 @@ function _check_periodic_2d_halo_exchange!(exchange!)
 
     topology = CartesianTopology(comm, (0, 0); periodic=(true, true))
     halo_width_cells = 1
-    local_size = (4, 3)
+    owned_dims = (4, 3)
     ha = HaloArray(
         Int,
-        local_size,
+        owned_dims,
         halo_width_cells,
         topology;
         boundary_condition=((Periodic(), Periodic()), (Periodic(), Periodic())),
@@ -105,7 +105,7 @@ function _check_periodic_2d_halo_exchange!(exchange!)
     exchange!(ha)
     MPI.Barrier(comm)
 
-    nx, ny = local_size
+    nx, ny = owned_dims
     left_rank = topology.neighbors[1][1]
     right_rank = topology.neighbors[1][2]
     down_rank = topology.neighbors[2][1]
@@ -121,7 +121,7 @@ function _check_periodic_2d_halo_exchange!(exchange!)
 end
 
 function _fill_3d_rank_pattern!(ha, rank)
-    nx, ny, nz = local_size(ha)
+    nx, ny, nz = owned_size(ha)
     interior = interior_view(ha)
     for i in 1:nx, j in 1:ny, k in 1:nz
         interior[i, j, k] = 100_000 * rank + 10_000 * i + 100 * j + k
@@ -141,10 +141,10 @@ function _check_periodic_3d_halo_exchange!(exchange!)
 
     topology = CartesianTopology(comm, (0, 0, 0); periodic=(true, true, true))
     halo_width_cells = 1
-    local_size = (3, 2, 2)
+    owned_dims = (3, 2, 2)
     ha = HaloArray(
         Int,
-        local_size,
+        owned_dims,
         halo_width_cells,
         topology;
         boundary_condition=ntuple(_ -> (Periodic(), Periodic()), 3),
@@ -155,7 +155,7 @@ function _check_periodic_3d_halo_exchange!(exchange!)
     exchange!(ha)
     MPI.Barrier(comm)
 
-    nx, ny, nz = local_size
+    nx, ny, nz = owned_dims
     left_rank = topology.neighbors[1][1]
     right_rank = topology.neighbors[1][2]
     down_rank = topology.neighbors[2][1]
@@ -577,11 +577,11 @@ function _check_periodic_2d_flux_contribution_exchange()
     @test nranks > 1
 
     topology = CartesianTopology(comm, (0, 0); periodic = (true, true))
-    local_size = (4, 5)
-    nx, ny = local_size
+    owned_dims = (4, 5)
+    nx, ny = owned_dims
     du = HaloArray(
         Int,
-        local_size,
+        owned_dims,
         1,
         topology;
         boundary_condition = ((Periodic(), Periodic()), (Periodic(), Periodic())),
@@ -602,7 +602,7 @@ function _check_periodic_2d_flux_contribution_exchange()
     synchronize_flux_contributions!(du)
     MPI.Barrier(comm)
 
-    expected = zeros(Int, local_size)
+    expected = zeros(Int, owned_dims)
     left_rank = topology.neighbors[1][1]
     right_rank = topology.neighbors[1][2]
     down_rank = topology.neighbors[2][1]
@@ -630,11 +630,11 @@ function _check_nonperiodic_2d_flux_contribution_exchange()
     @test nranks > 1
 
     topology = CartesianTopology(comm, (0, 0); periodic=(false, false))
-    local_size = (4, 5)
-    nx, ny = local_size
+    owned_dims = (4, 5)
+    nx, ny = owned_dims
     du = HaloArray(
         Int,
-        local_size,
+        owned_dims,
         1,
         topology;
         boundary_condition=((Repeating(), Repeating()), (Repeating(), Repeating())),
@@ -655,7 +655,7 @@ function _check_nonperiodic_2d_flux_contribution_exchange()
     synchronize_flux_contributions!(du)
     MPI.Barrier(comm)
 
-    expected = zeros(Int, local_size)
+    expected = zeros(Int, owned_dims)
     left_rank = topology.neighbors[1][1]
     right_rank = topology.neighbors[1][2]
     down_rank = topology.neighbors[2][1]

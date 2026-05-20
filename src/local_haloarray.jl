@@ -8,14 +8,14 @@ function LocalHaloArray(data::AbstractArray{T,N}, halo::Int, boundary_condition)
     return LocalHaloArray{T,N,typeof(data),halo,typeof(bc)}(data, bc)
 end
 
-function LocalHaloArray(::Type{T}, local_inner_size::NTuple{N,Int}, halo::Int; boundary_condition=:repeating) where {T,N}
-    fullsize = ntuple(i -> local_inner_size[i] + 2 * halo, Val(N))
+function LocalHaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int; boundary_condition=:repeating) where {T,N}
+    fullsize = ntuple(i -> owned_dims[i] + 2 * halo, Val(N))
     data = zeros(T, fullsize...)
     return LocalHaloArray(data, halo, boundary_condition)
 end
 
-function LocalHaloArray(local_inner_size::NTuple{N,Int}, halo::Int; boundary_condition=:repeating) where {N}
-    return LocalHaloArray(Float64, local_inner_size, halo; boundary_condition)
+function LocalHaloArray(owned_dims::NTuple{N,Int}, halo::Int; boundary_condition=:repeating) where {N}
+    return LocalHaloArray(Float64, owned_dims, halo; boundary_condition)
 end
 
 @inline Base.length(halo::LocalHaloArray) = length(interior_view(halo))
@@ -28,8 +28,8 @@ end
 @inline Base.parent(halo::LocalHaloArray) = halo.data
 @inline Base.axes(halo::LocalHaloArray) = map(Base.OneTo, size(halo))
 @inline Base.axes(halo::LocalHaloArray, d::Int) = Base.OneTo(size(halo, d))
-@inline local_axes(halo::LocalHaloArray) = axes(interior_view(halo))
-@inline local_axes(halo::LocalHaloArray, d::Int) = axes(interior_view(halo), d)
+@inline owned_axes(halo::LocalHaloArray) = axes(interior_view(halo))
+@inline owned_axes(halo::LocalHaloArray, d::Int) = axes(interior_view(halo), d)
 @inline Base.eachindex(halo::LocalHaloArray) = eachindex(interior_view(halo))
 @inline Base.iterate(halo::LocalHaloArray) = iterate(interior_view(halo))
 @inline Base.iterate(halo::LocalHaloArray, state) = iterate(interior_view(halo), state)
@@ -45,18 +45,18 @@ get_comm(::LocalHaloArray) = nothing
     return ntuple(i -> size(halo.data, i) - 2 * h, Val(N))
 end
 
-@inline full_size(halo::LocalHaloArray) = size(halo.data)
-@inline full_size(halo::LocalHaloArray, i::Int) = size(halo.data, i)
+@inline storage_size(halo::LocalHaloArray) = size(halo.data)
+@inline storage_size(halo::LocalHaloArray, i::Int) = size(halo.data, i)
 
 @inline function interior_range(halo::LocalHaloArray)
     h = halo_width(halo)
     N = ndims(halo)
-    return ntuple(i -> (h + 1):(full_size(halo, i) - h), Val(N))
+    return ntuple(i -> (h + 1):(storage_size(halo, i) - h), Val(N))
 end
 
 @inline function full_range(halo::LocalHaloArray)
     N = ndims(halo)
-    return ntuple(i -> 1:full_size(halo, i), Val(N))
+    return ntuple(i -> 1:storage_size(halo, i), Val(N))
 end
 
 @inline function interior_view(halo::LocalHaloArray)
@@ -167,32 +167,32 @@ function fill_from_global_indices!(f, halo::LocalHaloArray)
     return halo
 end
 
-local_to_global_index(::LocalHaloArray, local_idx::NTuple{N,<:Integer}) where {N} = local_idx
-global_to_local_index(halo::LocalHaloArray, global_idx::NTuple{N,<:Integer}) where {N} =
-    all(i -> 1 <= global_idx[i] <= local_size(halo, i), 1:N) ? ntuple(i -> global_idx[i] + halo_width(halo), Val(N)) : nothing
-global_size(halo::LocalHaloArray) = local_size(halo)
+owned_to_global_index(::LocalHaloArray, owned_idx::NTuple{N,<:Integer}) where {N} = owned_idx
+global_to_storage_index(halo::LocalHaloArray, global_idx::NTuple{N,<:Integer}) where {N} =
+    all(i -> 1 <= global_idx[i] <= owned_size(halo, i), 1:N) ? ntuple(i -> global_idx[i] + halo_width(halo), Val(N)) : nothing
+global_size(halo::LocalHaloArray) = owned_size(halo)
 
 function Base.getindex(halo::LocalHaloArray, I::Vararg{Integer})
     idx = _check_global_scalar_indices(halo, I)
-    local_idx = global_to_local_index(halo, idx)
-    @inbounds return parent(halo)[local_idx...]
+    storage_idx = global_to_storage_index(halo, idx)
+    @inbounds return parent(halo)[storage_idx...]
 end
 
 function Base.setindex!(halo::LocalHaloArray, value, I::Vararg{Integer})
     idx = _check_global_scalar_indices(halo, I)
-    local_idx = global_to_local_index(halo, idx)
-    @inbounds parent(halo)[local_idx...] = value
+    storage_idx = global_to_storage_index(halo, idx)
+    @inbounds parent(halo)[storage_idx...] = value
     return halo
 end
 
 function Base.show(io::IO, obj::LocalHaloArray)
-    print(io, "LocalHaloArray of global size ", size(obj), " (local size: ", local_size(obj), ", full size: ", full_size(obj), "), halo width: ", halo_width(obj), "\n")
+    print(io, "LocalHaloArray of global size ", size(obj), " (owned size: ", owned_size(obj), ", storage size: ", storage_size(obj), "), halo width: ", halo_width(obj), "\n")
     print(io, "  eltype: ", eltype(obj), "\n")
     print(io, "  boundary_condition: ", obj.boundary_condition, "\n")
 end
 
 function Base.show(io::IO, mime::MIME"text/plain", obj::LocalHaloArray)
-    println(io, "LocalHaloArray (full size: ", full_size(obj), ", halo width: ", halo_width(obj), ")")
+    println(io, "LocalHaloArray (storage size: ", storage_size(obj), ", halo width: ", halo_width(obj), ")")
     println(io, "  eltype: ", eltype(obj))
     println(io, "  boundary_condition: ", obj.boundary_condition)
     println(io, "  interior data preview:")

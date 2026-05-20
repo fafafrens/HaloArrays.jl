@@ -9,12 +9,12 @@ MPI.Init()
 comm = MPI.COMM_WORLD
 rank = MPI.Comm_rank(comm)
 
-local_size = (4, 4)
+owned_dims = (4, 4)
 halo_size = 1
 
 # Construct HaloArrays with known content
-ha1 = HaloArray(local_size, halo_size)
-ha2 = HaloArray(local_size, halo_size)
+ha1 = HaloArray(owned_dims, halo_size)
+ha2 = HaloArray(owned_dims, halo_size)
 ha1.data .= rank + 1.
 ha2.data .= 2. * (rank + 1.)
 

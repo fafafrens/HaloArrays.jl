@@ -11,9 +11,9 @@ function _ode_topology(comm)
 end
 
 function _ode_initial_condition(topology)
-    local_size = (4, 5)
-    global_dims = local_size .* topology.dims
-    u0 = HaloArray(Float64, local_size, 1, topology; boundary_condition=:repeating)
+    owned_dims = (4, 5)
+    global_dims = owned_dims .* topology.dims
+    u0 = HaloArray(Float64, owned_dims, 1, topology; boundary_condition=:repeating)
 
     fill_from_global_indices!(u0) do I
         x = I[1]

@@ -9,20 +9,20 @@ function LocalMultiHaloArray(arrs::NamedTuple; check=nothing)
     return MultiHaloArray(arrs; check=check)
 end
 
-function LocalMultiHaloArray(::Type{T}, local_size::NTuple{N,<:Integer}, halo::Integer;
+function LocalMultiHaloArray(::Type{T}, owned_dims::NTuple{N,<:Integer}, halo::Integer;
         boundary_conditions::NamedTuple{names,<:Tuple}) where {T,N,names}
-    owned_size = ntuple(d -> Int(local_size[d]), Val(N))
-    return MultiHaloArray(LocalHaloArray, T, owned_size, Int(halo);
+    normalized_owned_dims = ntuple(d -> Int(owned_dims[d]), Val(N))
+    return MultiHaloArray(LocalHaloArray, T, normalized_owned_dims, Int(halo);
         boundary_conditions=boundary_conditions)
 end
 
-function LocalMultiHaloArray(local_size::NTuple{N,<:Integer}, halo::Integer,
+function LocalMultiHaloArray(owned_dims::NTuple{N,<:Integer}, halo::Integer,
         bcs::NamedTuple{names,<:Tuple}) where {N,names}
-    return LocalMultiHaloArray(Float64, local_size, halo; boundary_conditions=bcs)
+    return LocalMultiHaloArray(Float64, owned_dims, halo; boundary_conditions=bcs)
 end
 
-function LocalMultiHaloArray(local_size::NTuple{N,<:Integer}, halo::Integer;
+function LocalMultiHaloArray(owned_dims::NTuple{N,<:Integer}, halo::Integer;
         boundary_conditions::NamedTuple{names,<:Tuple}) where {N,names}
-    return LocalMultiHaloArray(Float64, local_size, halo;
+    return LocalMultiHaloArray(Float64, owned_dims, halo;
         boundary_conditions=boundary_conditions)
 end

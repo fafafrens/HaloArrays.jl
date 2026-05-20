@@ -60,10 +60,10 @@ end
         @test isactive(maybe_reduced)
         reduced = unwrap(maybe_reduced)
         reduced_global_size = (topology.dims[2] * local_dims[2],)
-        reduced_local_size = (local_dims[2],)
+        reduced_owned_size = (local_dims[2],)
         @test size(reduced) == reduced_global_size
         @test global_size(reduced) == reduced_global_size
-        @test local_size(reduced) == reduced_local_size
+        @test owned_size(reduced) == reduced_owned_size
         @test halo_width(reduced) == halo
 
         expected = zeros(Int, local_dims[2])
@@ -91,11 +91,11 @@ end
         fields = unwrap(maybe_fields)
         @test fields isa MultiHaloArray
         reduced_global_size = (topology.dims[2] * local_dims[2],)
-        reduced_local_size = (local_dims[2],)
+        reduced_owned_size = (local_dims[2],)
         @test size(fields.arrays.u) == reduced_global_size
         @test size(fields.arrays.v) == reduced_global_size
-        @test local_size(fields.arrays.u) == reduced_local_size
-        @test local_size(fields.arrays.v) == reduced_local_size
+        @test owned_size(fields.arrays.u) == reduced_owned_size
+        @test owned_size(fields.arrays.v) == reduced_owned_size
     else
         @test !isactive(maybe_fields)
     end

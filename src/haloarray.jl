@@ -88,8 +88,8 @@ end
 @inline Base.eltype(ha::HaloArray{T,N,A,Halo,B,BCondition}) where {T,N,A,Halo,B,BCondition} = T
 @inline Base.axes(halo::HaloArray) = map(Base.OneTo, size(halo))
 @inline Base.axes(halo::HaloArray, i::Int) = Base.OneTo(size(halo, i))
-@inline local_axes(halo::HaloArray) = axes(interior_view(halo))
-@inline local_axes(halo::HaloArray, i::Int) = axes(interior_view(halo), i)
+@inline owned_axes(halo::HaloArray) = axes(interior_view(halo))
+@inline owned_axes(halo::HaloArray, i::Int) = axes(interior_view(halo), i)
 @inline Base.eachindex(halo::HaloArray) = eachindex(interior_view(halo))
 @inline Base.iterate(halo::HaloArray) = iterate(interior_view(halo))
 @inline Base.iterate(halo::HaloArray, state) = iterate(interior_view(halo), state)
@@ -101,8 +101,8 @@ end
 
 @inline Base.eltype(::Type{<:HaloArray{T}}) where {T} = T
 
-@inline full_size(halo::HaloArray) = size(halo.data)
-@inline full_size(halo::HaloArray, i::Int) = size(halo.data,i)
+@inline storage_size(halo::HaloArray) = size(halo.data)
+@inline storage_size(halo::HaloArray, i::Int) = size(halo.data,i)
 
 
 @inline halo_width(::Type{HaloArray{T,N,A,Halo,B,BCondition}}) where {T,N,A,Halo,B,BCondition} = Halo
@@ -143,16 +143,16 @@ function HaloArray(data::AbstractArray{T,N}, halo::Int, topology::CartesianTopol
     return build_haloarray_from_data(data, halo, topology, boundary_condition)
 end
 
-# Costruttore da tipo + interior sizes + topology (crea data zeros)
-function HaloArray(::Type{T}, local_inner_size::NTuple{N,Int}, halo::Int, topology::CartesianTopology{N}; boundary_condition=(ntuple(_ -> (Repeating(), Repeating()), Val(N)))) where {T,N}
-    fullsize = ntuple(i -> local_inner_size[i] + 2 * halo, Val(N))
+# Costruttore da tipo + owned interior sizes + topology (crea data zeros)
+function HaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int, topology::CartesianTopology{N}; boundary_condition=(ntuple(_ -> (Repeating(), Repeating()), Val(N)))) where {T,N}
+    fullsize = ntuple(i -> owned_dims[i] + 2 * halo, Val(N))
     data = zeros(T, fullsize...)
     # Delegate normalization to build_haloarray_from_data (single normalization point)
     return build_haloarray_from_data(data, halo, topology, boundary_condition)
 end
 
 # Costruttore che sceglie la topologia MPI automaticamente (usa MPI.COMM_WORLD)
-function HaloArray(::Type{T}, local_inner_size::NTuple{N,Int}, halo::Int, boundary_condition::NTuple{N,NTuple{2,AbstractBoundaryCondition}}) where {T,N}
+function HaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int, boundary_condition::NTuple{N,NTuple{2,AbstractBoundaryCondition}}) where {T,N}
     if !MPI.Initialized()
         MPI.Init()
     end
@@ -160,25 +160,25 @@ function HaloArray(::Type{T}, local_inner_size::NTuple{N,Int}, halo::Int, bounda
     dims_guess = ntuple(i -> 0, Val(N))
     periodic = infer_periodicity(normalize_boundary_condition(boundary_condition, N))
     topology = CartesianTopology(comm, dims_guess; periodic=periodic)
-    return HaloArray(T, local_inner_size, halo, topology; boundary_condition=boundary_condition)
+    return HaloArray(T, owned_dims, halo, topology; boundary_condition=boundary_condition)
 end
 
 
 # Accept legacy positional boundary_condition argument (fifth positional arg)
-function HaloArray(::Type{T}, local_inner_size::NTuple{N,Int}, halo::Int, topology::CartesianTopology{N}, boundary_condition) where {T,N}
+function HaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int, topology::CartesianTopology{N}, boundary_condition) where {T,N}
     # normalize boundary condition (accept Symbols/Types/instances)
     bc_norm = normalize_boundary_condition(boundary_condition, N)
-    return HaloArray(T, local_inner_size, halo, topology; boundary_condition=bc_norm)
+    return HaloArray(T, owned_dims, halo, topology; boundary_condition=bc_norm)
 end
 
-function HaloArray(::Type{T}, local_inner_size::NTuple{N,Int}, halo::Int; boundary_condition=(ntuple(_ -> (Repeating(), Repeating()), Val(N)))) where {T,N}
+function HaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int; boundary_condition=(ntuple(_ -> (Repeating(), Repeating()), Val(N)))) where {T,N}
     # Create a HaloArray without explicit topology (auto-choose topology). The auto-topology
     # variant needs a normalized BC to infer periodicity, so normalize here and delegate.
-    HaloArray(T, local_inner_size, halo, normalize_boundary_condition(boundary_condition, N))
+    HaloArray(T, owned_dims, halo, normalize_boundary_condition(boundary_condition, N))
 end
 
-function HaloArray(local_inner_size::NTuple{N,Int}, halo::Int; boundary_condition=(ntuple(_ -> (Repeating(), Repeating()), Val(N)))) where {N}
-    HaloArray(Float64, local_inner_size, halo, normalize_boundary_condition(boundary_condition, N))
+function HaloArray(owned_dims::NTuple{N,Int}, halo::Int; boundary_condition=(ntuple(_ -> (Repeating(), Repeating()), Val(N)))) where {N}
+    HaloArray(Float64, owned_dims, halo, normalize_boundary_condition(boundary_condition, N))
 end
 
 
@@ -252,50 +252,50 @@ end
 #this are the function specialized for HaloArray
 @inline function get_send_view(::Side{1}, ::Dim{D}, array::HaloArray{T,N,A,Halo,B,BCondition}) where {D, T,N,A,Halo,B,BCondition}
     send_range = (halo_width(array) + 1):(2 * halo_width(array))
-    indices = ntuple(I -> I == D ? send_range : (halo_width(array)+1):(full_size(array,I)-halo_width(array)), Val(N))
+    indices = ntuple(I -> I == D ? send_range : (halo_width(array)+1):(storage_size(array,I)-halo_width(array)), Val(N))
     view(parent(array), indices...)
 end
 
 @inline function get_send_view(::Side{2}, ::Dim{D}, array::HaloArray{T,N,A,Halo,B,BCondition}) where {D, T,N,A,Halo,B,BCondition}
-    send_range = (full_size(array, D) - 2 * halo_width(array) + 1):(full_size(array, D) - halo_width(array))
-    indices = ntuple(I -> I == D ? send_range : (halo_width(array)+1):(full_size(array,I)-halo_width(array)), Val(N))
+    send_range = (storage_size(array, D) - 2 * halo_width(array) + 1):(storage_size(array, D) - halo_width(array))
+    indices = ntuple(I -> I == D ? send_range : (halo_width(array)+1):(storage_size(array,I)-halo_width(array)), Val(N))
     view(parent(array), indices...)
 end
 
 @inline function get_recv_view(::Side{1}, ::Dim{D}, array::HaloArray{T,N,A,Halo,B,BCondition}) where {D, T,N,A,Halo,B,BCondition}
     recv_range = 1:halo_width(array)
-    indices = ntuple(I -> I == D ? recv_range : (halo_width(array)+1):(full_size(array,I)-halo_width(array)), Val(N))
+    indices = ntuple(I -> I == D ? recv_range : (halo_width(array)+1):(storage_size(array,I)-halo_width(array)), Val(N))
     view(parent(array), indices...)
 end
 
 @inline function get_recv_view(::Side{2}, ::Dim{D}, array::HaloArray{T,N,A,Halo,B,BCondition}) where {D, T, N, A, Halo, B, BCondition}
-    recv_range = (full_size(array, D) - halo_width(array) + 1):(full_size(array, D))
-    indices = ntuple(I -> I == D ? recv_range : (halo_width(array)+1):(full_size(array,I)-halo_width(array)), Val(N))
+    recv_range = (storage_size(array, D) - halo_width(array) + 1):(storage_size(array, D))
+    indices = ntuple(I -> I == D ? recv_range : (halo_width(array)+1):(storage_size(array,I)-halo_width(array)), Val(N))
     view(parent(array), indices...)
 end
 
 #this are the function specialized for HaloArray and the dimension as Int for perfomance resons
 @inline function get_send_view(::Side{1}, D::Int, array::HaloArray{T,N,A,Halo,B,BCondition}) where { T, N,A,Halo,B,BCondition}
     send_range = (halo_width(array) + 1):(2 * halo_width(array))
-    indices = ntuple(I -> I == D ? send_range : (halo_width(array)+1):(full_size(array,I)-halo_width(array)), Val(N))
+    indices = ntuple(I -> I == D ? send_range : (halo_width(array)+1):(storage_size(array,I)-halo_width(array)), Val(N))
     view(parent(array), indices...)
 end
 
 @inline function get_send_view(::Side{2}, D::Int, array::HaloArray{T,N,A,Halo,B,BCondition}) where { T, N,A,Halo,B,BCondition}
-    send_range = (full_size(array, D) - 2 * halo_width(array) + 1):(full_size(array, D) - halo_width(array))
-    indices = ntuple(I -> I == D ? send_range : (halo_width(array)+1):(full_size(array,I)-halo_width(array)), Val(N))
+    send_range = (storage_size(array, D) - 2 * halo_width(array) + 1):(storage_size(array, D) - halo_width(array))
+    indices = ntuple(I -> I == D ? send_range : (halo_width(array)+1):(storage_size(array,I)-halo_width(array)), Val(N))
     view(parent(array), indices...)
 end
 
 @inline function get_recv_view(::Side{1}, D::Int, array::HaloArray{T,N,A,Halo,B,BCondition}) where { T,N,A,Halo,B,BCondition}
     recv_range = 1:halo_width(array)
-    indices = ntuple(I -> I == D ? recv_range : (halo_width(array)+1):(full_size(array,I)-halo_width(array)), Val(N))
+    indices = ntuple(I -> I == D ? recv_range : (halo_width(array)+1):(storage_size(array,I)-halo_width(array)), Val(N))
     view(parent(array), indices...)
 end
 
 @inline function get_recv_view(::Side{2}, D::Int, array::HaloArray{T,N,A,Halo,B,BCondition}) where { T, N,A,Halo,B,BCondition}
-    recv_range = (full_size(array, D) - halo_width(array) + 1):(full_size(array, D))
-    indices = ntuple(I -> I == D ? recv_range : (halo_width(array)+1):(full_size(array,I)-halo_width(array)), Val(N))
+    recv_range = (storage_size(array, D) - halo_width(array) + 1):(storage_size(array, D))
+    indices = ntuple(I -> I == D ? recv_range : (halo_width(array)+1):(storage_size(array,I)-halo_width(array)), Val(N))
     view(parent(array), indices...)
 end
 
@@ -304,13 +304,13 @@ end
 @inline function interior_range(halo::HaloArray)
     h = halo_width(halo)
     N=ndims(halo)
-    ntuple(i -> (h + 1):(full_size(halo, i) - h), Val(N))
+    ntuple(i -> (h + 1):(storage_size(halo, i) - h), Val(N))
 end
 
 @inline function full_range(halo::HaloArray)
     h = halo_width(halo)
     N=ndims(halo)
-    ntuple(i -> ( 1):(full_size(halo, i) ), Val(N))
+    ntuple(i -> ( 1):(storage_size(halo, i) ), Val(N))
 end
 
 @inline function interior_view(halo::HaloArray)
@@ -329,58 +329,58 @@ end
 
 
 """
-    local_to_global_index(halo::HaloArray, local_idx::NTuple{N,<:Integer})
+    owned_to_global_index(halo::HaloArray, owned_idx::NTuple{N,<:Integer})
 
-Convert a local interior index (excluding halo) to global index (1-based).
+Convert an owned interior index (excluding halo) to global index (1-based).
 """
-function local_to_global_index(halo::HaloArray{T,N,A,Halo,B,BCondition}, local_idx::NTuple{N,<:Integer}) where {T,N,A,Halo,B,BCondition}
+function owned_to_global_index(halo::HaloArray{T,N,A,Halo,B,BCondition}, owned_idx::NTuple{N,<:Integer}) where {T,N,A,Halo,B,BCondition}
     coords = halo.topology.cart_coords
-    size_local = interior_size(halo)
-    all(i -> 1 <= local_idx[i] <= size_local[i], 1:N) ||
-        throw(BoundsError(halo, local_idx))
-    global_idx = ntuple(i -> coords[i] * size_local[i] + local_idx[i], Val(N))
+    owned_dims = interior_size(halo)
+    all(i -> 1 <= owned_idx[i] <= owned_dims[i], 1:N) ||
+        throw(BoundsError(halo, owned_idx))
+    global_idx = ntuple(i -> coords[i] * owned_dims[i] + owned_idx[i], Val(N))
     return global_idx
 end
 
-function global_to_local_index(halo::HaloArray, global_idx::NTuple{N,<:Integer}) where {N}
-    size_local = interior_size(halo)
+function global_to_storage_index(halo::HaloArray, global_idx::NTuple{N,<:Integer}) where {N}
+    owned_dims = interior_size(halo)
     coords = halo.topology.cart_coords
     h = halo_width(halo)
 
     # Compute which tile should own this global index
-    owner_coords = ntuple(i -> (global_idx[i] - 1) ÷ size_local[i], Val(N))
+    owner_coords = ntuple(i -> (global_idx[i] - 1) ÷ owned_dims[i], Val(N))
 
     # If this rank doesn't own it, return nothing
     if owner_coords != coords
         return nothing
     end
 
-    # Compute the interior local index
-    interior_idx = ntuple(i -> global_idx[i] - coords[i] * size_local[i], Val(N))
+    # Compute the owned interior index
+    interior_idx = ntuple(i -> global_idx[i] - coords[i] * owned_dims[i], Val(N))
 
-    # Convert to full local index (i.e., add halo)
-    local_idx = ntuple(i -> interior_idx[i] + h, Val(N))
-    return local_idx
+    # Convert to storage index (i.e., add halo)
+    storage_idx = ntuple(i -> interior_idx[i] + h, Val(N))
+    return storage_idx
 end
 
-@inline function _owned_global_to_local_index(halo::HaloArray, I)
+@inline function _owned_global_to_storage_index(halo::HaloArray, I)
     idx = _check_global_scalar_indices(halo, I)
-    local_idx = global_to_local_index(halo, idx)
-    local_idx === nothing &&
+    storage_idx = global_to_storage_index(halo, idx)
+    storage_idx === nothing &&
         throw(ArgumentError("Global index $idx is not owned by this MPI rank; HaloArray scalar indexing is local-only and does not communicate."))
-    return local_idx
+    return storage_idx
 end
 
 function Base.getindex(halo::HaloArray, I::Vararg{Integer})
-    @warn "Global scalar getindex on HaloArray is local-only and intended for diagnostics, not hot loops; use interior_view/local_axes for kernels." maxlog=1
-    local_idx = _owned_global_to_local_index(halo, I)
-    @inbounds return parent(halo)[local_idx...]
+    @warn "Global scalar getindex on HaloArray is local-only and intended for diagnostics, not hot loops; use interior_view/owned_axes for kernels." maxlog=1
+    storage_idx = _owned_global_to_storage_index(halo, I)
+    @inbounds return parent(halo)[storage_idx...]
 end
 
 function Base.setindex!(halo::HaloArray, value, I::Vararg{Integer})
-    @warn "Global scalar setindex! on HaloArray is local-only and intended for diagnostics, not hot loops; use interior_view/local_axes for kernels." maxlog=1
-    local_idx = _owned_global_to_local_index(halo, I)
-    @inbounds parent(halo)[local_idx...] = value
+    @warn "Global scalar setindex! on HaloArray is local-only and intended for diagnostics, not hot loops; use interior_view/owned_axes for kernels." maxlog=1
+    storage_idx = _owned_global_to_storage_index(halo, I)
+    @inbounds parent(halo)[storage_idx...] = value
     return halo
 end
 
@@ -391,11 +391,9 @@ end
 end
 
 @inline function owner_coordinates(halo::HaloArray, global_idx::NTuple{N,<:Integer}) where {N}
-    size_local = interior_size(halo)
-    ntuple(i -> (global_idx[i] - 1) ÷ size_local[i], Val(N))
+    owned_dims = interior_size(halo)
+    ntuple(i -> (global_idx[i] - 1) ÷ owned_dims[i], Val(N))
 end
-
-const owner_coordinares = owner_coordinates
 
 #function local_offset(halo::HaloArray)
 #    size_local =interior_size(halo)
@@ -411,7 +409,7 @@ const owner_coordinares = owner_coordinates
 #end
 #
 #
-#function global_to_local_index(halo::HaloArray, global_idx::NTuple{N,Int}) where {N}
+#function global_to_storage_index(halo::HaloArray, global_idx::NTuple{N,Int}) where {N}
 #    if !owns_global_index(halo, global_idx)
 #        return nothing
 #    end
@@ -532,7 +530,7 @@ function fill_from_global_indices!(f,halo::HaloArray)
     for local_I in CartesianIndices(local_shape)
         full_I = Tuple(local_I)
         local_interior_I = ntuple(i -> full_I[i] - h, Val(ndims(halo)))
-        global_I = local_to_global_index(halo, local_interior_I)
+        global_I = owned_to_global_index(halo, local_interior_I)
         halo.data[local_I] = f(global_I)
     end
 
@@ -551,7 +549,7 @@ end
 
 # 2-argument show, used by Array show, print(obj) and repr(obj), keep it short
 function Base.show(io::IO, obj::HaloArray)
-    print(io, "HaloArray of global size ", size(obj), " (local size: ", local_size(obj), ", full size: ", full_size(obj), "), halo width: ", halo_width(obj), "\n")
+    print(io, "HaloArray of global size ", size(obj), " (owned size: ", owned_size(obj), ", storage size: ", storage_size(obj), "), halo width: ", halo_width(obj), "\n")
     print(io, "  eltype: ", eltype(obj), "\n")
     print(io, "  topology: ", obj.topology, "\n")
     print(io, "  boundary_condition: ", obj.boundary_condition, "\n")
@@ -560,7 +558,7 @@ end
 # the 3-argument show used by display(obj) on the REPL
 function Base.show(io::IO, mime::MIME"text/plain", obj::HaloArray)
     # Show a more detailed, pretty-printed summary for REPL and text/plain
-    println(io, "HaloArray (full size: ", full_size(obj), ", halo width: ", halo_width(obj), ")")
+    println(io, "HaloArray (storage size: ", storage_size(obj), ", halo width: ", halo_width(obj), ")")
     println(io, "  eltype: ", eltype(obj))
     println(io, "  topology: ", obj.topology)
     println(io, "  boundary_condition: ", obj.boundary_condition)
@@ -571,7 +569,7 @@ end
 
 function global_size(halo::HaloArray)
     N = ndims(halo)
-    local_interior = local_size(halo)     # Tuple with local interior sizes per dimension
+    local_interior = owned_size(halo)     # Tuple with owned interior sizes per dimension
     dims = halo.topology.dims             # Tuple with number of processes per dimension
     
     return ntuple(i -> local_interior[i] * dims[i], Val(N))

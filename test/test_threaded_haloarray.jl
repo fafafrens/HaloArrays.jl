@@ -17,13 +17,13 @@
         @test tile_size(halo) == (4, 5)
         @test halo isa AbstractArray{Int,2}
         @test size(halo) == (12, 10)
-        @test local_size(halo) == (12, 10)
+        @test owned_size(halo) == (12, 10)
         @test global_size(halo) == (12, 10)
         @test axes(halo) == map(Base.OneTo, global_size(halo))
-        @test local_axes(halo) == map(Base.OneTo, local_size(halo))
+        @test owned_axes(halo) == map(Base.OneTo, owned_size(halo))
         @test halo_width(halo) == 2
         @test tile_count(halo) == 6
-        @test full_size(halo) == (8, 9)
+        @test storage_size(halo) == (8, 9)
         @test size(tile_parent(halo, 1)) == (8, 9)
         @test size(interior_view(halo, 1)) == (4, 5)
         @test_throws ErrorException ThreadedHaloArray(Int, (4,), 1; dims=(2,),
@@ -34,7 +34,7 @@
         @test eltype(resized) === Float32
         @test size(resized) == (15, 12)
         @test tile_size(resized) == (5, 6)
-        @test full_size(resized) == (9, 10)
+        @test storage_size(resized) == (9, 10)
         @test_throws DimensionMismatch similar(halo, Float32, (14, 12))
 
         resized_same_eltype = similar(halo, (15, 12))

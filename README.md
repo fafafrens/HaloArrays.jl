@@ -30,13 +30,13 @@ MPI-backed features require an MPI runtime (OpenMPI or MPICH).
 - `CartesianTopology`: MPI Cartesian topology helper.
 
 `size(u)` and `axes(u)` describe the global logical domain for every halo
-container. Local owned data is accessed through `local_size(u)`, `local_axes(u)`,
+container. Local owned data is accessed through `owned_size(u)`, `owned_axes(u)`,
 and `interior_view(u)`.
 
 Scalar indexing on `HaloArray` uses global indices, but it is local-only: it
 works only for global cells owned by the current MPI rank and throws otherwise.
 It is intended for diagnostics and setup, not stencil kernels or hot loops. Use
-`interior_view`, `parent`, `local_to_global_index`, and `global_to_local_index`
+`interior_view`, `parent`, `owned_to_global_index`, and `global_to_storage_index`
 when you need explicit local/global behavior.
 
 ## Typical Workflow
@@ -54,10 +54,10 @@ This keeps interior ownership explicit and halo validity predictable.
 The package separates logical array shape from owned storage:
 
 - `size(u)` / `axes(u)`: global logical array shape.
-- `local_size(u)` / `local_axes(u)`: cells owned by this rank or local backend.
+- `owned_size(u)` / `owned_axes(u)`: cells owned by this rank or local backend.
 - `interior_view(u)`: writable owned cells, excluding halos.
 - `parent(u)`: raw storage including halos.
-- `full_size(u)`: raw storage size including halos.
+- `storage_size(u)`: raw storage size including halos.
 
 For MPI-backed `HaloArray`, scalar `u[I...]` does not communicate. If `I` is not
 owned by the current rank, it errors. This keeps expensive communication out of
@@ -195,13 +195,13 @@ Keep independent arrays when fields require different halo widths, different gri
 
 ## Core Utility Functions
 
-- Domain and layout: `interior_size`, `full_size`, `halo_width`, `global_size`, `interior_range`
-- Index mapping: `local_to_global_index`, `global_to_local_index`
+- Domain and layout: `interior_size`, `storage_size`, `halo_width`, `global_size`, `interior_range`
+- Index mapping: `owned_to_global_index`, `global_to_storage_index`
 - Data movement and reduction: `gather_haloarray`, `mapreduce_haloarray_dims`
 - HDF5 helpers: `create_haloarray_output_file`, `write_haloarray_timestep!`, `gather_and_save_haloarray`
 
-`local_to_global_index(u, I)` expects a local interior index, excluding halo
-offsets. `global_to_local_index(u, I)` returns the full parent-storage index for
+`owned_to_global_index(u, I)` expects an owned interior index, excluding halo
+offsets. `global_to_storage_index(u, I)` returns the full parent-storage index for
 owned global cells and `nothing` for cells owned by another rank.
 
 ## Examples

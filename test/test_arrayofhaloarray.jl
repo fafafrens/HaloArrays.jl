@@ -37,11 +37,11 @@ end
     @test size(fields) == (2, 2, 3)
     @test size(fields) == global_size(fields)
     @test axes(fields) == map(Base.OneTo, global_size(fields))
-    @test local_axes(fields) == map(Base.OneTo, local_size(fields))
-    @test local_size(fields) == (2, 2, 3)
+    @test owned_axes(fields) == map(Base.OneTo, owned_size(fields))
+    @test owned_size(fields) == (2, 2, 3)
     @test interior_size(fields) == (2, 2, 3)
     @test global_size(fields) == (2, 2, 3)
-    @test full_size(fields) == (2, 2, 5)
+    @test storage_size(fields) == (2, 2, 5)
     @test halo_width(fields) == 1
     @test parent(fields) === arrays
     @test fields[1, 2] === arrays[1, 2]
@@ -99,8 +99,8 @@ end
     @test eltype(resized_fields) === Float32
     @test field_shape(resized_fields) == (2, 2)
     @test size(resized_fields) == (2, 2, 4)
-    @test local_size(resized_fields) == (2, 2, 4)
-    @test full_size(resized_fields) == (2, 2, 6)
+    @test owned_size(resized_fields) == (2, 2, 4)
+    @test storage_size(resized_fields) == (2, 2, 6)
 
     reshaped_fields = similar(fields, Float32, (3, 2, 4))
     @test reshaped_fields isa ArrayOfHaloArray
@@ -128,8 +128,8 @@ end
     @test field_shape(local_fields) == (2,)
     @test size(local_fields) == (2, 3)
     @test size(local_fields) == global_size(local_fields)
-    @test local_axes(local_fields) == map(Base.OneTo, local_size(local_fields))
-    @test local_size(local_fields) == (2, 3)
+    @test owned_axes(local_fields) == map(Base.OneTo, owned_size(local_fields))
+    @test owned_size(local_fields) == (2, 3)
     @test local_fields[2, 3] == 30
     local_fields[2, 3] = 33
     @test local_fields[2, 3] == 33
@@ -152,7 +152,7 @@ end
     @test eltype(resized_local) === Float32
     @test field_shape(resized_local) == (2,)
     @test size(resized_local) == (2, 5)
-    @test full_size(resized_local) == (2, 7)
+    @test storage_size(resized_local) == (2, 7)
 
     reshaped_local = similar(local_fields, Float32, (3, 5))
     @test field_shape(reshaped_local) == (3,)

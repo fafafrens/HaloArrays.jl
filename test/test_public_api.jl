@@ -12,22 +12,22 @@ using HaloArrays
     @test ha isa AbstractArray{Float64,1}
     @test eltype(typeof(ha)) === Float64
     @test interior_size(ha) == (5,)
-    @test local_size(ha) == (5,)
-    @test full_size(ha) == (9,)
+    @test owned_size(ha) == (5,)
+    @test storage_size(ha) == (9,)
     @test halo_width(ha) == 2
     @test size(ha) == global_size(ha)
     @test axes(ha) == map(Base.OneTo, global_size(ha))
-    @test local_axes(ha) == axes(interior_view(ha))
+    @test owned_axes(ha) == axes(interior_view(ha))
     @test length(axes(ha, 1)) == size(ha, 1)
-    @test length(local_axes(ha, 1)) == local_size(ha, 1)
+    @test length(owned_axes(ha, 1)) == owned_size(ha, 1)
     @test length(ha) == prod(global_size(ha))
-    owned_first = ha.topology.cart_coords[1] * local_size(ha, 1) + 1
-    owned_last = owned_first + local_size(ha, 1) - 1
-    @test local_to_global_index(ha, (1,)) == (owned_first,)
-    @test local_to_global_index(ha, (5,)) == (owned_last,)
-    @test global_to_local_index(ha, (owned_first,)) == (3,)
-    @test global_to_local_index(ha, (owned_last,)) == (7,)
-    @test_throws BoundsError local_to_global_index(ha, (0,))
+    owned_first = ha.topology.cart_coords[1] * owned_size(ha, 1) + 1
+    owned_last = owned_first + owned_size(ha, 1) - 1
+    @test owned_to_global_index(ha, (1,)) == (owned_first,)
+    @test owned_to_global_index(ha, (5,)) == (owned_last,)
+    @test global_to_storage_index(ha, (owned_first,)) == (3,)
+    @test global_to_storage_index(ha, (owned_last,)) == (7,)
+    @test_throws BoundsError owned_to_global_index(ha, (0,))
 
     fill_interior(ha, 3.0)
     @test all(interior_view(ha) .== 3.0)
@@ -55,14 +55,14 @@ using HaloArrays
     @test eltype(resized) === Float32
     @test size(resized) == resized_global_size
     @test size(resized) == global_size(resized)
-    @test local_size(resized) == (3,)
-    @test full_size(resized) == (7,)
+    @test owned_size(resized) == (3,)
+    @test storage_size(resized) == (7,)
 
     resized_same_eltype = similar(ha, resized_global_size)
     @test resized_same_eltype isa HaloArray
     @test eltype(resized_same_eltype) === Float64
     @test size(resized_same_eltype) == resized_global_size
-    @test local_size(resized_same_eltype) == (3,)
+    @test owned_size(resized_same_eltype) == (3,)
 
     local_ha = LocalHaloArray(Float64, (3,), 1; boundary_condition=:repeating)
     @test local_ha isa AbstractSerialHaloArray
@@ -70,10 +70,10 @@ using HaloArrays
     @test local_ha isa AbstractHaloArray
     @test local_ha isa AbstractArray{Float64,1}
     @test eltype(typeof(local_ha)) === Float64
-    @test local_size(local_ha) == (3,)
-    @test global_size(local_ha) == local_size(local_ha)
+    @test owned_size(local_ha) == (3,)
+    @test global_size(local_ha) == owned_size(local_ha)
     @test axes(local_ha) == map(Base.OneTo, global_size(local_ha))
-    @test local_axes(local_ha) == axes(interior_view(local_ha))
+    @test owned_axes(local_ha) == axes(interior_view(local_ha))
     interior_view(local_ha) .= [1.0, 2.0, 3.0]
     @test start_halo_exchange!(local_ha) === local_ha
     @test finish_halo_exchange!(local_ha) === local_ha

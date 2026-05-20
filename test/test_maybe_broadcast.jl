@@ -67,7 +67,7 @@ using HaloArrays
     @test isactive(maybe_resized)
     @test eltype(typeof(maybe_resized)) === Float32
     @test size(unwrap(maybe_resized)) == (6,)
-    @test full_size(unwrap(maybe_resized)) == (8,)
+    @test storage_size(unwrap(maybe_resized)) == (8,)
 
     threaded_ha = ThreadedHaloArray(Int, (2,), 1; dims=(2,), boundary_condition=:repeating)
     maybe_threaded = MaybeHaloArray(threaded_ha)

@@ -146,7 +146,7 @@ end
 """
     mapreduce_haloarray_dims(f,op,ha::HaloArray, dims; root_coord=0)
 
-Reduce `ha` over the dimensions in `dims_to_remove` (1-based). Assumes the local interior
+Reduce `ha` over the dimensions in `dims_to_remove` (1-based). Assumes the owned interior
 size along each dimension is 1 (i.e. each process owns exactly one interior cell),
 so the per-slice reduction produces a single scalar placed on the corresponding root
 process of the reduced topology.
@@ -177,8 +177,8 @@ function mapreduce_haloarray_dims(f,op,ha::HaloArray{T,N,A,Halo,B,BCondition}, d
     # build the root (reduced) topology
     root_topo = root_topology_multi(topo, dims_to_remove; root_coord=root_coord)
     new_boundary = ntuple(i -> ha.boundary_condition[dims_to_keep[i]], Val(M))
-    reduced_local_size = size(local_value)
-    new_ha = HaloArray(T, reduced_local_size, Halo, root_topo; boundary_condition=new_boundary)
+    reduced_owned_size = size(local_value)
+    new_ha = HaloArray(T, reduced_owned_size, Halo, root_topo; boundary_condition=new_boundary)
 
     # if this process is the root of its sub-comm, place reduced scalar into the interior cell
     if isactive(root_topo)
