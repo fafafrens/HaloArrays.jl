@@ -51,9 +51,6 @@ mpiexec -n 4 julia --project=. examples/heat_diffusion_mpi_2d.jl
 mpiexec -n 4 julia --project=. examples/heat_diffusion_mpi_3d.jl
 ```
 
-The old `tes_heat.jl`, `tes_heat_2d.jl`, and `tes_heat_3d.jl` files remain as
-compatibility wrappers around the new names.
-
 To save a gathered final snapshot to HDF5:
 
 ```bash

@@ -229,8 +229,7 @@ mpiexec -n 4 julia --project=. examples/heat_diffusion_mpi_3d.jl
 ```
 
 The local, threaded, and MPI examples share their finite-difference update in
-`examples/heat_diffusion_common.jl`. The old `examples/tes_heat*.jl` files remain
-as compatibility wrappers.
+`examples/heat_diffusion_common.jl`.
 
 DiffEq/OrdinaryDiffEq example:
 
