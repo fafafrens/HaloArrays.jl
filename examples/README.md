@@ -9,6 +9,16 @@ Local no-MPI examples
   - 3D: julia --project=. examples/heat_diffusion_local_3d.jl
 - The finite-difference update is shared in `examples/heat_diffusion_common.jl`, so the same stencil can be used by local arrays and MPI-backed `HaloArray`s.
 
+Local and threaded array example
+- `examples/local_and_threaded_halo_arrays.jl` runs the same 2D heat diffusion update with:
+  - `LocalHaloArray`, a single local array with halo cells.
+  - `ThreadedHaloArray`, a local tiled array with halo exchange between tiles.
+- Run it with:
+  - julia --project=. examples/local_and_threaded_halo_arrays.jl
+- `examples/local_and_threaded_diffeq.jl` solves the same heat equation through `DifferentialEquations.jl` with the same two array types. The threaded RHS uses `OhMyThreads.@tasks` over tiles.
+- Run it with:
+  - julia --project=. examples/local_and_threaded_diffeq.jl
+
 DiffEq example
 - `examples/ode_diffeq.jl` solves `du/dt = -0.1u` with `OrdinaryDiffEq.Tsit5()` for `LocalHaloArray`, `ThreadedHaloArray`, and MPI-backed `HaloArray`.
 - The solver packages are optional example dependencies, not package dependencies:
