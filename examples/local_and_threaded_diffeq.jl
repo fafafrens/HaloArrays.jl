@@ -1,5 +1,6 @@
 using Printf
-using DifferentialEquations
+using DiffEqBase
+using OrdinaryDiffEq
 
 include("heat_diffusion_common.jl")
 
@@ -34,9 +35,9 @@ function main()
     local_u, local_sol = run_local_example()
     threaded_u, threaded_sol = run_threaded_example()
 
-    @printf("DifferentialEquations LocalHaloArray:    size=%s, tiles=1,    t=%.3e, saved steps=%d, final mean=%.12f\n",
+    @printf("OrdinaryDiffEq LocalHaloArray:    size=%s, tiles=1,    t=%.3e, saved steps=%d, final mean=%.12f\n",
         string(size(local_u)), local_sol.t[end], length(local_sol.t) - 1, interior_mean(local_u))
-    @printf("DifferentialEquations ThreadedHaloArray: size=%s, tiles=%d, t=%.3e, saved steps=%d, final mean=%.12f\n",
+    @printf("OrdinaryDiffEq ThreadedHaloArray: size=%s, tiles=%d, t=%.3e, saved steps=%d, final mean=%.12f\n",
         string(size(threaded_u)), tile_count(threaded_u), threaded_sol.t[end], length(threaded_sol.t) - 1,
         interior_mean(threaded_u))
 end

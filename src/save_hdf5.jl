@@ -370,8 +370,10 @@ function gather_and_save_haloarray(filename::String, halo::HaloArray; root::Int=
     comm = halo.topology.cart_comm
     gathered = _hdf5_gather_snapshot(halo; root=root)
     if MPI.Comm_rank(comm) == root
-        save_array_hdf5(filename, gathered, comm; root=root)
+        save_array_hdf5(filename, gathered)
     end
+    MPI.Barrier(comm)
+    return nothing
 end
 
 function gather_and_save_haloarray(filename::String, halo::AbstractSerialHaloArray; root::Int=0)

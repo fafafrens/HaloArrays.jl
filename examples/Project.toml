@@ -1,0 +1,13 @@
+[deps]
+DiffEqBase = "2b5f629d-d688-5b77-993f-72d75c75574e"
+HaloArrays = "817e997d-d664-46c1-9042-93a8067e2dd6"
+MPI = "da04e1cc-30fd-572f-bb4f-1f8673147195"
+OhMyThreads = "67456a42-1dca-4109-a031-0a68de7e3ad5"
+OrdinaryDiffEq = "1dea7af3-3e70-54e6-95c3-0bf5283fa5ed"
+
+[compat]
+DiffEqBase = "7"
+MPI = "0.20, 0.21"
+OhMyThreads = "0.8"
+OrdinaryDiffEq = "6, 7"
+julia = "1.10"

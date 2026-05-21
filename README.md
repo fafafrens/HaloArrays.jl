@@ -206,6 +206,12 @@ owned global cells and `nothing` for cells owned by another rank.
 
 ## Examples
 
+Optional DiffEq examples use their own environment:
+
+```bash
+julia --project=examples -e 'using Pkg; Pkg.develop(path=pwd()); Pkg.instantiate()'
+```
+
 Local heat-diffusion examples:
 
 ```bash
@@ -217,25 +223,27 @@ julia --project=. examples/heat_diffusion_local_3d.jl
 MPI heat-diffusion examples:
 
 ```bash
-mpiexec -n 4 julia --project=. examples/tes_heat.jl
-mpiexec -n 4 julia --project=. examples/tes_heat_2d.jl
-mpiexec -n 4 julia --project=. examples/tes_heat_3d.jl
+mpiexec -n 4 julia --project=. examples/heat_diffusion_mpi_1d.jl
+mpiexec -n 4 julia --project=. examples/heat_diffusion_mpi_2d.jl
+mpiexec -n 4 julia --project=. examples/heat_diffusion_mpi_3d.jl
 ```
 
-The local examples share their finite-difference update in `examples/heat_diffusion_common.jl`.
+The local, threaded, and MPI examples share their finite-difference update in
+`examples/heat_diffusion_common.jl`. The old `examples/tes_heat*.jl` files remain
+as compatibility wrappers.
 
 DiffEq/OrdinaryDiffEq example:
 
 ```bash
-julia --project=/tmp/haloarrays-ode-example -e 'using Pkg; Pkg.develop(path=pwd()); Pkg.add(["DiffEqBase", "OrdinaryDiffEq"])'
-julia --project=/tmp/haloarrays-ode-example examples/ode_diffeq.jl
-mpiexec -n 2 julia --project=/tmp/haloarrays-ode-example examples/ode_diffeq.jl
+julia --project=examples examples/ode_diffeq.jl
+mpiexec -n 2 julia --project=examples examples/ode_diffeq.jl
+julia --project=examples examples/local_and_threaded_diffeq.jl
 ```
 
 On machines with fewer cores than ranks, use `--oversubscribe`:
 
 ```bash
-mpiexec --oversubscribe -n 4 julia --project=. examples/tes_heat_2d.jl
+mpiexec --oversubscribe -n 4 julia --project=. examples/heat_diffusion_mpi_2d.jl
 ```
 
 ## Tests

@@ -1,4 +1,4 @@
-# Heat diffusion solved with DifferentialEquations.jl (Tsit5 adaptive solver)
+# Heat diffusion solved with OrdinaryDiffEq.jl (Tsit5 adaptive solver)
 #
 # Demonstrates using LocalHaloArray as the ODE state in an ODEProblem.
 # The RHS function explicitly refreshes the halo after each evaluation so
