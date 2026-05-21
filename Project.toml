@@ -15,6 +15,7 @@ julia = "1.10"
 MPI = "0.20, 0.21"
 HDF5 = "0.16, 0.17"
 OhMyThreads = "0.8"
+OrdinaryDiffEq = "6, 7"
 StaticArrays = "1"
 
 [weakdeps]
@@ -25,7 +26,8 @@ HaloArraysDiffEqBaseExt = "DiffEqBase"
 
 [extras]
 DiffEqBase = "2b5f629d-d688-5b77-993f-72d75c75574e"
+OrdinaryDiffEq = "1dea7af3-3e70-54e6-95c3-0bf5283fa5ed"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test", "DiffEqBase"]
+test = ["Test", "DiffEqBase", "OrdinaryDiffEq"]

@@ -1,7 +1,12 @@
 using Test
 using MPI
 using DiffEqBase
+using OrdinaryDiffEq
 using HaloArrays
+
+if !MPI.Initialized()
+    MPI.Init()
+end
 
 const ODE_RATE = 0.1
 
@@ -65,6 +70,28 @@ function _check_solution(u0, u_final, expected_factor)
     return nothing
 end
 
+function _check_ordinary_diffeq_integrator(comm)
+    topology = _ode_topology(comm)
+    u0 = _ode_initial_condition(topology)
+    tspan = (0.0, 1.0)
+    prob = @inferred ODEProblem{true}(_rhs!, u0, tspan)
+
+    integrator = init(prob, Tsit5(); reltol=1.0e-9, abstol=1.0e-11, save_everystep=false)
+
+    for _ in 1:10
+        dts = MPI.Allgather(integrator.dt, comm)
+        @test allequal(dts)
+        step!(integrator)
+        @test all(isfinite, integrator.u)
+    end
+
+    expected_factor = exp(-ODE_RATE * integrator.t)
+    local_err = maximum(abs, interior_view(integrator.u) .- expected_factor .* interior_view(u0))
+    err = MPI.Allreduce(local_err, max, comm)
+    @test err < 1.0e-8
+    return nothing
+end
+
 @testset "DiffEq recursive length" begin
     topology = _ode_topology(MPI.COMM_WORLD)
     u = _ode_initial_condition(topology)
@@ -115,6 +142,10 @@ end
         u0, u_final, expected_factor = _solve_halo_ode(MPI.COMM_WORLD)
         _check_solution(u0, u_final, expected_factor)
     end
+end
+
+@testset "OrdinaryDiffEq adaptive integrator keeps ranks synchronized" begin
+    _check_ordinary_diffeq_integrator(MPI.COMM_WORLD)
 end
 
 @testset "DiffEq default checks use HaloArray reductions" begin
