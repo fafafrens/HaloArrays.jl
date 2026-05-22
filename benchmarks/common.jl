@@ -95,6 +95,33 @@ function benchmark_times!(f, samples, warmups; comm=nothing)
     return times
 end
 
+function benchmarktools_times!(f, samples, warmups)
+    try
+        @eval import BenchmarkTools
+    catch err
+        error("BenchmarkTools is required for --timer=benchmarktools. Install it in the active Julia environment or use --timer=manual.")
+    end
+
+    for _ in 1:warmups
+        f()
+    end
+
+    f_ref = Ref(f)
+    trial = @eval BenchmarkTools.@benchmark $(f_ref)[]() samples=$(samples) evals=1 seconds=Inf
+    return Float64.(trial.times) ./ 1.0e9
+end
+
+function benchmark_times!(f, samples, warmups, timer::Symbol; comm=nothing)
+    if timer === :manual
+        return benchmark_times!(f, samples, warmups; comm)
+    elseif timer === :benchmarktools
+        comm === nothing || error("--timer=benchmarktools is only supported for rank-local benchmarks")
+        return benchmarktools_times!(f, samples, warmups)
+    else
+        error("--timer must be manual or benchmarktools")
+    end
+end
+
 function print_summary(name, times)
     println(rpad(name, 26),
         " min=", round(1e6 * minimum(times), digits=2), " us",

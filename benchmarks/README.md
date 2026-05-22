@@ -6,12 +6,14 @@ elapsed time across ranks for each sample.
 Common options:
 
 - `--ndims=2`
-- `--owned-size=128,128`
 - `--halo=1`
 - `--samples=30`
 - `--warmups=5`
 - `--csv=path/to/results.csv`
 
+MPI benchmarks use `--owned-size` for the per-rank local domain size.
+The local/threaded heat solver benchmark uses `--size` for the full local
+problem size.
 `--local-size` is still accepted by `halo_exchange.jl` as a deprecated alias for
 `--owned-size`, but new commands should use `--owned-size`.
 
@@ -54,14 +56,32 @@ heat-step style stencil for `ThreadedHaloArray`.
 julia --project=. benchmarks/threaded.jl --owned-size=128,128 --tile-dims=2,2
 ```
 
-## Heat Solver Backend Comparison
+## MPI Heat Solver
 
 Solves the same periodic heat equation workload with MPI `HaloArray`,
 `LocalHaloArray`, and `ThreadedHaloArray`. `--owned-size` is the MPI owned size
 per rank; the local and threaded cases use the equivalent global problem size.
+For example, with 2 MPI ranks and topology `(2, 1)`, `--owned-size=256,512`
+gives global problem size `(512, 512)`.
 The output includes both the full `--steps` solve and single-step split timings
 for halo synchronization, stencil work, and synchronization plus stencil.
+`--timer=benchmarktools` uses BenchmarkTools for the rank-local
+`LocalHaloArray` and `ThreadedHaloArray` cases; MPI cases always use the manual
+barrier/max-time timer.
+Use `--timer=manual` or `--timer=benchmarktools` for the rank-local cases.
+Set `JULIA_NUM_THREADS` when comparing the rank-local `ThreadedHaloArray`
+numbers printed by this benchmark.
 
 ```sh
-mpiexec -n 4 julia --project=. benchmarks/heat_solver.jl --owned-size=64,64 --tile-dims=2,2 --steps=10
+JULIA_NUM_THREADS=2 mpiexec -n 2 julia --project=. benchmarks/heat_solver_mpi.jl --owned-size=256,512 --tile-dims=2,1 --steps=10
+```
+
+## Local And Threaded Heat Solver
+
+Compares `LocalHaloArray` and `ThreadedHaloArray` without MPI. Here `--size`
+is the full local problem size, so there is no owned/global distinction.
+Use `--timer=manual` or `--timer=benchmarktools`.
+
+```sh
+JULIA_NUM_THREADS=2 julia --project=. benchmarks/heat_solver_local_threaded.jl --size=512,512 --tile-dims=2,1 --timer=benchmarktools
 ```
