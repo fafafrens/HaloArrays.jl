@@ -218,25 +218,87 @@ end
     return neighbor_tile_id(halo.topology, tile_id, dim, side)
 end
 
+@inline function _threaded_exchange_side!(halo::ThreadedHaloArray, tile_id::Integer,
+        dim::Dim{D}, side::Side{S}) where {D,S}
+    neighbor_id = neighbor_tile_id(halo, tile_id, D, S)
+    if neighbor_id != 0
+        _threaded_copy_side!(halo, tile_id, neighbor_id, dim, side)
+    end
+    return halo
+end
+
+@inline function _threaded_copy_side!(halo::ThreadedHaloArray, tile_id::Integer, neighbor_id::Integer,
+        dim::Dim{D}, side::Side{S}) where {D,S}
+    recv_view = get_recv_view(side, dim, halo, tile_id)
+    send_view = get_send_view(Side(3 - S), dim, halo, neighbor_id)
+    copyto!(recv_view, send_view)
+    return halo
+end
+
+@inline function _threaded_boundary_side!(halo::ThreadedHaloArray, tile_id::Integer,
+        dim::Dim{D}, side::Side{S}) where {D,S}
+    if neighbor_tile_id(halo, tile_id, D, S) == 0
+        mode = halo.boundary_condition[D][S]
+        boundary_condition!(halo, tile_id, side, dim, mode)
+    end
+    return halo
+end
+
+@inline function _threaded_synchronize_side!(halo::ThreadedHaloArray, tile_id::Integer,
+        dim::Dim{D}, side::Side{S}) where {D,S}
+    neighbor_id = neighbor_tile_id(halo, tile_id, D, S)
+    if neighbor_id != 0
+        _threaded_copy_side!(halo, tile_id, neighbor_id, dim, side)
+    else
+        mode = halo.boundary_condition[D][S]
+        boundary_condition!(halo, tile_id, side, dim, mode)
+    end
+    return halo
+end
+
+@inline _threaded_exchange_dims!(halo::ThreadedHaloArray, tile_id::Integer, ::Val{0}) = halo
+@inline _threaded_boundary_dims!(halo::ThreadedHaloArray, tile_id::Integer, ::Val{0}) = halo
+@inline _threaded_synchronize_dims!(halo::ThreadedHaloArray, tile_id::Integer, ::Val{0}) = halo
+
+@inline function _threaded_exchange_dims!(halo::ThreadedHaloArray, tile_id::Integer, ::Val{D}) where {D}
+    _threaded_exchange_dims!(halo, tile_id, Val(D - 1))
+    _threaded_exchange_side!(halo, tile_id, Dim(D), Side(1))
+    _threaded_exchange_side!(halo, tile_id, Dim(D), Side(2))
+    return halo
+end
+
+@inline function _threaded_boundary_dims!(halo::ThreadedHaloArray, tile_id::Integer, ::Val{D}) where {D}
+    _threaded_boundary_dims!(halo, tile_id, Val(D - 1))
+    _threaded_boundary_side!(halo, tile_id, Dim(D), Side(1))
+    _threaded_boundary_side!(halo, tile_id, Dim(D), Side(2))
+    return halo
+end
+
+@inline function _threaded_synchronize_dims!(halo::ThreadedHaloArray, tile_id::Integer, ::Val{D}) where {D}
+    _threaded_synchronize_dims!(halo, tile_id, Val(D - 1))
+    _threaded_synchronize_side!(halo, tile_id, Dim(D), Side(1))
+    _threaded_synchronize_side!(halo, tile_id, Dim(D), Side(2))
+    return halo
+end
+
+@inline _threaded_exchange_tile!(halo::ThreadedHaloArray{T,N}, tile_id::Integer) where {T,N} =
+    _threaded_exchange_dims!(halo, tile_id, Val(N))
+
+@inline _threaded_boundary_tile!(halo::ThreadedHaloArray{T,N}, tile_id::Integer) where {T,N} =
+    _threaded_boundary_dims!(halo, tile_id, Val(N))
+
+@inline _threaded_synchronize_tile!(halo::ThreadedHaloArray{T,N}, tile_id::Integer) where {T,N} =
+    _threaded_synchronize_dims!(halo, tile_id, Val(N))
+
 function halo_exchange!(halo::ThreadedHaloArray)
-    @tasks for tile_id in eachindex(parent(halo))
-        @inbounds for dim in 1:ndims(halo), side in 1:2
-            neighbor_id = neighbor_tile_id(halo, tile_id, dim, side)
-            if neighbor_id != 0
-                recv_view = get_recv_view(Side(side), dim, halo, tile_id)
-                send_view = get_send_view(Side(3 - side), dim, halo, neighbor_id)
-                copyto!(recv_view, send_view)
-            end
-        end
+    @inbounds for tile_id in eachindex(parent(halo))
+        _threaded_exchange_tile!(halo, tile_id)
     end
     return halo
 end
 
 function boundary_condition!(halo::ThreadedHaloArray, tile_id::Integer, side::Side{S}, dim::Dim{D}) where {S,D}
-    if neighbor_tile_id(halo, tile_id, D, S) == 0
-        mode = halo.boundary_condition[D][S]
-        boundary_condition!(halo, tile_id, side, dim, mode)
-    end
+    _threaded_boundary_side!(halo, tile_id, dim, side)
     return nothing
 end
 
@@ -333,19 +395,16 @@ function boundary_condition!(halo::ThreadedHaloArray, tile_id::Integer, s::Side,
 end
 
 function boundary_condition!(halo::ThreadedHaloArray)
-    @tasks for tile_id in eachindex(parent(halo))
-        ntuple(Val(ndims(halo))) do D
-            ntuple(Val(2)) do S
-                boundary_condition!(halo, tile_id, Side(S), Dim(D))
-            end
-        end
+    @inbounds for tile_id in eachindex(parent(halo))
+        _threaded_boundary_tile!(halo, tile_id)
     end
     return nothing
 end
 
 function synchronize_halo!(halo::ThreadedHaloArray)
-    halo_exchange!(halo)
-    boundary_condition!(halo)
+    @inbounds for tile_id in eachindex(parent(halo))
+        _threaded_synchronize_tile!(halo, tile_id)
+    end
     return halo
 end
 

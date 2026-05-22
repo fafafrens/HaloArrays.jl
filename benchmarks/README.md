@@ -53,3 +53,15 @@ heat-step style stencil for `ThreadedHaloArray`.
 ```sh
 julia --project=. benchmarks/threaded.jl --owned-size=128,128 --tile-dims=2,2
 ```
+
+## Heat Solver Backend Comparison
+
+Solves the same periodic heat equation workload with MPI `HaloArray`,
+`LocalHaloArray`, and `ThreadedHaloArray`. `--owned-size` is the MPI owned size
+per rank; the local and threaded cases use the equivalent global problem size.
+The output includes both the full `--steps` solve and single-step split timings
+for halo synchronization, stencil work, and synchronization plus stencil.
+
+```sh
+mpiexec -n 4 julia --project=. benchmarks/heat_solver.jl --owned-size=64,64 --tile-dims=2,2 --steps=10
+```
