@@ -248,6 +248,12 @@ function Base.copy(mha::ArrayOfHaloArray)
     return ArrayOfHaloArray(arrs)
 end
 
+function Base.zero(mha::ArrayOfHaloArray)
+    z = similar(mha)
+    fill!(z, zero(eltype(mha)))
+    return z
+end
+
 function Base.fill!(mha::ArrayOfHaloArray, value)
     foreach(a -> fill!(a, value), mha.arrays)
     return mha

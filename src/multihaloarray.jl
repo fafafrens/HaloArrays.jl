@@ -141,6 +141,8 @@ Base.ndims(::Type{<:MultiHaloArray{T,N,A,D}}) where {T,N,A,D} = D
 @inline Base.size(mha::MultiHaloArray) = global_size(mha)
 
 @inline Base.size(mha::MultiHaloArray, i::Int) = size(mha)[i]
+@inline Base.length(mha::MultiHaloArray) = prod(size(mha))
+@inline Base.eachindex(mha::MultiHaloArray) = CartesianIndices(axes(mha))
 
 n_field(halos::MultiHaloArray{T,N,A,D}) where {T,N,A,D} = length(halos.arrays)
 
@@ -223,6 +225,26 @@ function Base.copy(mha::MultiHaloArray)
     newfields = map(x -> copy(x), values(mha.arrays))
     new_ntuple = NamedTuple{keys(mha.arrays)}(newfields)
     return MultiHaloArray(new_ntuple)
+end
+
+function Base.copyto!(dest::MultiHaloArray, src::MultiHaloArray)
+    keys(dest.arrays) == keys(src.arrays) ||
+        throw(DimensionMismatch("MultiHaloArray copyto! requires matching field names"))
+    for name in keys(dest.arrays)
+        copyto!(dest.arrays[name], src.arrays[name])
+    end
+    return dest
+end
+
+function Base.fill!(mha::MultiHaloArray, value)
+    foreach(field -> fill!(field, value), values(mha.arrays))
+    return mha
+end
+
+function Base.zero(mha::MultiHaloArray)
+    z = similar(mha)
+    fill!(z, zero(eltype(mha)))
+    return z
 end
 
 function Base.map(f, mha::MultiHaloArray)

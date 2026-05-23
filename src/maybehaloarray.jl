@@ -16,6 +16,7 @@ owned_axes(m::MaybeHaloArray) = owned_axes(m.data)
 interior_size(m::MaybeHaloArray) = interior_size(m.data)
 global_size(m::MaybeHaloArray) = global_size(m.data)
 storage_size(m::MaybeHaloArray) = storage_size(m.data)
+Base.parent(m::MaybeHaloArray) = m.data
 Base.axes(m::MaybeHaloArray) = axes(m.data)
 Base.axes(m::MaybeHaloArray, i::Int) = axes(m.data, i)
 
@@ -30,7 +31,10 @@ Base.ndims(m::MaybeHaloArray{T,N,A}) where {T,N,A} = N
 @inline halo_width(m::MaybeHaloArray) = halo_width(m.data)
 
 Base.eltype(::Type{<:MaybeHaloArray{T,N,A}}) where {T,N,A} = T
+Base.eltype(::MaybeHaloArray{T,N,A}) where {T,N,A} = T
 Base.length(m::MaybeHaloArray) = m.active ? length(m.data) : 0
+Base.eachindex(m::MaybeHaloArray{T,N,A}) where {T,N,A} =
+    isactive(m) ? eachindex(m.data) : CartesianIndices(ntuple(_ -> 1:0, Val(N)))
 
 function Base.getindex(m::MaybeHaloArray, I::Vararg{Integer})
     isactive(m) || throw(ErrorException("MaybeHaloArray: attempt to index inactive value"))
@@ -123,4 +127,24 @@ end
 function Base.copy(m::MaybeHaloArray)
     newdata = copy(m.data)
     return MaybeHaloArray(newdata, m.active)
+end
+
+function Base.copyto!(dest::MaybeHaloArray, src::MaybeHaloArray)
+    isactive(dest) == isactive(src) ||
+        throw(ArgumentError("MaybeHaloArray copyto! requires matching active states"))
+    if isactive(dest)
+        copyto!(dest.data, src.data)
+    end
+    return dest
+end
+
+function Base.fill!(m::MaybeHaloArray, value)
+    if isactive(m)
+        fill!(m.data, value)
+    end
+    return m
+end
+
+function Base.zero(m::MaybeHaloArray)
+    return MaybeHaloArray(zero(m.data), m.active)
 end

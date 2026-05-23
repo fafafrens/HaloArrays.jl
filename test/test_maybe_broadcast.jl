@@ -14,6 +14,8 @@ using HaloArrays
     @test maybe isa AbstractArray{Int,1}
     @test isactive(maybe)
     @test length(maybe) == 4
+    @test parent(maybe) === ha
+    @test eltype(maybe) === Int
     @test unwrap(maybe) === ha
     @test halo_width(maybe) == 1
 
@@ -26,16 +28,35 @@ using HaloArrays
     dest .= 3 .* maybe
     @test collect(interior_view(unwrap(dest))) == [3 * i for i in 1:4]
 
+    copied_into = similar(maybe)
+    fill!(copied_into, -1)
+    @test copyto!(copied_into, maybe) === copied_into
+    @test collect(interior_view(unwrap(copied_into))) == [i for i in 1:4]
+
+    zero_maybe = zero(maybe)
+    @test zero_maybe isa MaybeHaloArray
+    @test isactive(zero_maybe)
+    @test all(==(0), unwrap(zero_maybe))
+    @test fill!(zero_maybe, 6) === zero_maybe
+    @test all(==(6), unwrap(zero_maybe))
+
     inactive_topology = HaloArrays.inactive_cartesian_topology((1,))
     inactive_ha = HaloArray(Int, (4,), 1, inactive_topology; boundary_condition=:repeating)
     inactive_maybe = MaybeHaloArray(inactive_ha)
     @test !isactive(inactive_maybe)
     @test length(inactive_maybe) == 0
+    @test isempty(eachindex(inactive_maybe))
     @test_throws ErrorException unwrap(inactive_maybe)
 
     inactive_result = inactive_maybe .+ 1
     @test inactive_result isa MaybeHaloArray
     @test !isactive(inactive_result)
+
+    inactive_dest = similar(inactive_maybe)
+    @test !isactive(inactive_dest)
+    @test copyto!(inactive_dest, inactive_maybe) === inactive_dest
+    @test fill!(inactive_dest, 2) === inactive_dest
+    @test !isactive(zero(inactive_maybe))
 
     u = copy(ha)
     v = copy(ha)

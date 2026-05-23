@@ -78,6 +78,20 @@ For `HaloArray`, `synchronize_halo!` performs exchange and then applies physical
 
 Use the split async API (`start_halo_exchange!` + `finish_halo_exchange!`) when you want to overlap communication with independent computation.
 
+For `ThreadedHaloArray`, the default `halo_exchange!`, `boundary_condition!`,
+and `synchronize_halo!` use a serial tile loop because this is allocation-free
+and fastest for small halo surfaces. Explicit threaded variants are also
+available:
+
+```julia
+halo_exchange_threads!(u)
+boundary_condition_threads!(u)
+synchronize_halo_threads!(u)
+```
+
+Use these only after benchmarking the target problem. They can help for large
+halo surfaces, but they add thread scheduling overhead.
+
 ## Boundary Conditions
 
 Built-in boundary conditions are:
@@ -269,8 +283,11 @@ Halo exchange benchmarks:
 
 ```bash
 mpiexec -n 4 julia --project=. benchmarks/halo_exchange.jl
-mpiexec -n 4 julia --project=. benchmarks/halo_exchange.jl --ndims=3 --local-size=64,64,64 --samples=50
+mpiexec -n 4 julia --project=. benchmarks/halo_exchange.jl --ndims=3 --owned-size=64,64,64 --samples=50
 ```
+
+See [`benchmarks/README.md`](benchmarks/README.md) for boundary, reduction,
+gather/HDF5, heat-solver, and threaded synchronization benchmarks.
 
 ## License
 

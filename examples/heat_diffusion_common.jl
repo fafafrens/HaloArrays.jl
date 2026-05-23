@@ -56,36 +56,34 @@ function heat_step!(u_next, u_old, alpha, dt, dx)
     return u_next
 end
 
+function _heat_step_tile!(data_next, data_old, alpha, dt, dxs, offsets, range, ::Val{N}) where {N}
+    @inbounds for I in CartesianIndices(range)
+        laplacian = zero(eltype(data_old))
+        for dim in 1:N
+            offset = offsets[dim]
+            laplacian += (data_old[I + offset] - 2 * data_old[I] + data_old[I - offset]) / dxs[dim]^2
+        end
+        data_next[I] = data_old[I] + alpha * dt * laplacian
+    end
+    return data_next
+end
+
 function heat_step!(u_next::ThreadedHaloArray, u_old::ThreadedHaloArray, alpha, dt, dx)
     N = ndims(u_old)
     dxs = _as_tuple(dx, Val(N))
     offsets = CartesianIndex.(versors(Val(N)))
+    range = interior_range(u_old)
 
     @tasks for tile_id in 1:tile_count(u_old)
         data_old = tile_parent(u_old, tile_id)
         data_next = tile_parent(u_next, tile_id)
-
-        @inbounds for I in CartesianIndices(interior_range(u_old, tile_id))
-            laplacian = zero(eltype(data_old))
-            for dim in 1:N
-                offset = offsets[dim]
-                laplacian += (data_old[I + offset] - 2 * data_old[I] + data_old[I - offset]) / dxs[dim]^2
-            end
-            data_next[I] = data_old[I] + alpha * dt * laplacian
-        end
+        _heat_step_tile!(data_next, data_old, alpha, dt, dxs, offsets, range, Val(N))
     end
     return u_next
 end
 
 function _copy_heat_solution!(dest, src)
     copyto!(dest, src)
-    return dest
-end
-
-function _copy_heat_solution!(dest::ThreadedHaloArray, src::ThreadedHaloArray)
-    @tasks for tile_id in 1:tile_count(dest)
-        copyto!(tile_parent(dest, tile_id), tile_parent(src, tile_id))
-    end
     return dest
 end
 

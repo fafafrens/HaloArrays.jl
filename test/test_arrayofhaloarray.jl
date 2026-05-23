@@ -88,6 +88,19 @@ end
     interior_view(copied[1, 1])[1] = -100
     @test interior_view(fields[1, 1])[1] != interior_view(copied[1, 1])[1]
 
+    copied_into = similar(fields)
+    fill!(copied_into, -1)
+    @test copyto!(copied_into, fields) === copied_into
+    for I in CartesianIndices(arrays)
+        @test collect(interior_view(copied_into[I])) == collect(interior_view(fields[I]))
+    end
+
+    zero_fields = zero(fields)
+    @test zero_fields isa ArrayOfHaloArray
+    @test all(==(0), zero_fields)
+    @test fill!(zero_fields, 9) === zero_fields
+    @test all(==(9), zero_fields)
+
     similar_fields = similar(fields, Int)
     @test similar_fields isa ArrayOfHaloArray
     @test eltype(similar_fields) === Int

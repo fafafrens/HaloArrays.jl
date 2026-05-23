@@ -49,6 +49,21 @@ end
     @test collect(interior_view(dest.arrays.u)) == [2 * (i + j / 10) for i in 1:3, j in 1:2]
     @test collect(interior_view(dest.arrays.v)) == [2 * (10 * i + j) for i in 1:3, j in 1:2]
 
+    @test length(fields) == prod(size(fields))
+    @test first(eachindex(fields)) == CartesianIndex(1, 1, 1)
+
+    copied_into = similar(fields)
+    fill!(copied_into, -1)
+    @test copyto!(copied_into, fields) === copied_into
+    @test collect(interior_view(copied_into.arrays.u)) == collect(interior_view(fields.arrays.u))
+    @test collect(interior_view(copied_into.arrays.v)) == collect(interior_view(fields.arrays.v))
+
+    zero_fields = zero(fields)
+    @test zero_fields isa MultiHaloArray
+    @test all(==(0), zero_fields)
+    @test fill!(zero_fields, 7) === zero_fields
+    @test all(==(7), zero_fields)
+
     from_bcs = MultiHaloArray(Float64, (3, 2), 1, topology;
         boundary_conditions=(; rho=:repeating, mom=:repeating))
     @test from_bcs isa MultiHaloArray
@@ -132,6 +147,20 @@ end
     @test collect(interior_view(threaded_dest.arrays.rho, 2)) == [11, 13, 15]
     @test collect(interior_view(threaded_dest.arrays.mom, 1)) == [23, 43, 63]
     @test collect(interior_view(threaded_dest.arrays.mom, 2)) == [83, 103, 123]
+
+    threaded_copy = similar(threaded_fields)
+    @test copyto!(threaded_copy, threaded_fields) === threaded_copy
+    for name in keys(threaded_fields.arrays), tile_id in 1:tile_count(threaded_fields)
+        @test tile_parent(threaded_copy.arrays[name], tile_id) ==
+              tile_parent(threaded_fields.arrays[name], tile_id)
+    end
+
+    threaded_zero = zero(threaded_fields)
+    @test threaded_zero isa MultiHaloArray
+    @test fill!(threaded_zero, -3) === threaded_zero
+    for field in values(threaded_zero.arrays), tile_id in 1:tile_count(threaded_zero)
+        @test all(==(-3), tile_parent(field, tile_id))
+    end
 
     resized_threaded = similar(threaded_fields, Float32, (2, 8))
     @test resized_threaded isa MultiHaloArray

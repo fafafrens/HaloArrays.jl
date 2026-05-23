@@ -480,10 +480,19 @@ function Base.zero(halo::ThreadedHaloArray)
     return z
 end
 
+function Base.copyto!(dest::ThreadedHaloArray, src::ThreadedHaloArray)
+    size(dest) == size(src) || throw(DimensionMismatch("ThreadedHaloArray copyto! requires matching global sizes"))
+    tile_size(dest) == tile_size(src) || throw(DimensionMismatch("ThreadedHaloArray copyto! requires matching tile sizes"))
+    tile_count(dest) == tile_count(src) || throw(DimensionMismatch("ThreadedHaloArray copyto! requires matching tile counts"))
+
+    @tasks for tile_id in eachindex(parent(dest))
+        copyto!(tile_parent(dest, tile_id), tile_parent(src, tile_id))
+    end
+    return dest
+end
+
 function Base.copy(halo::ThreadedHaloArray)
     copied = similar(halo)
-    @tasks for tile_id in eachindex(parent(halo))
-        copyto!(tile_parent(copied, tile_id), tile_parent(halo, tile_id))
-    end
+    copyto!(copied, halo)
     return copied
 end

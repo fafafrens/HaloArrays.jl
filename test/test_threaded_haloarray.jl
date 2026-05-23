@@ -158,6 +158,24 @@
         @test collect(get_recv_view(Side(2), Dim(2), halo, 1)) == reshape([13, 23], 2, 1)
     end
 
+    @testset "copyto! copies threaded tile storage" begin
+        src = ThreadedHaloArray(Int, (2, 3), 1; dims=(2, 2), boundary_condition=:repeating)
+        dest = similar(src)
+
+        for tile_id in 1:tile_count(src)
+            tile_parent(src, tile_id) .= tile_id
+            tile_parent(dest, tile_id) .= -1
+        end
+
+        @test copyto!(dest, src) === dest
+        for tile_id in 1:tile_count(src)
+            @test tile_parent(dest, tile_id) == tile_parent(src, tile_id)
+        end
+
+        wrong_size = similar(src, (6, 6))
+        @test_throws DimensionMismatch copyto!(wrong_size, src)
+    end
+
     @testset "explicit threaded halo synchronization variants match default path" begin
         function make_sync_test_halo()
             halo = ThreadedHaloArray(Int, (2, 3), 1; dims=(2, 2), boundary_condition=:repeating)
