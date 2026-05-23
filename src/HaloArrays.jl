@@ -85,14 +85,17 @@ export interior_view,
 
 # Boundary conditions
 export boundary_condition!,
+    boundary_condition_threads!,
     normalize_boundary_condition,
     to_bc
 
 # Halo exchange
 export halo_exchange!,
+    halo_exchange_threads!,
     start_halo_exchange!,
     finish_halo_exchange!,
     synchronize_halo!,
+    synchronize_halo_threads!,
     synchronize_flux_contributions!,
     get_send_view,
     get_recv_view

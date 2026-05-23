@@ -7,21 +7,27 @@ function make_threaded_halo(::Val{N}, owned_size, halo_width, tile_dims) where {
     return ThreadedHaloArray(Float64, tile_size, halo_width; dims=tile_dims, boundary_condition=:repeating)
 end
 
-function threaded_stencil_step!(dest::ThreadedHaloArray, src::ThreadedHaloArray)
+function _threaded_stencil_tile!(dest_tile, src_tile, offsets, range, ::Val{N}) where {N}
+    @inbounds for I in CartesianIndices(range)
+        laplacian = zero(eltype(src_tile))
+        for dim in 1:N
+            offset = offsets[dim]
+            laplacian += src_tile[I + offset] - 2 * src_tile[I] + src_tile[I - offset]
+        end
+        dest_tile[I] = src_tile[I] + 0.1 * laplacian
+    end
+    return dest_tile
+end
+
+function threaded_stencil_step!(dest::ThreadedHaloArray{T,N}, src::ThreadedHaloArray{T,N}) where {T,N}
     synchronize_halo!(src)
-    offsets = CartesianIndex.(versors(Val(ndims(src))))
+    offsets = CartesianIndex.(versors(Val(N)))
+    range = interior_range(src)
 
     @tasks for tile_id in 1:tile_count(src)
         src_tile = tile_parent(src, tile_id)
         dest_tile = tile_parent(dest, tile_id)
-        @inbounds for I in CartesianIndices(interior_range(src, tile_id))
-            laplacian = zero(eltype(src_tile))
-            for dim in 1:ndims(src)
-                offset = offsets[dim]
-                laplacian += src_tile[I + offset] - 2 * src_tile[I] + src_tile[I - offset]
-            end
-            dest_tile[I] = src_tile[I] + 0.1 * laplacian
-        end
+        _threaded_stencil_tile!(dest_tile, src_tile, offsets, range, Val(N))
     end
 
     return dest

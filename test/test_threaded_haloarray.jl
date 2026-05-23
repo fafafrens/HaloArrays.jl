@@ -158,6 +158,41 @@
         @test collect(get_recv_view(Side(2), Dim(2), halo, 1)) == reshape([13, 23], 2, 1)
     end
 
+    @testset "explicit threaded halo synchronization variants match default path" begin
+        function make_sync_test_halo()
+            halo = ThreadedHaloArray(Int, (2, 3), 1; dims=(2, 2), boundary_condition=:repeating)
+            fill!(halo, -1)
+            for tile_id in 1:tile_count(halo)
+                interior = interior_view(halo, tile_id)
+                for I in CartesianIndices(interior)
+                    i, j = Tuple(I)
+                    interior[I] = 100 * tile_id + 10 * i + j
+                end
+            end
+            return halo
+        end
+
+        same_storage(a, b) = all(tile_id -> tile_parent(a, tile_id) == tile_parent(b, tile_id), 1:tile_count(a))
+
+        default_exchange = make_sync_test_halo()
+        threaded_exchange = copy(default_exchange)
+        halo_exchange!(default_exchange)
+        @test halo_exchange_threads!(threaded_exchange) === threaded_exchange
+        @test same_storage(threaded_exchange, default_exchange)
+
+        default_boundary = make_sync_test_halo()
+        threaded_boundary = copy(default_boundary)
+        boundary_condition!(default_boundary)
+        @test boundary_condition_threads!(threaded_boundary) === nothing
+        @test same_storage(threaded_boundary, default_boundary)
+
+        default_sync = make_sync_test_halo()
+        threaded_sync = copy(default_sync)
+        synchronize_halo!(default_sync)
+        @test synchronize_halo_threads!(threaded_sync) === threaded_sync
+        @test same_storage(threaded_sync, default_sync)
+    end
+
     @testset "threaded multi halo array fieldwise exchange and boundary conditions" begin
         fields = ThreadedMultiHaloArray(
             Int,

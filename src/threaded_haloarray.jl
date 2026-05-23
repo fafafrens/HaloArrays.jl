@@ -297,6 +297,13 @@ function halo_exchange!(halo::ThreadedHaloArray)
     return halo
 end
 
+function halo_exchange_threads!(halo::ThreadedHaloArray)
+    Base.Threads.@threads :static for tile_id in eachindex(parent(halo))
+        _threaded_exchange_tile!(halo, tile_id)
+    end
+    return halo
+end
+
 function boundary_condition!(halo::ThreadedHaloArray, tile_id::Integer, side::Side{S}, dim::Dim{D}) where {S,D}
     _threaded_boundary_side!(halo, tile_id, dim, side)
     return nothing
@@ -401,8 +408,22 @@ function boundary_condition!(halo::ThreadedHaloArray)
     return nothing
 end
 
+function boundary_condition_threads!(halo::ThreadedHaloArray)
+    Base.Threads.@threads :static for tile_id in eachindex(parent(halo))
+        _threaded_boundary_tile!(halo, tile_id)
+    end
+    return nothing
+end
+
 function synchronize_halo!(halo::ThreadedHaloArray)
     @inbounds for tile_id in eachindex(parent(halo))
+        _threaded_synchronize_tile!(halo, tile_id)
+    end
+    return halo
+end
+
+function synchronize_halo_threads!(halo::ThreadedHaloArray)
+    Base.Threads.@threads :static for tile_id in eachindex(parent(halo))
         _threaded_synchronize_tile!(halo, tile_id)
     end
     return halo

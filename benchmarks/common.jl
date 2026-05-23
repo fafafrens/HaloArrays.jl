@@ -122,15 +122,17 @@ function benchmark_times!(f, samples, warmups, timer::Symbol; comm=nothing)
     end
 end
 
-function print_summary(name, times)
-    println(rpad(name, 26),
+function print_summary(name, times; allocations=nothing)
+    print(rpad(name, 26),
         " min=", round(1e6 * minimum(times), digits=2), " us",
         " median=", round(1e6 * median_value(times), digits=2), " us",
         " p90=", round(1e6 * quantile_value(times, 0.90), digits=2), " us",
         " max=", round(1e6 * maximum(times), digits=2), " us")
+    allocations === nothing || print(" alloc=", allocations, " B")
+    println()
 end
 
-function benchmark_record(benchmark, name, times; metadata=Dict{String,Any}())
+function benchmark_record(benchmark, name, times; metadata=Dict{String,Any}(), allocations=nothing)
     row = Dict{String,Any}(
         "benchmark" => benchmark,
         "case" => name,
@@ -140,8 +142,30 @@ function benchmark_record(benchmark, name, times; metadata=Dict{String,Any}())
         "p90_us" => 1e6 * quantile_value(times, 0.90),
         "max_us" => 1e6 * maximum(times),
     )
+    allocations === nothing || (row["alloc_bytes"] = allocations)
     merge!(row, metadata)
     return row
+end
+
+function max_allocated(bytes, ::Nothing)
+    return bytes
+end
+
+function max_allocated(bytes, comm)
+    return MPI.Allreduce(bytes, MPI.MAX, comm)
+end
+
+function allocation_bytes!(f, warmups=1; comm=nothing)
+    for _ in 1:warmups
+        barrier(comm)
+        f()
+    end
+
+    GC.gc()
+    barrier(comm)
+    bytes = @allocated f()
+    barrier(comm)
+    return max_allocated(bytes, comm)
 end
 
 function _csv_escape(value)

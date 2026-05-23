@@ -56,6 +56,45 @@ heat-step style stencil for `ThreadedHaloArray`.
 julia --project=. benchmarks/threaded.jl --owned-size=128,128 --tile-dims=2,2
 ```
 
+## Threaded Synchronization Variants
+
+Compares benchmark-only implementations of threaded halo synchronization:
+the production serial tile loop, an `OhMyThreads.@tasks` loop, and a
+`Base.Threads.@threads :static` loop. This is useful for checking whether
+parallelizing halo copies helps for a given tile size and halo width.
+
+```sh
+JULIA_NUM_THREADS=4 julia --project=. benchmarks/threaded_sync_variants.jl --owned-size=2048,2048 --tile-dims=4,1 --halo=8 --boundary=repeating --timer=benchmarktools
+```
+
+## Boundary Conditions
+
+Benchmarks `boundary_condition!` and `synchronize_halo!` for `LocalHaloArray`,
+`ThreadedHaloArray`, and MPI `HaloArray`. The output includes allocation bytes,
+reported as the maximum across MPI ranks for MPI cases.
+
+```sh
+julia --project=. benchmarks/boundary_conditions.jl --owned-size=128,128 --tile-dims=2,2 --modes=repeating,reflecting,antireflecting,periodic
+mpiexec -n 4 julia --project=. benchmarks/boundary_conditions.jl --owned-size=128,128 --tile-dims=2,2 --modes=repeating,periodic
+```
+
+Use `--timer=benchmarktools` for the rank-local `LocalHaloArray` and
+`ThreadedHaloArray` cases. MPI cases always use the manual barrier/max-time
+timer.
+
+## MPI Diagnostics
+
+Benchmarks MPI exchange and synchronization paths with allocation reporting.
+This is meant to catch hidden allocations or type-instability symptoms in the
+low-level communication paths.
+
+```sh
+mpiexec -n 4 julia --project=. benchmarks/mpi_diagnostics.jl --owned-size=128,128 --boundary=repeating
+```
+
+The periodic cases benchmark pure neighbor exchange. The physical-boundary cases
+benchmark exchange, boundary fill, and the combined `synchronize_halo!` path.
+
 ## MPI Heat Solver
 
 Solves the same periodic heat equation workload with MPI `HaloArray`,
