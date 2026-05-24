@@ -5,6 +5,10 @@ using MPI
 # include le definizioni usate nei test
 using HaloArrays
 
+if !MPI.Initialized()
+    MPI.Init()
+end
+
 struct CustomBoundaryForTest <: HaloArrays.AbstractBoundaryCondition end
 
 # non richiediamo mpiexec per questi test; MPI è usato solo per costanti come COMM_NULL
@@ -69,23 +73,60 @@ h = HaloArrays.HaloArray{Float64,2,Array{Float64,2},1}(undef, bc)
         @test right_face_range(ha, 1) == (5:5, 2:6)
         @test face_offset(ha, 1) == CartesianIndex(1, 0)
 
-        dim2_ranges = FaceRanges(ha, Dim(2))
-        @test collect(get_left_face(dim2_ranges)) == collect(CartesianIndices((2:5, 1:1)))
+        dim2_ranges = FaceRanges(ha)
+        @test collect(get_left_face(dim2_ranges, Dim(2))) == collect(CartesianIndices((2:5, 1:1)))
         @test collect(get_internal_face(dim2_ranges)) == collect(CartesianIndices((2:4, 2:5)))
-        @test collect(get_right_face(dim2_ranges)) == collect(CartesianIndices((2:5, 6:6)))
+        @test collect(get_right_face(dim2_ranges, Dim(2))) == collect(CartesianIndices((2:5, 6:6)))
         @test face_offset(ha, Dim(2)) == CartesianIndex(0, 1)
+        @test get_unit_vector(dim2_ranges, Dim(2)) == CartesianIndex(0, 1)
 
         one_cell = LocalHaloArray(Int, (1,), 1; boundary_condition=:repeating)
-        one_cell_ranges = FaceRanges(one_cell, 1)
-        @test collect(get_left_face(one_cell_ranges)) == [CartesianIndex(1)]
+        one_cell_ranges = FaceRanges(one_cell)
+        @test collect(get_left_face(one_cell_ranges, 1)) == [CartesianIndex(1)]
         @test isempty(get_internal_face(one_cell_ranges))
-        @test collect(get_right_face(one_cell_ranges)) == [CartesianIndex(2)]
+        @test collect(get_right_face(one_cell_ranges, 1)) == [CartesianIndex(2)]
 
-        range_struct = HaloArrays.FaceRanges(ha, 1)
-        @test collect(HaloArrays.get_left_face(range_struct)) == collect(CartesianIndices((1:1, 2:6)))
+        range_struct = HaloArrays.FaceRanges(ha)
+        @test collect(HaloArrays.get_left_face(range_struct, 1)) == collect(CartesianIndices((1:1, 2:6)))
         @test collect(HaloArrays.get_internal_face(range_struct)) == collect(CartesianIndices((2:4, 2:5)))
-        @test collect(HaloArrays.get_right_face(range_struct)) == collect(CartesianIndices((5:5, 2:6)))
-        @test HaloArrays.get_unit_vector(range_struct) == CartesianIndex(1, 0)
+        @test collect(HaloArrays.get_right_face(range_struct, 1)) == collect(CartesianIndices((5:5, 2:6)))
+        @test HaloArrays.get_unit_vector(range_struct, 1) == CartesianIndex(1, 0)
+
+        topology = CartesianTopology(MPI.COMM_SELF, (1, 1); periodic=(false, false))
+        mpi_ha = HaloArray(Int, (4, 5), 1, topology; boundary_condition=:repeating)
+        mpi_ranges = FaceRanges(mpi_ha)
+        @test collect(get_left_face(mpi_ranges, 1)) == collect(get_left_face(range_struct, 1))
+        @test collect(get_internal_face(mpi_ranges)) == collect(get_internal_face(range_struct))
+        @test collect(get_right_face(mpi_ranges, 1)) == collect(get_right_face(range_struct, 1))
+        @test get_unit_vector(mpi_ranges, 1) == CartesianIndex(1, 0)
+
+        threaded_ha = ThreadedHaloArray(Int, (4, 5), 1; dims=(1, 1), boundary_condition=:repeating)
+        threaded_ranges = FaceRanges(threaded_ha)
+        @test collect(get_left_face(threaded_ranges, 1)) == collect(get_left_face(range_struct, 1))
+        @test collect(get_internal_face(threaded_ranges)) == collect(get_internal_face(range_struct))
+        @test collect(get_right_face(threaded_ranges, 1)) == collect(get_right_face(range_struct, 1))
+        @test get_unit_vector(threaded_ranges, 1) == CartesianIndex(1, 0)
+
+        fields = MultiHaloArray((;
+            rho=LocalHaloArray(Int, (4, 5), 1; boundary_condition=:repeating),
+            mom=LocalHaloArray(Int, (4, 5), 1; boundary_condition=:repeating),
+        ))
+        field_ranges = FaceRanges(fields)
+        @test collect(get_left_face(field_ranges, 1)) == collect(get_left_face(range_struct, 1))
+        @test collect(get_internal_face(field_ranges)) == collect(get_internal_face(range_struct))
+        @test collect(get_right_face(field_ranges, 1)) == collect(get_right_face(range_struct, 1))
+        @test get_unit_vector(field_ranges, 1) == CartesianIndex(1, 0)
+        @test_throws BoundsError get_left_face(field_ranges, 3)
+
+        array_fields = ArrayOfHaloArray([
+            LocalHaloArray(Int, (4, 5), 1; boundary_condition=:repeating) for _ in 1:2, _ in 1:2
+        ])
+        array_field_ranges = FaceRanges(array_fields)
+        @test collect(get_left_face(array_field_ranges, 1)) == collect(get_left_face(range_struct, 1))
+        @test collect(get_internal_face(array_field_ranges)) == collect(get_internal_face(range_struct))
+        @test collect(get_right_face(array_field_ranges, 1)) == collect(get_right_face(range_struct, 1))
+        @test get_unit_vector(array_field_ranges, 1) == CartesianIndex(1, 0)
+        @test_throws BoundsError get_right_face(array_field_ranges, 3)
     end
 
     @testset "face ranges support owned-cell update" begin
@@ -95,10 +136,10 @@ h = HaloArrays.HaloArray{Float64,2,Array{Float64,2},1}(undef, bc)
         parent(u) .= [100, 1, 2, 3, 4, 200]
         fill!(parent(du), 0)
 
-        ranges = FaceRanges(u, 1)
-        offset = get_unit_vector(ranges)
+        ranges = FaceRanges(u)
+        offset = get_unit_vector(ranges, 1)
 
-        for IL in get_left_face(ranges)
+        for IL in get_left_face(ranges, 1)
             IR = IL + offset
             parent(du)[IR] += parent(u)[IR] - parent(u)[IL]
         end
@@ -110,7 +151,7 @@ h = HaloArrays.HaloArray{Float64,2,Array{Float64,2},1}(undef, bc)
             parent(du)[IR] += flux
         end
 
-        for IL in get_right_face(ranges)
+        for IL in get_right_face(ranges, 1)
             IR = IL + offset
             parent(du)[IL] -= parent(u)[IR] - parent(u)[IL]
         end
