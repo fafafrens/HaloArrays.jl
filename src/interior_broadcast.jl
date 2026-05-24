@@ -139,9 +139,8 @@ end
 
 @inline function Base.copyto!(dest::ThreadedHaloArray, bc::Broadcasted{<:ThreadedHaloArrayStyle})
     bc_flat = Broadcast.flatten(bc)
-    @tasks for tile_id in eachindex(parent(dest))
-        copyto!(interior_view(dest, tile_id), unpack_ha_tile(bc_flat, tile_id))
-    end
+    tforeach(tile_id -> _copyto_threaded_broadcast_tile!(dest, bc_flat, tile_id),
+        eachindex(parent(dest)); scheduler=:static)
     return dest
 end
 
@@ -173,10 +172,19 @@ end
 
 function Broadcast.materialize!(dest::ThreadedHaloArray, bc::Broadcasted)
     bc_flat = Broadcast.flatten(bc)
-    @tasks for tile_id in eachindex(parent(dest))
-        Broadcast.materialize!(interior_view(dest, tile_id), unpack_ha_tile(bc_flat, tile_id))
-    end
+    tforeach(tile_id -> _materialize_threaded_broadcast_tile!(dest, bc_flat, tile_id),
+        eachindex(parent(dest)); scheduler=:static)
     return dest
+end
+
+@inline function _copyto_threaded_broadcast_tile!(dest::ThreadedHaloArray, bc_flat, tile_id)
+    copyto!(interior_view(dest, tile_id), unpack_ha_tile(bc_flat, tile_id))
+    return nothing
+end
+
+@inline function _materialize_threaded_broadcast_tile!(dest::ThreadedHaloArray, bc_flat, tile_id)
+    Broadcast.materialize!(interior_view(dest, tile_id), unpack_ha_tile(bc_flat, tile_id))
+    return nothing
 end
 
 # ------------------------------------------------------------------------------

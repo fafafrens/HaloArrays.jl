@@ -461,7 +461,6 @@ function Base.map!(f,dest::HaloArray,src::HaloArray )
     dest_interior = interior_view(dest)
     src_interior = interior_view(src)
     @views map!(f, dest_interior, src_interior)
-    halo_exchange!(dest) # Use @views to avoid unnecessary copies
     return dest
 end
 
@@ -470,7 +469,6 @@ function Base.map!(f,dest::HaloArray,src::Vararg{ HaloArray,2} )
     src_interior_1 = interior_view(src[1])
     src_interior_2 = interior_view(src[2])
     @views map!(f, dest_interior, src_interior_1, src_interior_2)
-    halo_exchange!(dest) # Use @views to avoid unnecessary copies
     return dest
 end
 
@@ -480,7 +478,6 @@ function Base.map!(f,dest::HaloArray,src::Vararg{ HaloArray,3} )
     src_interior_2 = interior_view(src[2])
     src_interior_3 = interior_view(src[3])
     map!(f, dest_interior, src_interior_1, src_interior_2, src_interior_3)
-    halo_exchange!(dest) # Use @views to avoid unnecessary copies
     return dest
 end
 
@@ -491,7 +488,6 @@ function Base.map!(f, dest::HaloArray, src::Vararg{ HaloArray, N }) where {N}
         interior_view(s)
     end
     map!(f, dest_interior, src_interiors...)
-    halo_exchange!(dest) # Use @views to avoid unnecessary copies
     return dest
 end
 

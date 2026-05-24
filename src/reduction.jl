@@ -64,7 +64,7 @@ for func in (:mapreduce, :mapfoldl, :mapfoldr)
     @eval function Base.$func(
             f::F, op::OP, halo::ThreadedHaloArray, etc::Vararg{ThreadedHaloArray}; kws...,
         ) where {F<:Function, OP}
-        tile_results = tmap(1:tile_count(halo)) do tile_id
+        tile_results = tmap(1:tile_count(halo); scheduler=:static) do tile_id
             interiors = map(h -> interior_view(h, tile_id), (halo, etc...))
             $func(f, op, interiors...; kws...)
         end
@@ -88,11 +88,11 @@ function Base.all(f::F, u::LocalHaloArray) where {F<:Function}
 end
 
 function Base.any(f::F, u::ThreadedHaloArray) where {F<:Function}
-    return tmapreduce(tile_id -> any(f, interior_view(u, tile_id)), |, 1:tile_count(u))
+    return tmapreduce(tile_id -> any(f, interior_view(u, tile_id)), |, 1:tile_count(u); scheduler=:static)
 end
 
 function Base.all(f::F, u::ThreadedHaloArray) where {F<:Function}
-    return tmapreduce(tile_id -> all(f, interior_view(u, tile_id)), &, 1:tile_count(u))
+    return tmapreduce(tile_id -> all(f, interior_view(u, tile_id)), &, 1:tile_count(u); scheduler=:static)
 end
 
 for (func, commutative) in [:mapreduce => true, :mapfoldl => false, :mapfoldr => false]

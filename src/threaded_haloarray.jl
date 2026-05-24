@@ -298,9 +298,8 @@ function halo_exchange!(halo::ThreadedHaloArray)
 end
 
 function halo_exchange_threads!(halo::ThreadedHaloArray)
-    Base.Threads.@threads :static for tile_id in eachindex(parent(halo))
-        _threaded_exchange_tile!(halo, tile_id)
-    end
+    tforeach(tile_id -> _threaded_exchange_tile!(halo, tile_id),
+        eachindex(parent(halo)); scheduler=:static)
     return halo
 end
 
@@ -409,9 +408,8 @@ function boundary_condition!(halo::ThreadedHaloArray)
 end
 
 function boundary_condition_threads!(halo::ThreadedHaloArray)
-    Base.Threads.@threads :static for tile_id in eachindex(parent(halo))
-        _threaded_boundary_tile!(halo, tile_id)
-    end
+    tforeach(tile_id -> _threaded_boundary_tile!(halo, tile_id),
+        eachindex(parent(halo)); scheduler=:static)
     return nothing
 end
 
@@ -423,9 +421,8 @@ function synchronize_halo!(halo::ThreadedHaloArray)
 end
 
 function synchronize_halo_threads!(halo::ThreadedHaloArray)
-    Base.Threads.@threads :static for tile_id in eachindex(parent(halo))
-        _threaded_synchronize_tile!(halo, tile_id)
-    end
+    tforeach(tile_id -> _threaded_synchronize_tile!(halo, tile_id),
+        eachindex(parent(halo)); scheduler=:static)
     return halo
 end
 
@@ -433,17 +430,19 @@ start_halo_exchange!(halo::ThreadedHaloArray) = halo_exchange!(halo)
 finish_halo_exchange!(halo::ThreadedHaloArray) = halo
 
 function fill_interior(halo::ThreadedHaloArray, value)
-    @tasks for tile_id in eachindex(parent(halo))
-        fill!(interior_view(halo, tile_id), value)
-    end
+    tforeach(tile_id -> _fill_threaded_interior_tile!(halo, tile_id, value),
+        eachindex(parent(halo)); scheduler=:static)
     return halo
 end
 
 function Base.fill!(halo::ThreadedHaloArray, value)
-    @tasks for tile in parent(halo)
-        fill!(tile, value)
-    end
+    tforeach(tile -> fill!(tile, value), parent(halo); scheduler=:static)
     return halo
+end
+
+@inline function _fill_threaded_interior_tile!(halo::ThreadedHaloArray, tile_id::Integer, value)
+    fill!(interior_view(halo, tile_id), value)
+    return nothing
 end
 
 function _global_to_tile_dims(halo::ThreadedHaloArray{T,N}, dims::NTuple{M,<:Integer}) where {T,N,M}
@@ -485,10 +484,14 @@ function Base.copyto!(dest::ThreadedHaloArray, src::ThreadedHaloArray)
     tile_size(dest) == tile_size(src) || throw(DimensionMismatch("ThreadedHaloArray copyto! requires matching tile sizes"))
     tile_count(dest) == tile_count(src) || throw(DimensionMismatch("ThreadedHaloArray copyto! requires matching tile counts"))
 
-    @tasks for tile_id in eachindex(parent(dest))
-        copyto!(tile_parent(dest, tile_id), tile_parent(src, tile_id))
-    end
+    tforeach(tile_id -> _copy_threaded_tile_storage!(dest, src, tile_id),
+        eachindex(parent(dest)); scheduler=:static)
     return dest
+end
+
+@inline function _copy_threaded_tile_storage!(dest::ThreadedHaloArray, src::ThreadedHaloArray, tile_id::Integer)
+    copyto!(tile_parent(dest, tile_id), tile_parent(src, tile_id))
+    return nothing
 end
 
 function Base.copy(halo::ThreadedHaloArray)

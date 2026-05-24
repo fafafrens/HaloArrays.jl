@@ -122,7 +122,6 @@ function Base.map!(f, dest::LocalHaloArray, src::Vararg{LocalHaloArray,N}) where
     dest_interior = interior_view(dest)
     src_interiors = map(interior_view, src)
     map!(f, dest_interior, src_interiors...)
-    boundary_condition!(dest)
     return dest
 end
 

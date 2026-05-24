@@ -64,46 +64,60 @@ h = HaloArrays.HaloArray{Float64,2,Array{Float64,2},1}(undef, bc)
     @testset "owned face ranges" begin
         ha = LocalHaloArray(Int, (4, 5), 1; boundary_condition=:repeating)
 
-        @test lower_owned_face_range(ha, 1) == (2:2, 2:6)
-        @test internal_owned_face_left_range(ha, 1) == (2:4, 2:6)
-        @test upper_owned_face_range(ha, 1) == (5:5, 2:6)
+        @test left_face_range(ha, 1) == (1:1, 2:6)
+        @test internal_face_range(ha) == (2:4, 2:5)
+        @test right_face_range(ha, 1) == (5:5, 2:6)
         @test face_offset(ha, 1) == CartesianIndex(1, 0)
 
-        dim2_ranges = owned_face_ranges(ha, Dim(2))
-        @test dim2_ranges.lower_owned == (2:5, 2:2)
-        @test dim2_ranges.internal_left == (2:5, 2:5)
-        @test dim2_ranges.upper_owned == (2:5, 6:6)
+        dim2_ranges = FaceRanges(ha, Dim(2))
+        @test collect(get_left_face(dim2_ranges)) == collect(CartesianIndices((2:5, 1:1)))
+        @test collect(get_internal_face(dim2_ranges)) == collect(CartesianIndices((2:4, 2:5)))
+        @test collect(get_right_face(dim2_ranges)) == collect(CartesianIndices((2:5, 6:6)))
         @test face_offset(ha, Dim(2)) == CartesianIndex(0, 1)
 
         one_cell = LocalHaloArray(Int, (1,), 1; boundary_condition=:repeating)
-        one_cell_ranges = owned_face_ranges(one_cell, 1)
-        @test collect(CartesianIndices(one_cell_ranges.lower_owned)) == [CartesianIndex(2)]
-        @test isempty(CartesianIndices(one_cell_ranges.internal_left))
-        @test collect(CartesianIndices(one_cell_ranges.upper_owned)) == [CartesianIndex(2)]
+        one_cell_ranges = FaceRanges(one_cell, 1)
+        @test collect(get_left_face(one_cell_ranges)) == [CartesianIndex(1)]
+        @test isempty(get_internal_face(one_cell_ranges))
+        @test collect(get_right_face(one_cell_ranges)) == [CartesianIndex(2)]
+
+        range_struct = HaloArrays.FaceRanges(ha, 1)
+        @test collect(HaloArrays.get_left_face(range_struct)) == collect(CartesianIndices((1:1, 2:6)))
+        @test collect(HaloArrays.get_internal_face(range_struct)) == collect(CartesianIndices((2:4, 2:5)))
+        @test collect(HaloArrays.get_right_face(range_struct)) == collect(CartesianIndices((5:5, 2:6)))
+        @test HaloArrays.get_unit_vector(range_struct) == CartesianIndex(1, 0)
     end
 
-    @testset "owned face update helper" begin
+    @testset "face ranges support owned-cell update" begin
         u = LocalHaloArray(Int, (4,), 1; boundary_condition=:repeating)
         du = similar(u)
 
         parent(u) .= [100, 1, 2, 3, 4, 200]
         fill!(parent(du), 0)
 
-        foreach_owned_face!((ul, ur) -> ur - ul, du, u, 1)
+        ranges = FaceRanges(u, 1)
+        offset = get_unit_vector(ranges)
+
+        for IL in get_left_face(ranges)
+            IR = IL + offset
+            parent(du)[IR] += parent(u)[IR] - parent(u)[IL]
+        end
+
+        for IL in get_internal_face(ranges)
+            IR = IL + offset
+            flux = parent(u)[IR] - parent(u)[IL]
+            parent(du)[IL] -= flux
+            parent(du)[IR] += flux
+        end
+
+        for IL in get_right_face(ranges)
+            IR = IL + offset
+            parent(du)[IL] -= parent(u)[IR] - parent(u)[IL]
+        end
 
         @test collect(interior_view(du)) == [-100, 0, 0, -195]
         @test parent(du)[1] == 0
         @test parent(du)[end] == 0
-
-        fill!(parent(du), 0)
-        foreach_owned_face!((ul, ur) -> ur - ul, du, u, Dim(1))
-        @test collect(interior_view(du)) == [-100, 0, 0, -195]
-
-        bad_size = LocalHaloArray(Int, (5,), 1; boundary_condition=:repeating)
-        bad_halo = LocalHaloArray(Int, (4,), 2; boundary_condition=:repeating)
-        @test_throws DimensionMismatch foreach_owned_face!((ul, ur) -> ur - ul, bad_size, u, 1)
-        @test_throws DimensionMismatch foreach_owned_face!((ul, ur) -> ur - ul, bad_halo, u, 1)
-        @test_throws ArgumentError foreach_owned_face!((ul, ur) -> ur - ul, du, u, 2)
     end
 
 end

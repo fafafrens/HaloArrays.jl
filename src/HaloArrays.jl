@@ -4,7 +4,7 @@ module HaloArrays
 using MPI
 using HDF5
 using LinearAlgebra
-using OhMyThreads: @tasks, tmap, tmapreduce
+using OhMyThreads: tforeach, tmap, tmapreduce
 using StaticArrays
 
 # Include library files
@@ -72,11 +72,14 @@ export interior_view,
     tile_coordinates,
     neighbor_tile_id,
     face_offset,
-    lower_owned_face_range,
-    internal_owned_face_left_range,
-    upper_owned_face_range,
-    owned_face_ranges,
-    foreach_owned_face!,
+    left_face_range,
+    internal_face_range,
+    right_face_range,
+    FaceRanges,
+    get_left_face,
+    get_internal_face,
+    get_right_face,
+    get_unit_vector,
     owned_to_global_index,
     global_to_storage_index,
     fill_interior,
