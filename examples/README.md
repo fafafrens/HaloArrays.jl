@@ -57,6 +57,16 @@ To save a gathered final snapshot to HDF5:
 mpiexec -n 4 julia --project=. -e 'include("examples/heat_diffusion_mpi_2d.jl"); run_mpi_heat_2d(save_hdf5=true)'
 ```
 
+## Burgers Finite Volume
+
+These examples solve 1D inviscid Burgers with a conservative finite-volume
+update and Rusanov face fluxes.
+
+```bash
+julia --project=. examples/burgers_1d.jl
+mpiexec -n 4 julia --project=. examples/burgers_mpi_1d.jl
+```
+
 ## DiffEq Examples
 
 The DiffEq examples use `DiffEqBase` and `OrdinaryDiffEq` from

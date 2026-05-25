@@ -23,8 +23,17 @@ end
     local_sum = sum(interior_view(ha))
     @test mapreduce(identity, +, ha) ≈ MPI.Allreduce(local_sum, MPI.SUM, topology.cart_comm)
     @test reduce(+, ha) ≈ MPI.Allreduce(local_sum, MPI.SUM, topology.cart_comm)
+    @test sum(ha) ≈ MPI.Allreduce(local_sum, MPI.SUM, topology.cart_comm)
+    @test sum(abs2, ha) ≈ MPI.Allreduce(sum(abs2, interior_view(ha)), MPI.SUM, topology.cart_comm)
+    @test maximum(ha) ≈ MPI.Allreduce(maximum(interior_view(ha)), max, topology.cart_comm)
+    @test minimum(ha) ≈ MPI.Allreduce(minimum(interior_view(ha)), min, topology.cart_comm)
     @test any(x -> x < 0, ha) == false
     @test all(x -> x >= 0, ha) == true
+
+    maybe_ha = MaybeHaloArray(ha)
+    @test sum(maybe_ha) ≈ MPI.Allreduce(local_sum, MPI.SUM, topology.cart_comm)
+    @test maximum(maybe_ha) ≈ MPI.Allreduce(maximum(interior_view(ha)), max, topology.cart_comm)
+    @test minimum(maybe_ha) ≈ MPI.Allreduce(minimum(interior_view(ha)), min, topology.cart_comm)
 
     u = copy(ha)
     v = similar(ha)
@@ -38,6 +47,16 @@ end
     @test mapreduce(identity, +, fields) ≈ MPI.Allreduce(local_field_sum, MPI.SUM, topology.cart_comm)
     @test all(x -> x >= 0, fields)
     @test any(x -> x == 1, fields)
+
+    array_fields = ArrayOfHaloArray([u, v])
+    @test mapreduce(identity, +, array_fields) ≈ MPI.Allreduce(local_field_sum, MPI.SUM, topology.cart_comm)
+    @test sum(array_fields) ≈ MPI.Allreduce(local_field_sum, MPI.SUM, topology.cart_comm)
+    @test maximum(array_fields) ≈
+        MPI.Allreduce(max(maximum(interior_view(u)), maximum(interior_view(v))), max, topology.cart_comm)
+    @test minimum(array_fields) ≈
+        MPI.Allreduce(min(minimum(interior_view(u)), minimum(interior_view(v))), min, topology.cart_comm)
+    @test all(x -> x >= 0, array_fields)
+    @test any(x -> x == 1, array_fields)
 end
 
 @testset "MPI dimension reductions" begin

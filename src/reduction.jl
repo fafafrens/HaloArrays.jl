@@ -95,7 +95,7 @@ function Base.all(f::F, u::ThreadedHaloArray) where {F<:Function}
     return tmapreduce(tile_id -> all(f, interior_view(u, tile_id)), &, 1:tile_count(u); scheduler=:static)
 end
 
-for (func, commutative) in [:mapreduce => true, :mapfoldl => false, :mapfoldr => false]
+for func in (:mapreduce, :mapfoldl, :mapfoldr)
     @eval function Base.$func(
             f::F, op::OP, halo::MultiHaloArray, etc::Vararg{MultiHaloArray}; kws...,
         ) where {F<:Function, OP}
@@ -141,6 +141,58 @@ function Base.any(f::F, mha::MultiHaloArray) where {F<:Function}
     end
     return any(field_results)
 end
+
+for func in (:mapreduce, :mapfoldl, :mapfoldr)
+    @eval function Base.$func(
+            f::F, op::OP, halo::ArrayOfHaloArray, etc::Vararg{ArrayOfHaloArray}; kws...,
+        ) where {F<:Function, OP}
+        all_arrays = (parent(halo), parent.(etc)...)
+        per_field_results = map(eachindex(parent(halo))) do idx
+            field_arrays = map(arrs -> arrs[idx], all_arrays)
+            $func(f, op, field_arrays...; kws...)
+        end
+        return reduce(op, per_field_results; kws...)
+    end
+
+    @eval function Base.$func(
+            f::F, op::OP, z::Iterators.Zip{<:Tuple{Vararg{ArrayOfHaloArray}}}; kws...,
+        ) where {F<:Function, OP}
+        g(args...) = f(args)
+        $func(g, op, z.is...; kws...)
+    end
+end
+
+for func in (:mapreduce, :mapfoldl, :mapfoldr)
+    @eval function Base.$func(
+            f::F, op::OP, halo::MaybeHaloArray, etc::Vararg{MaybeHaloArray}; kws...,
+        ) where {F<:Function, OP}
+        all(isactive, (halo, etc...)) ||
+            throw(ErrorException("MaybeHaloArray: attempt to reduce inactive value"))
+        return $func(f, op, getdata(halo), getdata.(etc)...; kws...)
+    end
+
+    @eval function Base.$func(
+            f::F, op::OP, z::Iterators.Zip{<:Tuple{Vararg{MaybeHaloArray}}}; kws...,
+        ) where {F<:Function, OP}
+        g(args...) = f(args)
+        $func(g, op, z.is...; kws...)
+    end
+end
+
+function Base.all(f::F, halo::MaybeHaloArray) where {F<:Function}
+    isactive(halo) || throw(ErrorException("MaybeHaloArray: attempt to reduce inactive value"))
+    return all(f, getdata(halo))
+end
+
+function Base.any(f::F, halo::MaybeHaloArray) where {F<:Function}
+    isactive(halo) || throw(ErrorException("MaybeHaloArray: attempt to reduce inactive value"))
+    return any(f, getdata(halo))
+end
+
+Base.sum(halo::AbstractHaloArray) = mapreduce(identity, +, halo)
+Base.sum(f::F, halo::AbstractHaloArray) where {F<:Function} = mapreduce(f, +, halo)
+Base.maximum(halo::AbstractHaloArray) = mapreduce(identity, max, halo)
+Base.minimum(halo::AbstractHaloArray) = mapreduce(identity, min, halo)
 
 
 """
