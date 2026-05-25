@@ -49,16 +49,22 @@ function _zero_storage!(u::ThreadedHaloArray)
     return u
 end
 
-function advection_rhs!(du::Union{HaloArray,LocalHaloArray}, u::Union{HaloArray,LocalHaloArray}, p, t)
+function _prepare_rhs!(du, u)
+    start_halo_exchange!(u)
     _zero_storage!(du)
-    synchronize_halo!(u)
+    finish_halo_exchange!(u)
+    boundary_condition!(u)
+    return du
+end
+
+function advection_rhs!(du::Union{HaloArray,LocalHaloArray}, u::Union{HaloArray,LocalHaloArray}, p, t)
+    _prepare_rhs!(du, u)
     _accumulate_advection_flux!(parent(du), parent(u), FaceRanges(u), p.velocity, p.dx)
     return du
 end
 
 function advection_rhs!(du::ThreadedHaloArray, u::ThreadedHaloArray, p, t)
-    _zero_storage!(du)
-    synchronize_halo!(u)
+    _prepare_rhs!(du, u)
     ranges = FaceRanges(u)
 
     tforeach(1:tile_count(u); scheduler=:static) do tile_id
