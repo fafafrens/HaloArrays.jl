@@ -207,10 +207,47 @@ Use a multi-array container when:
 
 Keep independent arrays when fields require different halo widths, different grid layouts, or different topologies.
 
+## Face Loops
+
+`FaceRanges(u)` gives the index ranges needed by finite-volume style face
+updates. The ranges are expressed in parent-storage indices, so they are meant
+for kernels that work directly with `parent(u)` and `parent(du)`.
+
+```julia
+ranges = FaceRanges(u)
+e = get_unit_vector(ranges, dim)
+udata = parent(u)
+dudata = parent(du)
+
+for IL in get_left_face(ranges, dim)
+    IR = IL + e
+    flux = numerical_flux(udata[IL], udata[IR])
+    dudata[IR] += flux
+end
+
+for IL in get_internal_face(ranges)
+    IR = IL + e
+    flux = numerical_flux(udata[IL], udata[IR])
+    dudata[IL] -= flux
+    dudata[IR] += flux
+end
+
+for IL in get_right_face(ranges, dim)
+    IR = IL + e
+    flux = numerical_flux(udata[IL], udata[IR])
+    dudata[IL] -= flux
+end
+```
+
+The helper works for `HaloArray`, `LocalHaloArray`, `ThreadedHaloArray`, and
+the collection wrappers. For collections, the face ranges describe the spatial
+part only; select a field first, then apply the ranges to that field.
+
 ## Core Utility Functions
 
 - Domain and layout: `interior_size`, `storage_size`, `halo_width`, `global_size`, `interior_range`
 - Index mapping: `owned_to_global_index`, `global_to_storage_index`
+- Face loops: `FaceRanges`, `get_left_face`, `get_internal_face`, `get_right_face`
 - Data movement and reduction: `gather_haloarray`, `mapreduce_haloarray_dims`
 - HDF5 helpers: `create_haloarray_output_file`, `write_haloarray_timestep!`, `gather_and_save_haloarray`
 

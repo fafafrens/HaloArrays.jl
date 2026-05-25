@@ -7,15 +7,8 @@ function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,BCondition}, s::Side{s
     T,N,A,Halo,B,BCondition,side, d}
     
     mode = halo.boundary_condition[d][side]
-    # Check if this is a boundary
     nbrank = halo.topology.neighbors[d][side]
     if nbrank == MPI.PROC_NULL
-        # Extract halo region and its mirror interior slice
-        #halo_region = get_recv_view(s, dim, full, h)
-        #interior_region = get_send_view(s, dim, full, h)
-
-        # Dispatch based on boundary mode
-        #@show "Applying boundary condition for side $s, dim $dim, mode $mode"
         boundary_condition!(halo, s, dim, mode)
     end
     return nothing
@@ -30,7 +23,7 @@ function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,BCondition},s::Side{1}
 
     for i in 1:size(halo_region, dim)
 
-        src_i = h-i + 1                        # reflect index: 1 → 1, 2 → 2, ...
+        src_i = h-i + 1
         mirror_idx = _slice_index(Val(N), dim, src_i)
         dst_idx = _slice_index(Val(N), dim, i)
     
@@ -62,7 +55,7 @@ function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,BCondition}, s::Side{1
     interior_region = interior_view(halo)
     halo_region = get_recv_view(s, d, full, h)
     for i in 1:size(halo_region, dim)
-        src_i = h - i + 1                        # reflect index: 1 → 1, 2 → 2, ...
+        src_i = h - i + 1
         mirror_idx = _slice_index(Val(N), dim, src_i)
         dst_idx = _slice_index(Val(N), dim, i)
         @views halo_region[dst_idx...] .= .- interior_region[mirror_idx...]
@@ -261,7 +254,6 @@ function boundary_condition!(halo::LocalHaloArray{T,N}) where {T,N}
 end
 
 function boundary_condition!(mha::MultiHaloArray{T,N,A}) where {T,N,A}
-    # Dispatch to each field's boundary condition
     foreach_field!(boundary_condition!,mha)
     return nothing
     
@@ -272,7 +264,6 @@ function boundary_condition!(mha::ArrayOfHaloArray)
     return nothing
 end
 
-# Unified converter: Symbol | Type | instance -> concrete BC instance
 function to_bc(x)
     if x isa Symbol
         if x == :reflecting
@@ -295,7 +286,6 @@ function to_bc(x)
     end
 end
 
-# Normalize one-dimension BC spec to (left, right)
 function normalize_one_dim(bc_dim)
     if bc_dim isa Tuple && length(bc_dim) == 2
         return (to_bc(bc_dim[1]), to_bc(bc_dim[2]))
@@ -304,7 +294,6 @@ function normalize_one_dim(bc_dim)
     end
 end
 
-# Normalize full spec to NTuple{N,NTuple{2,AbstractBoundaryCondition}}
 function normalize_boundary_condition(bc, N::Int)
     if bc isa Tuple
         if length(bc) == N
@@ -313,15 +302,10 @@ function normalize_boundary_condition(bc, N::Int)
             throw(ArgumentError("Boundary condition tuple length $(length(bc)) does not match expected dimension $N"))
         end
     else
-        # single BC (Symbol/Type/instance) for all dims
         bc_concrete = to_bc(bc)
         return ntuple(_ -> (bc_concrete, bc_concrete), N)
     end
 end
-
-# ------------------------------------------------------------------------------
-# Periodicity check
-# ------------------------------------------------------------------------------
 
 function isperiodic(bc::AbstractBoundaryCondition)
     return bc isa Periodic

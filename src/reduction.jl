@@ -1,5 +1,3 @@
-# We force specialisation on each function to avoid (tiny) allocations.
-#reduce
 # Note that, for mapreduce, we can assume that the operation is commutative,
 # which allows MPI to freely reorder operations.
 #
@@ -10,16 +8,13 @@ for (func, commutative) in [:mapreduce => true, :mapfoldl => false, :mapfoldr =>
     @eval function Base.$func(
             f::F, op::OP, halo::HaloArray, etc::Vararg{HaloArray}; kws...,
         ) where {F<:Function, OP}
-        #foreach(v -> _check_compatible_arrays(u, v), etc)
         comm = get_comm(halo)
-        #we create a tuple of view 
         ups = map(interior_view, (halo, etc...))
         rlocal = $func(f, op, ups...; kws...)
         op_mpi = MPI.Op(op, typeof(rlocal); iscommutative = $commutative)
         MPI.Allreduce(rlocal, op_mpi, comm)
     end
 
-    # Make things work with zip(u::PencilArray, v::PencilArray, ...)
     @eval function Base.$func(
             f::F, op::OP, z::Iterators.Zip{<:Tuple{Vararg{HaloArray}}}; kws...,
         ) where {F<:Function, OP}
@@ -100,25 +95,19 @@ for func in (:mapreduce, :mapfoldl, :mapfoldr)
             f::F, op::OP, halo::MultiHaloArray, etc::Vararg{MultiHaloArray}; kws...,
         ) where {F<:Function, OP}
         
-        # Get names (field keys) and bundle all inputs together
-        
         all_arrays = (to_tuple(halo), to_tuple.(etc)...)
         N=n_field(halo)
 
-        # Compute per-field reduction to scalars
         per_field_results = map(1:N) do idx
-            # Extract the field arrays for this index
             field_arrays = map(all_arrays) do arrs
                 arrs[idx]
             end
             $func(f, op, field_arrays...; kws...)
         end
 
-        # Final reduction over all fields
         return reduce(op, per_field_results; kws...)
     end
 
-    # Make things work with zip(u::PencilArray, v::PencilArray, ...)
     @eval function Base.$func(
             f::F, op::OP, z::Iterators.Zip{<:Tuple{Vararg{MultiHaloArray}}}; kws...,
         ) where {F<:Function, OP}
@@ -214,7 +203,6 @@ function mapreduce_haloarray_dims(f,op,ha::HaloArray{T,N,A,Halo,B,BCondition}, d
     M = length(dims_to_keep)
     M == 0 && throw(ArgumentError("Reducing all dimensions to a scalar is not supported by mapreduce_haloarray_dims"))
 
-    # split communicator grouping processes that share coords on the kept dims
     (sub_comm, coords, subrank) = subcomm_for_slices(topo, dims_to_remove)
 
     mpi_op=MPI.Op(op, T; iscommutative=true)
@@ -222,22 +210,17 @@ function mapreduce_haloarray_dims(f,op,ha::HaloArray{T,N,A,Halo,B,BCondition}, d
     dimension_to_reduce = Tuple(dims_to_remove)
     local_value = dropdims(mapreduce(f, op, interior_view(ha), dims=dimension_to_reduce), dims=dimension_to_reduce)
 
-    # perform reduction inside the sub-communicator; result only valid on subrank==0
-
     sum_on_root = MPI.Reduce(local_value, mpi_op, sub_comm, root=root_coord)
 
-    # build the root (reduced) topology
     root_topo = root_topology_multi(topo, dims_to_remove; root_coord=root_coord)
     new_boundary = ntuple(i -> ha.boundary_condition[dims_to_keep[i]], Val(M))
     reduced_owned_size = size(local_value)
     new_ha = HaloArray(T, reduced_owned_size, Halo, root_topo; boundary_condition=new_boundary)
 
-    # if this process is the root of its sub-comm, place reduced scalar into the interior cell
     if isactive(root_topo)
         interior_view(new_ha) .= sum_on_root
     end
 
-    # free sub_comm if allocated
     if sub_comm != MPI.COMM_NULL
         MPI.free(sub_comm)
     end
@@ -246,18 +229,18 @@ function mapreduce_haloarray_dims(f,op,ha::HaloArray{T,N,A,Halo,B,BCondition}, d
 end
 
 """
-    reduce_mhaloarray_dims(op, mha::MultiHaloArray, dims; root_coord=0)
+    mapreduce_mhaloarray_dims(f, op, mha::MultiHaloArray, dims)
 
-Riduce `mha` campo-per-campo lungo `dims` usando `mapreduce_haloarray_dims(identity, op, ...)`.
-Restituisce un `MaybeHaloArray(MultiHaloArray(...))` attivo solo sui root delle slice ridotte.
-Se nessun campo è root sulla slice (tutti inactive) ritorna MaybeHaloArray(mha, false).
-Se alcuni campi risultano active e altri no -> errore (incoerenza).
+Reduce each field of `mha` over `dims` using `mapreduce_haloarray_dims`.
+
+Returns a `MaybeHaloArray` wrapping a reduced `MultiHaloArray`. Active state is
+expected to be consistent across all fields.
 """
 function mapreduce_mhaloarray_dims(f, op, mha::MultiHaloArray, dims)
     
     names = keys(mha.arrays)
 
-    list_of_maybe = map_over_field( mha) do field 
+    list_of_maybe = map_over_field(mha) do field
         mapreduce_haloarray_dims(f, op, field, dims)
     end
     active_states = map(isactive, values(list_of_maybe))

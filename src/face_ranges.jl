@@ -22,9 +22,10 @@ end
 """
     left_face_range(halo, dim)
 
-Return the lower ghost-cell slab adjacent to owned cells in dimension `dim`.
-For a face loop this is the lower-index cell range of the left boundary faces
-`ghost | owned`.
+Return the lower-side boundary face cells in dimension `dim`.
+
+These are ghost cells. In a face loop, pair each index `IL` with
+`IR = IL + face_offset(halo, dim)` to visit the `ghost | owned` face.
 """
 function left_face_range(halo, dim::Int)
     _check_face_dim(halo, dim)
@@ -37,8 +38,11 @@ left_face_range(halo, ::Dim{D}) where {D} = left_face_range(halo, D)
 """
     internal_face_range(halo)
 
-Return the lower-index owned-cell range for the internal cells that have an
-owned neighbor in the positive direction of every dimension.
+Return the dimension-independent owned-cell core used by face loops.
+
+Each returned cell has an owned positive neighbor in every spatial dimension.
+For a chosen dimension, pair each index `IL` with
+`IR = IL + face_offset(halo, dim)`.
 """
 function internal_face_range(halo)
     ranges = _face_spatial_interior_range(halo)
@@ -48,9 +52,11 @@ end
 """
     right_face_range(halo, dim)
 
-Return the owned-cell slab adjacent to the upper ghost side in dimension `dim`.
-For a face loop this is the lower-index cell range of the right boundary faces
-`owned | ghost`.
+Return the upper-side boundary face cells in dimension `dim`.
+
+These are owned cells adjacent to the upper ghost side. In a face loop, pair
+each index `IL` with `IR = IL + face_offset(halo, dim)` to visit the
+`owned | ghost` face.
 """
 function right_face_range(halo, dim::Int)
     _check_face_dim(halo, dim)
@@ -63,20 +69,19 @@ right_face_range(halo, ::Dim{D}) where {D} = right_face_range(halo, D)
 """
     FaceRanges(halo)
 
-Return Cartesian index ranges for face loops in all spatial dimensions.
+Precompute Cartesian index ranges and offsets for face loops.
 
-Each left/right range contains the lower/left cell of the face for a given
-dimension. The matching upper/right cell is obtained by adding
-`get_unit_vector(ranges, dim)`.
-For `MultiHaloArray` and `ArrayOfHaloArray`, the ranges and offset describe the
-spatial indices of each field; decompose the collection and apply them to the
-field arrays.
+The stored indices always identify the lower-index cell of a face. Add
+`get_unit_vector(ranges, dim)` to get the upper-index cell.
 
-- `get_left_face(ranges, dim)`: lower ghost cells for `ghost | owned` faces.
-- `get_internal_face(ranges)`: lower-index owned cells of internal faces.
-- `get_right_face(ranges, dim)`: upper owned cells for `owned | ghost` faces.
+For `MultiHaloArray` and `ArrayOfHaloArray`, the ranges are spatial only. Apply
+them after selecting an individual field.
 
-Example owned-cell-only face loop:
+- `get_left_face(ranges, dim)`: lower-side ghost cells.
+- `get_internal_face(ranges)`: dimension-independent owned-cell core.
+- `get_right_face(ranges, dim)`: upper-side owned cells.
+
+Minimal owned-cell update:
 
 ```julia
 ranges = FaceRanges(u)
@@ -111,15 +116,6 @@ struct FaceRanges{A,B,C,D,Halo}
     unit_vector::D
     halo::Halo
 end
-
-
-@inline function shift_range(r::AbstractUnitRange, s::Integer)
-    return (first(r) + s):(last(r) + s)
-end
-@inline function shift_ranges(ranges::NTuple{N,Any}, s::Integer) where {N}
-    return ntuple(d -> shift_range(ranges[d], s), Val(N))
-end
-
 
 function FaceRanges(halo)
     spatial_ndims = _face_spatial_ndims(halo)

@@ -3,15 +3,13 @@ abstract type AbstractBoundaryCondition end
 struct Reflecting <: AbstractBoundaryCondition end
 struct Antireflecting <: AbstractBoundaryCondition end
 struct Repeating <: AbstractBoundaryCondition end
-struct Periodic<: AbstractBoundaryCondition end
+struct Periodic <: AbstractBoundaryCondition end
 
-# -- Helper types --
 struct Side{S}; end
 @inline Side(s::Int) = Side{s}()
 
 struct Dim{D}; end
 @inline Dim(d::Int) = Dim{d}()
-# -- HaloArrays module (simplified inline) --
 
 
 struct HaloCommState{N}
@@ -116,42 +114,31 @@ end
 @inline Base.parent(halo::HaloArray) = halo.data
 
 
-isactive(a::HaloArray) = isactive(a.topology)
-
-
-
-
-# Factory minima: costruisce HaloArray da un array esistente, normalizza BC e crea buffer
 function build_haloarray_from_data(data::AbstractArray{T,N}, halo::Int, topology::CartesianTopology{N}, boundary_condition_raw) where {T,N}
  
-     # Normalizza la rappresentazione della BC (assume normalize_boundary_condition disponibile)
     bc = normalize_boundary_condition(boundary_condition_raw, N)
  
-    # type-stable NTuple buffers
     recv_bufs = make_recv_buffers(data, halo)
-   send_bufs = make_send_buffers(data, halo)
+    send_bufs = make_send_buffers(data, halo)
  
-     # verifica che la BC sia coerente con la topology
     validate_boundary_condition(topology, bc)
  
     comm_state = HaloCommState(N)
     HaloArray{T, N, typeof(data), halo, typeof(recv_bufs), typeof(bc)}(data, topology, comm_state, recv_bufs, send_bufs, bc)
- end
+end
 
-# Costruttore principale da array già pieno (mantiene il parent fornito)
+isactive(a::HaloArray) = isactive(a.topology)
+
 function HaloArray(data::AbstractArray{T,N}, halo::Int, topology::CartesianTopology{N}, boundary_condition) where {T,N}
     return build_haloarray_from_data(data, halo, topology, boundary_condition)
 end
 
-# Costruttore da tipo + owned interior sizes + topology (crea data zeros)
 function HaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int, topology::CartesianTopology{N}; boundary_condition=(ntuple(_ -> (Repeating(), Repeating()), Val(N)))) where {T,N}
     fullsize = ntuple(i -> owned_dims[i] + 2 * halo, Val(N))
     data = zeros(T, fullsize...)
-    # Delegate normalization to build_haloarray_from_data (single normalization point)
     return build_haloarray_from_data(data, halo, topology, boundary_condition)
 end
 
-# Costruttore che sceglie la topologia MPI automaticamente (usa MPI.COMM_WORLD)
 function HaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int, boundary_condition::NTuple{N,NTuple{2,AbstractBoundaryCondition}}) where {T,N}
     if !MPI.Initialized()
         MPI.Init()
@@ -166,14 +153,11 @@ end
 
 # Accept legacy positional boundary_condition argument (fifth positional arg)
 function HaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int, topology::CartesianTopology{N}, boundary_condition) where {T,N}
-    # normalize boundary condition (accept Symbols/Types/instances)
     bc_norm = normalize_boundary_condition(boundary_condition, N)
     return HaloArray(T, owned_dims, halo, topology; boundary_condition=bc_norm)
 end
 
 function HaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int; boundary_condition=(ntuple(_ -> (Repeating(), Repeating()), Val(N)))) where {T,N}
-    # Create a HaloArray without explicit topology (auto-choose topology). The auto-topology
-    # variant needs a normalized BC to infer periodicity, so normalize here and delegate.
     HaloArray(T, owned_dims, halo, normalize_boundary_condition(boundary_condition, N))
 end
 
@@ -192,11 +176,7 @@ function _global_to_owned_dims(halo::HaloArray{T,N}, dims::NTuple{M,<:Integer}) 
 end
 
 function Base.similar(halo::HaloArray{T,N,A,H,B,BCondition}, ::Type{AA},
-        dims::Dims{M}) where {T,N,A,H,B,BCondition,AA,M}    ## Create a new HaloArray with given global dims, preserving halo_width and topology
-    #HaloArray(element_type, dims ,halo_width(halo), halo.topology; boundary_condition=halo.boundary_condition)
-
-        # crea array fullsize (interior + halo) e costruisci HaloArray riutilizzando
-    # topology e boundary_condition esistenti tramite build_haloarray_from_data
+        dims::Dims{M}) where {T,N,A,H,B,BCondition,AA,M}
     owned_dims = _global_to_owned_dims(halo, dims)
     fullsize = ntuple(i -> owned_dims[i] + 2 * halo_width(halo), Val(N))
     data = similar(parent(halo), AA, fullsize)
@@ -213,24 +193,20 @@ Base.similar(halo::HaloArray, dims::Dims{M}) where {M} = similar(halo, eltype(ha
 Base.similar(halo::HaloArray, dims::NTuple{M,<:Integer}) where {M} =
     similar(halo, eltype(halo), dims)
 
-#this function is to give back a view of a generic array with singleton and on abstract array 
 @inline function get_send_view(::Side{1}, ::Dim{D}, array::AbstractArray, halo::Int) where {D}
     send_range = (halo + 1):(2 * halo)
-    #indices = ntuple(I -> I == D ? send_range : Colon(), Val(ndims(array)))
     indices = ntuple(I -> I == D ? send_range : (halo+1):(size(array,I)-halo), Val(ndims(array)))
     view(array, indices...)
 end
 
 @inline function get_send_view(::Side{2}, ::Dim{D}, array::AbstractArray, halo::Int) where {D}
     send_range = (size(array, D) - 2 * halo + 1):(size(array, D) - halo)
-    #indices = ntuple(I -> I == D ? send_range : Colon(), Val(ndims(array)))
     indices = ntuple(I -> I == D ? send_range : (halo+1):(size(array,I)-halo), Val(ndims(array)))
     view(array, indices...)
 end
 
 function get_recv_view(::Side{1}, ::Dim{D}, array::AbstractArray, halo::Int) where {D}
     recv_range = 1:halo
-    #indices = ntuple(I -> I == D ? recv_range : Colon(), Val(ndims(array)))
     indices = ntuple(ndims(array)) do I 
         if I == D 
             recv_range
@@ -243,13 +219,10 @@ end
 
 @inline function get_recv_view(::Side{2}, ::Dim{D}, array::AbstractArray, halo::Int) where {D}
     recv_range = (size(array, D) - halo + 1):(size(array, D))
-    #indices = ntuple(I -> I == D ? recv_range : Colon(), Val(ndims(array)))
     indices = ntuple(I -> I == D ? recv_range : (halo+1):(size(array,I)-halo), ndims(array))
     view(array, indices...)
 end
 
-
-#this are the function specialized for HaloArray
 @inline function get_send_view(::Side{1}, ::Dim{D}, array::HaloArray{T,N,A,Halo,B,BCondition}) where {D, T,N,A,Halo,B,BCondition}
     send_range = (halo_width(array) + 1):(2 * halo_width(array))
     indices = ntuple(I -> I == D ? send_range : (halo_width(array)+1):(storage_size(array,I)-halo_width(array)), Val(N))
@@ -274,7 +247,6 @@ end
     view(parent(array), indices...)
 end
 
-#this are the function specialized for HaloArray and the dimension as Int for perfomance resons
 @inline function get_send_view(::Side{1}, D::Int, array::HaloArray{T,N,A,Halo,B,BCondition}) where { T, N,A,Halo,B,BCondition}
     send_range = (halo_width(array) + 1):(2 * halo_width(array))
     indices = ntuple(I -> I == D ? send_range : (halo_width(array)+1):(storage_size(array,I)-halo_width(array)), Val(N))
@@ -300,7 +272,6 @@ end
 end
 
 
-# --- Helper to get interior or full data for broadcast ---
 @inline function interior_range(halo::HaloArray)
     h = halo_width(halo)
     N=ndims(halo)
@@ -347,18 +318,14 @@ function global_to_storage_index(halo::HaloArray, global_idx::NTuple{N,<:Integer
     coords = halo.topology.cart_coords
     h = halo_width(halo)
 
-    # Compute which tile should own this global index
     owner_coords = ntuple(i -> (global_idx[i] - 1) ÷ owned_dims[i], Val(N))
 
-    # If this rank doesn't own it, return nothing
     if owner_coords != coords
         return nothing
     end
 
-    # Compute the owned interior index
     interior_idx = ntuple(i -> global_idx[i] - coords[i] * owned_dims[i], Val(N))
 
-    # Convert to storage index (i.e., add halo)
     storage_idx = ntuple(i -> interior_idx[i] + h, Val(N))
     return storage_idx
 end
@@ -394,32 +361,6 @@ end
     owned_dims = interior_size(halo)
     ntuple(i -> (global_idx[i] - 1) ÷ owned_dims[i], Val(N))
 end
-
-#function local_offset(halo::HaloArray)
-#    size_local =interior_size(halo)
-#    return ntuple(i -> halo.topology.cart_coords[i] * size_local[i], Val(ndims(halo)))
-#end
-#
-#
-#function owns_global_index(halo::HaloArray, global_idx::NTuple{N,Int}) where {N}
-#    offset = local_offset(halo)
-#    size =interior_size(halo)
-#
-#    return all(i -> (offset[i] < global_idx[i] ≤ offset[i] + size[i]), 1:N)
-#end
-#
-#
-#function global_to_storage_index(halo::HaloArray, global_idx::NTuple{N,Int}) where {N}
-#    if !owns_global_index(halo, global_idx)
-#        return nothing
-#    end
-#
-#    offset = local_offset(halo)
-#    h = halo_width(halo)
-#
-#    return ntuple(i -> (global_idx[i] - offset[i]) + h[i], Val(N))
-#end
-
 
 @inline function versors(::Val{N}) where { N}
     return ntuple(i -> ntuple(j -> ifelse(i == j, 1, 0), Val(N)), Val(N))
@@ -543,7 +484,6 @@ function fill_from_local_indices!(f,halo::HaloArray)
 end
 
 
-# 2-argument show, used by Array show, print(obj) and repr(obj), keep it short
 function Base.show(io::IO, obj::HaloArray)
     print(io, "HaloArray of global size ", size(obj), " (owned size: ", owned_size(obj), ", storage size: ", storage_size(obj), "), halo width: ", halo_width(obj), "\n")
     print(io, "  eltype: ", eltype(obj), "\n")
@@ -551,14 +491,11 @@ function Base.show(io::IO, obj::HaloArray)
     print(io, "  boundary_condition: ", obj.boundary_condition, "\n")
 end
 
-# the 3-argument show used by display(obj) on the REPL
 function Base.show(io::IO, mime::MIME"text/plain", obj::HaloArray)
-    # Show a more detailed, pretty-printed summary for REPL and text/plain
     println(io, "HaloArray (storage size: ", storage_size(obj), ", halo width: ", halo_width(obj), ")")
     println(io, "  eltype: ", eltype(obj))
     println(io, "  topology: ", obj.topology)
     println(io, "  boundary_condition: ", obj.boundary_condition)
-    # Optionally, show a preview of the interior data
     println(io, "  interior data preview:")
     show(io, mime, interior_view(obj))
 end
@@ -571,17 +508,15 @@ function global_size(halo::HaloArray)
     return ntuple(i -> local_interior[i] * dims[i], Val(N))
 end
 
-# Helper: validate boundary_condition vs topology (semplificata)
 function validate_boundary_condition(topology::CartesianTopology{N}, boundary_condition) where {N}
 
     if !isactive(topology)
-        return true  # No need to validate if topology is inactive
+        return true
     end
 
     for d in 1:N
         left, right = boundary_condition[d]
 
-        # type check
         if !(left isa AbstractBoundaryCondition) || !(right isa AbstractBoundaryCondition)
             error("boundary_condition[$d] must be a tuple of AbstractBoundaryCondition (got $(left), $(right))")
         end
@@ -601,7 +536,6 @@ function validate_boundary_condition(topology::CartesianTopology{N}, boundary_co
     return true
 end
 
-# Helper: crea NTuple{N,NTuple{2,ArrayLike}} di receive/send buffer (type-stable)
 function make_recv_buffers(data::AbstractArray{T,N}, halo::Int) where {T,N}
     ntuple(D -> ntuple(S -> similar(get_recv_view(Side(S), Dim(D), data, halo)), Val(2)), Val(N))
 end

@@ -9,7 +9,6 @@ MaybeHaloArray(a::A) where {T,N,A<:AbstractHaloArray{T,N}} =
 
 
 
-# delegazioni di funzioni comunemente usate (inoltrate a data quando active)
 Base.size(m::MaybeHaloArray) = global_size(m)
 owned_size(m::MaybeHaloArray) = owned_size(m.data)
 owned_axes(m::MaybeHaloArray) = owned_axes(m.data)
@@ -20,10 +19,8 @@ Base.parent(m::MaybeHaloArray) = m.data
 Base.axes(m::MaybeHaloArray) = axes(m.data)
 Base.axes(m::MaybeHaloArray, i::Int) = axes(m.data, i)
 
-# ndims sul tipo MaybeHaloArray: delega al tipo interno A
 Base.ndims(::Type{<:MaybeHaloArray{T,N,A}}) where {T,N,A} = N
 
-# ndims sull'istanza MaybeHaloArray delega al tipo
 Base.ndims(m::MaybeHaloArray{T,N,A}) where {T,N,A} = N
 
 @inline halo_width(::Type{<:MaybeHaloArray{T,N,A}}) where {T,N,A} = halo_width(A)
@@ -47,7 +44,6 @@ function Base.setindex!(m::MaybeHaloArray, value, I::Vararg{Integer})
     return m
 end
 
-# show
 function Base.show(io::IO, m::MaybeHaloArray)
     if m.active
         print(io, "MaybeHaloArray(active) -> ")
@@ -57,7 +53,6 @@ function Base.show(io::IO, m::MaybeHaloArray)
     end
 end
 
-# utility helpers
 isactive(m::MaybeHaloArray) = m.active
 getdata(m::MaybeHaloArray) = m.data
 function unwrap(m::MaybeHaloArray)
@@ -97,8 +92,6 @@ macro maybe_delegate(funs...)
     return Expr(:block, bodies...)
 end
 
-# similar(m, T): crea un MaybeHaloArray il cui inner è `similar(m.data, T)`,
-# preservando il flag `active` del wrapper.
 function Base.similar(m::MaybeHaloArray, ::Type{T}) where {T}
     inner_sim = similar(m.data, T)
     return MaybeHaloArray(inner_sim, m.active)
@@ -116,14 +109,11 @@ Base.similar(m::MaybeHaloArray, dims::Dims{N}) where {N} = similar(m, eltype(m),
 Base.similar(m::MaybeHaloArray, dims::NTuple{N,<:Integer}) where {N} =
     similar(m, eltype(m), dims)
 
-# similar(m): crea un MaybeHaloArray con inner = similar(m.data)
-# preserva lo stato `active`
 function Base.similar(m::MaybeHaloArray)
     inner_sim = similar(m.data)
     return MaybeHaloArray(inner_sim, m.active)
 end
 
-# copy(m): copia profonda del wrapper; preserva `active`
 function Base.copy(m::MaybeHaloArray)
     newdata = copy(m.data)
     return MaybeHaloArray(newdata, m.active)
