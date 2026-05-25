@@ -86,14 +86,15 @@ mpiexec -n 4 julia --project=examples examples/linear_advection_diffeq_1d.jl
 
 ## Scalar Field Heat Bath
 
-This example runs a simple 2D free scalar field heat-bath update with
-checkerboard sweeps and periodic halo synchronization. It also shows the same
-sweep on named fields with `MultiHaloArray` and on replica fields with
-`ArrayOfHaloArray`.
+These examples run a simple 2D free scalar field heat-bath update with
+checkerboard sweeps and periodic halo synchronization. The local/threaded
+example also shows named fields with `MultiHaloArray` and replica fields with
+`ArrayOfHaloArray`; the MPI example shows the same collection wrappers across
+MPI ranks.
 
 ```bash
-julia --project=. examples/scalar_field_heatbath_2d.jl
-mpiexec -n 4 julia --project=. examples/scalar_field_heatbath_2d.jl
+julia --project=. examples/scalar_field_heatbath_local_threaded_2d.jl
+mpiexec -n 4 julia --project=. examples/scalar_field_heatbath_mpi_2d.jl
 ```
 
 ## DiffEq Examples
