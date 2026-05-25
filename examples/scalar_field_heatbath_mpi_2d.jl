@@ -8,9 +8,14 @@ function main()
     topology = CartesianTopology(MPI.COMM_WORLD, (0, 0); periodic=(true, true))
 
     mpi_phi = HaloArray(Float64, owned_cells, 1, topology; boundary_condition=:periodic)
-    run_heatbath!(mpi_phi, heatbath_rng(mpi_phi, 1234), p; sweeps)
+    mpi_history = Float64[]
+    run_heatbath!(mpi_phi, heatbath_rng(mpi_phi, 1234), p; sweeps, history=mpi_history)
     mpi_obs = observables(mpi_phi)
-    rank == 0 && print_observables("HaloArray MPI", mpi_phi, mpi_obs)
+    if rank == 0
+        print_observables("HaloArray MPI", mpi_phi, mpi_obs)
+        print_free_scalar_check("HaloArray MPI", mpi_phi, mpi_obs, p)
+        print_magnetization_trace("HaloArray MPI", mpi_history)
+    end
 
     mpi_fields = MultiHaloArray(Float64, owned_cells, 1, topology;
         boundary_conditions=(phi=:periodic, chi=:periodic))

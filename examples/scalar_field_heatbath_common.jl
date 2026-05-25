@@ -90,18 +90,38 @@ function heatbath_sweep!(phi, rng, p)
     return phi
 end
 
-function run_heatbath!(phi, rng, p; sweeps=50)
+function record_magnetization!(history, phi)
+    isnothing(history) || push!(history, observables(phi).mean)
+    return history
+end
+
+function run_heatbath!(phi, rng, p; sweeps=50, history=nothing)
     fill!(phi, zero(eltype(phi)))
     synchronize_halo!(phi)
+    record_magnetization!(history, phi)
 
     for _ in 1:sweeps
         heatbath_sweep!(phi, rng, p)
+        record_magnetization!(history, phi)
     end
 
     return phi
 end
 
 observables(phi) = (; mean=sum(phi) / length(phi), phi2=sum(abs2, phi) / length(phi))
+
+function exact_free_scalar_phi2(n::NTuple{2,<:Integer}, p)
+    total = 0.0
+
+    for j in 0:(n[2] - 1), i in 0:(n[1] - 1)
+        kx = 2 * pi * i / n[1]
+        ky = 2 * pi * j / n[2]
+        denom = p.mass2 + 4 * p.kappa - 2 * p.kappa * (cos(kx) + cos(ky))
+        total += inv(denom)
+    end
+
+    return total / prod(n)
+end
 
 heatbath_rng(phi::LocalHaloArray, seed) = MersenneTwister(seed)
 heatbath_rng(phi::HaloArray, seed) = MersenneTwister(seed + MPI.Comm_rank(get_comm(phi)))
@@ -123,5 +143,32 @@ end
 
 function print_observables(label, phi, obs)
     @printf("%-22s size=%s mean=% .6e phi2=%.6e\n", label, string(global_size(phi)), obs.mean, obs.phi2)
+    return nothing
+end
+
+function print_free_scalar_check(label, phi, obs, p)
+    exact = exact_free_scalar_phi2(global_size(phi), p)
+    relerr = abs(obs.phi2 - exact) / exact
+    @printf("%-22s exact_phi2=%.6e relerr=%.3e\n", label, exact, relerr)
+    return nothing
+end
+
+function print_magnetization_trace(label, history; width=48)
+    isempty(history) && return nothing
+
+    min_m = minimum(history)
+    max_m = maximum(history)
+    span = max(max_m - min_m, eps(Float64))
+    stride = max(1, cld(length(history), width))
+
+    @printf("\n%s magnetization trace\n", label)
+    @printf("  min=% .3e max=% .3e final=% .3e\n", min_m, max_m, last(history))
+
+    for i in 1:stride:length(history)
+        value = history[i]
+        pos = 1 + floor(Int, (value - min_m) / span * (width - 1))
+        @printf("%4d |%s*\n", i - 1, repeat(" ", pos - 1))
+    end
+
     return nothing
 end
