@@ -67,6 +67,23 @@ julia --project=. examples/burgers_1d.jl
 mpiexec -n 4 julia --project=. examples/burgers_mpi_1d.jl
 ```
 
+The same semi-discrete finite-volume RHS can also be stepped by OrdinaryDiffEq:
+
+```bash
+julia --project=examples examples/burgers_diffeq_1d.jl
+mpiexec -n 4 julia --project=examples examples/burgers_diffeq_1d.jl
+```
+
+## Linear Advection With DiffEq
+
+This example solves periodic 1D linear advection with an upwind finite-volume
+flux and steps the semi-discrete system with OrdinaryDiffEq.
+
+```bash
+julia --project=examples examples/linear_advection_diffeq_1d.jl
+mpiexec -n 4 julia --project=examples examples/linear_advection_diffeq_1d.jl
+```
+
 ## DiffEq Examples
 
 The DiffEq examples use `DiffEqBase` and `OrdinaryDiffEq` from

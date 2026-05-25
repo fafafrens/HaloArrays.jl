@@ -40,6 +40,7 @@ end
         include_test("test_hdf5_local_threaded.jl")
         if HAS_DIFFEQ_TEST_DEPS
             include_test("test_ode.jl")
+            include_test("test_linear_advection_diffeq.jl")
         else
             @info "Skipping DiffEq tests because optional test dependencies are unavailable"
         end
