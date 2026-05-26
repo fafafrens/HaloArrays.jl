@@ -74,6 +74,29 @@ julia --project=examples examples/burgers_diffeq_1d.jl
 mpiexec -n 4 julia --project=examples examples/burgers_diffeq_1d.jl
 ```
 
+## Ideal Hydro
+
+These examples start a 2D non-relativistic ideal hydrodynamics setup using
+conservative variables, periodic halos, first-order Rusanov fluxes, and
+`OrdinaryDiffEq`.
+
+```bash
+julia --project=examples examples/ideal_hydro_local_2d.jl
+JULIA_NUM_THREADS=4 julia --project=examples examples/ideal_hydro_threaded_2d.jl
+mpiexec -n 4 julia --project=examples examples/ideal_hydro_mpi_2d.jl
+```
+
+To write an SVG comparing the initial and final density/pressure fields:
+
+```bash
+julia --project=examples examples/ideal_hydro_plot_2d.jl
+```
+
+The threaded hydro example chooses a 2D tile decomposition that divides the
+problem size and whose tile count is equal to `Threads.nthreads()`. If
+`tile_dims` is supplied manually, it must satisfy
+`prod(tile_dims) == Threads.nthreads()`.
+
 ## Linear Advection With DiffEq
 
 This example solves periodic 1D linear advection with an upwind finite-volume

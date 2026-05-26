@@ -33,6 +33,7 @@ end
         include_test("test_local_haloarray.jl")
         include_test("test_threaded_haloarray.jl")
         include_test("test_heat_diffusion_examples.jl")
+        include_test("test_ideal_hydro_example.jl")
         include_test("test_mharray.jl")
         include_test("test_arrayofhaloarray.jl")
         include_test("test_maybe_broadcast.jl")
