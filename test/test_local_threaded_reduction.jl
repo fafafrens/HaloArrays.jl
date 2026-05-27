@@ -51,6 +51,7 @@ using HaloArrays
     interior_view(threaded_v, 2) .= [40, 50, 60]
 
     @test mapreduce(identity, +, threaded_u) == 21
+    @test @inferred(mapreduce(identity, +, threaded_u)) == 21
     @test reduce(+, threaded_u) == 21
     @test sum(threaded_u) == 21
     @test sum(abs2, threaded_u) == 91
@@ -59,6 +60,7 @@ using HaloArrays
     @test mapfoldl(abs2, +, threaded_u) == 91
     @test mapfoldr(abs2, +, threaded_u) == 91
     @test mapreduce((x, y) -> x * y, +, threaded_u, threaded_v) == 910
+    @test @inferred(mapreduce((x, y) -> x * y, +, threaded_u, threaded_v)) == 910
     @test mapreduce(x -> x[1] * x[2], +, zip(threaded_u, threaded_v)) == 910
     @test all(x -> x > 0, threaded_u)
     @test any(x -> x == 6, threaded_u)
@@ -70,6 +72,7 @@ using HaloArrays
 
     threaded_fields = MultiHaloArray((; u=threaded_u, v=threaded_v))
     @test mapreduce(identity, +, threaded_fields) == 231
+    @test @inferred(mapreduce(identity, +, threaded_fields)) == 231
     @test sum(threaded_fields) == 231
     @test maximum(threaded_fields) == 60
     @test minimum(threaded_fields) == 1

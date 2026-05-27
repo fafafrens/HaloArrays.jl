@@ -41,6 +41,13 @@ function _combine_threaded_reduction(op, values)
     return result
 end
 
+function _combine_threaded_reduction(op, result, values)
+    for value in values
+        result = op(result, value)
+    end
+    return result
+end
+
 for func in (:mapreduce, :mapfoldl, :mapfoldr)
     @eval function Base.$func(
             f::F, op::OP, halo::LocalHaloArray, etc::Vararg{LocalHaloArray}; kws...,
@@ -59,11 +66,16 @@ for func in (:mapreduce, :mapfoldl, :mapfoldr)
     @eval function Base.$func(
             f::F, op::OP, halo::ThreadedHaloArray, etc::Vararg{ThreadedHaloArray}; kws...,
         ) where {F<:Function, OP}
-        tile_results = tmap(1:tile_count(halo); scheduler=:static) do tile_id
+        ntile = tile_count(halo)
+        first_interiors = map(h -> interior_view(h, 1), (halo, etc...))
+        first_result = $func(f, op, first_interiors...; kws...)
+        ntile == 1 && return first_result
+
+        tile_results = tmap(typeof(first_result), 2:ntile; scheduler=:static) do tile_id
             interiors = map(h -> interior_view(h, tile_id), (halo, etc...))
             $func(f, op, interiors...; kws...)
         end
-        return _combine_threaded_reduction(op, tile_results)
+        return _combine_threaded_reduction(op, first_result, tile_results)
     end
 
     @eval function Base.$func(

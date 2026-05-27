@@ -36,6 +36,18 @@ Benchmarks `mapreduce`, `all`, and `any` for `HaloArray`, `LocalHaloArray`,
 mpiexec -n 4 julia --project=. benchmarks/reductions.jl --owned-size=128,128 --tile-dims=2,2
 ```
 
+## Ideal Hydro
+
+Benchmarks the 2D ideal-hydrodynamics example with `LocalMultiHaloArray`,
+`ThreadedMultiHaloArray`, and MPI `MultiHaloArray`. The output includes full-run
+allocation bytes and diagnostics for the package-owned fill, RHS, and
+wave-speed reduction kernels.
+
+```sh
+JULIA_NUM_THREADS=4 julia --project=. benchmarks/ideal_hydro.jl --cases=local,threaded --nx=128 --ny=128 --tile-dims=2,2
+mpiexec -n 4 julia --project=. benchmarks/ideal_hydro.jl --cases=mpi --nx=128 --ny=128
+```
+
 ## Gather And HDF5
 
 Benchmarks MPI gather and HDF5 write paths.
