@@ -2,11 +2,16 @@ using Test
 using MPI
 using HaloArrays
 
+if !MPI.Initialized()
+    MPI.Init()
+end
+
 @testset "CartesianTopology" begin
     @testset "inactive topology" begin
         topology = HaloArrays.inactive_cartesian_topology((2, 3))
 
         @test !isactive(topology)
+        @test !is_root(topology)
         @test topology.dims == (2, 3)
         @test topology.global_rank == MPI.PROC_NULL
         @test topology.cart_coords == (MPI.PROC_NULL, MPI.PROC_NULL)
@@ -19,6 +24,8 @@ using HaloArrays
         topology = CartesianTopology(MPI.COMM_SELF, (1, 1, 1); periodic=(false, true, false))
 
         @test isactive(topology)
+        @test is_root(topology)
+        @test !is_root(topology; root=1)
         @test topology.nprocs == 1
         @test topology.dims == (1, 1, 1)
         @test topology.global_rank == 0

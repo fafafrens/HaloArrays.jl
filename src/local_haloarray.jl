@@ -35,6 +35,7 @@ end
 @inline Base.iterate(halo::LocalHaloArray, state) = iterate(interior_view(halo), state)
 
 isactive(::LocalHaloArray) = true
+is_root(::LocalHaloArray; root::Integer=0) = (root == 0)
 get_comm(::LocalHaloArray) = nothing
 
 @inline halo_width(::Type{<:LocalHaloArray{T,N,A,Halo}}) where {T,N,A,Halo} = Halo

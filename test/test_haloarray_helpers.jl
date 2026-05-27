@@ -148,4 +148,21 @@ struct CustomBoundaryForTest <: HaloArrays.AbstractBoundaryCondition end
         @test parent(du)[end] == 0
     end
 
+    @testset "is_root array fallbacks" begin
+        topology = CartesianTopology(MPI.COMM_SELF, (1,); periodic=(false,))
+        distributed = HaloArray(Float64, (4,), 1, topology; boundary_condition=:repeating)
+        local_field = LocalHaloArray(Float64, (4,), 1; boundary_condition=:repeating)
+        threaded = ThreadedHaloArray(Float64, (4,), 1; dims=(2,), boundary_condition=:repeating)
+        fields = MultiHaloArray((; rho=local_field, mom=similar(local_field)))
+        array_fields = ArrayOfHaloArray([local_field, similar(local_field)])
+
+        @test is_root(distributed)
+        @test is_root(local_field)
+        @test is_root(threaded)
+        @test is_root(fields)
+        @test is_root(array_fields)
+        @test is_root(MaybeHaloArray(local_field))
+        @test !is_root(distributed; root=1)
+    end
+
 end

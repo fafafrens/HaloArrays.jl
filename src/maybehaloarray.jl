@@ -54,6 +54,8 @@ function Base.show(io::IO, m::MaybeHaloArray)
 end
 
 isactive(m::MaybeHaloArray) = m.active
+is_root(m::MaybeHaloArray; root::Integer=0) =
+    isactive(m) && is_root(getdata(m); root=root)
 getdata(m::MaybeHaloArray) = m.data
 function unwrap(m::MaybeHaloArray)
     if m.active

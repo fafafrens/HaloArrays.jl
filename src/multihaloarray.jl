@@ -283,6 +283,10 @@ function isactive(mha::MultiHaloArray)
     return all(isactive, values(mha.arrays))
 end
 
+function is_root(mha::MultiHaloArray; root::Integer=0)
+    return is_root(first(values(mha.arrays)); root=root)
+end
+
 function active_fields(mha::MultiHaloArray)
     return (; (name => isactive(ha) for (name, ha) in mha.arrays)...)
 end

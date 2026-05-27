@@ -10,6 +10,8 @@ if !MPI.Initialized()
     MPI.Init()
 end
 
+const _HydroSerialArray = Union{HaloArray,LocalHaloArray}
+
 ideal_hydro_boundary_conditions(boundary_condition) = (;
     rho=boundary_condition,
     mx=boundary_condition,
@@ -112,13 +114,11 @@ end
 function ideal_hydro_rhs!(du, u, p, t)
     fill!(du, zero(eltype(du)))
     synchronize_halo!(u)
-
-    if u[:rho] isa ThreadedHaloArray
-        return _ideal_hydro_rhs_threaded!(du, u, p)
-    else
-        return _ideal_hydro_rhs_serial!(du, u, p)
-    end
+    return _ideal_hydro_rhs!(du, u, p, u[:rho])
 end
+
+_ideal_hydro_rhs!(du, u, p, ::ThreadedHaloArray) = _ideal_hydro_rhs_threaded!(du, u, p)
+_ideal_hydro_rhs!(du, u, p, ::_HydroSerialArray) = _ideal_hydro_rhs_serial!(du, u, p)
 
 function initial_hydro_state(global_i, global_j, nx, ny, gamma)
     x = (global_i - 0.5) / nx
@@ -135,12 +135,14 @@ function initial_hydro_state(global_i, global_j, nx, ny, gamma)
 end
 
 function fill_pressure_bump!(u; gamma=1.4)
-    if u[:rho] isa ThreadedHaloArray
-        return fill_pressure_bump_threaded!(u; gamma)
-    else
-        return fill_pressure_bump_serial!(u; gamma)
-    end
+    return fill_pressure_bump!(u, u[:rho]; gamma)
 end
+
+fill_pressure_bump!(u, ::ThreadedHaloArray; gamma=1.4) =
+    fill_pressure_bump_threaded!(u; gamma)
+
+fill_pressure_bump!(u, ::_HydroSerialArray; gamma=1.4) =
+    fill_pressure_bump_serial!(u; gamma)
 
 function fill_pressure_bump_serial!(u; gamma=1.4)
     nx, ny = global_size(u[:rho])
@@ -190,50 +192,32 @@ function fill_pressure_bump_threaded!(u; gamma=1.4)
     return u
 end
 
-function _local_max_signal_speed(data, range, gamma)
-    speed = 0.0
-
-    @inbounds for I in CartesianIndices(range)
-        U = conserved_cell(data, I)
-        speed = max(speed, max_wave_speed(U, 1, gamma), max_wave_speed(U, 2, gamma))
-    end
-
-    return speed
-end
-
 function max_signal_speed(u, gamma)
-    if u[:rho] isa ThreadedHaloArray
-        range = interior_range(u[:rho])
-        local_speed = tmapreduce(tile_id -> _local_max_signal_speed(tile_parent(u, tile_id), range, gamma),
-            max, 1:tile_count(u); scheduler=:static)
-    else
-        local_speed = _local_max_signal_speed(parent(u), interior_range(u[:rho]), gamma)
-    end
-
-    return u[:rho] isa HaloArray ? MPI.Allreduce(local_speed, max, get_comm(u[:rho])) : local_speed
-end
-
-function _local_min_pressure(data, range, gamma)
-    pressure_min = Inf
-
-    @inbounds for I in CartesianIndices(range)
-        _, _, _, pressure, _ = primitive(conserved_cell(data, I), gamma)
-        pressure_min = min(pressure_min, pressure)
-    end
-
-    return pressure_min
+    return mapreduce(
+        (rho, mx, my, energy) -> begin
+            U = SVector(rho, mx, my, energy)
+            max(max_wave_speed(U, 1, gamma), max_wave_speed(U, 2, gamma))
+        end,
+        max,
+        u[:rho],
+        u[:mx],
+        u[:my],
+        u[:energy],
+    )
 end
 
 function min_pressure(u, gamma)
-    if u[:rho] isa ThreadedHaloArray
-        range = interior_range(u[:rho])
-        local_min = tmapreduce(tile_id -> _local_min_pressure(tile_parent(u, tile_id), range, gamma),
-            min, 1:tile_count(u); scheduler=:static)
-    else
-        local_min = _local_min_pressure(parent(u), interior_range(u[:rho]), gamma)
-    end
-
-    return u[:rho] isa HaloArray ? MPI.Allreduce(local_min, min, get_comm(u[:rho])) : local_min
+    return mapreduce(
+        (rho, mx, my, energy) -> begin
+            _, _, _, pressure, _ = primitive(SVector(rho, mx, my, energy), gamma)
+            pressure
+        end,
+        min,
+        u[:rho],
+        u[:mx],
+        u[:my],
+        u[:energy],
+    )
 end
 
 function hydro_diagnostics(u; gamma, dx, dy)
@@ -292,8 +276,6 @@ function run_ideal_hydro_2d!(u; gamma=1.4, cfl=0.25, steps=80, adaptive=true, re
 
     return u, info, initial, final
 end
-
-is_root(u) = !(u[:rho] isa HaloArray) || MPI.Comm_rank(get_comm(u[:rho])) == 0
 
 function print_hydro_summary(label, u, info, initial, final)
     if is_root(u)

@@ -298,6 +298,10 @@ function isactive(mha::ArrayOfHaloArray)
     return all(isactive, mha.arrays)
 end
 
+function is_root(mha::ArrayOfHaloArray; root::Integer=0)
+    return is_root(first(mha.arrays); root=root)
+end
+
 function Base.all(f::F, mha::ArrayOfHaloArray) where {F<:Function}
     return all(field -> all(f, field), mha.arrays)
 end
