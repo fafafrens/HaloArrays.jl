@@ -135,7 +135,7 @@ ThreadedHaloArray(tile_size::NTuple{N,<:Integer}, halo::Integer; kwargs...) wher
 @inline tile_coordinates(halo::ThreadedHaloArray, tile_id::Integer) = tile_coordinates(halo.topology, tile_id)
 @inline global_size(halo::ThreadedHaloArray) = owned_size(halo)
 @inline isactive(::ThreadedHaloArray) = true
-@inline is_root(::ThreadedHaloArray; root::Integer=0) = true
+@inline is_root(halo::ThreadedHaloArray; root::Integer=0) = is_root(halo.topology; root=root)
 @inline get_comm(::ThreadedHaloArray) = nothing
 
 @inline function _threaded_global_to_tile_index(halo::ThreadedHaloArray{T,N}, I) where {T,N}
