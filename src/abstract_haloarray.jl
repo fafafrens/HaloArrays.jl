@@ -32,6 +32,7 @@ looping over data that this process can update directly.
 function storage_size end
 function owned_to_global_index end
 function global_to_storage_index end
+function is_root end
 
 @inline function _check_global_scalar_indices(halo::AbstractHaloArray, I::Tuple)
     length(I) == ndims(halo) || throw(BoundsError(halo, I))

@@ -86,6 +86,16 @@ function isactive(cart::CartesianTopology)
 end
 
 """
+    is_root(cart::CartesianTopology; root=0)
+
+Return `true` on the root rank of an active MPI Cartesian topology.
+Inactive topologies are never roots.
+"""
+function is_root(cart::CartesianTopology; root::Integer=0)
+    return isactive(cart) && MPI.Comm_rank(cart.cart_comm) == root
+end
+
+"""
     coords_to_color_multi(coords, dims, dims_to_remove) -> Int
 
 Compute an integer `color` for `MPI.Comm_split` by compressing the coordinates

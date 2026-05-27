@@ -128,6 +128,7 @@ function build_haloarray_from_data(data::AbstractArray{T,N}, halo::Int, topology
 end
 
 isactive(a::HaloArray) = isactive(a.topology)
+is_root(a::HaloArray; root::Integer=0) = is_root(a.topology; root=root)
 
 function HaloArray(data::AbstractArray{T,N}, halo::Int, topology::CartesianTopology{N}, boundary_condition) where {T,N}
     return build_haloarray_from_data(data, halo, topology, boundary_condition)

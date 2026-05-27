@@ -53,6 +53,7 @@ function ThreadedCartesianTopology(dims::NTuple{N,<:Integer}; periodic=ntuple(_ 
 end
 
 @inline Base.ndims(::ThreadedCartesianTopology{N}) where {N} = N
+@inline is_root(::ThreadedCartesianTopology; root::Integer=0) = true
 @inline tile_count(topology::ThreadedCartesianTopology) = prod(topology.dims)
 @inline tile_coordinates(topology::ThreadedCartesianTopology, tile_id::Integer) = topology.tile_coords[tile_id]
 @inline neighbor_tile_id(topology::ThreadedCartesianTopology, tile_id::Integer, dim::Integer, side::Integer) =
@@ -134,6 +135,7 @@ ThreadedHaloArray(tile_size::NTuple{N,<:Integer}, halo::Integer; kwargs...) wher
 @inline tile_coordinates(halo::ThreadedHaloArray, tile_id::Integer) = tile_coordinates(halo.topology, tile_id)
 @inline global_size(halo::ThreadedHaloArray) = owned_size(halo)
 @inline isactive(::ThreadedHaloArray) = true
+@inline is_root(::ThreadedHaloArray; root::Integer=0) = true
 @inline get_comm(::ThreadedHaloArray) = nothing
 
 @inline function _threaded_global_to_tile_index(halo::ThreadedHaloArray{T,N}, I) where {T,N}
