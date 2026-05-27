@@ -56,6 +56,7 @@ end
 isactive(m::MaybeHaloArray) = m.active
 is_root(m::MaybeHaloArray; root::Integer=0) =
     isactive(m) && is_root(getdata(m); root=root)
+halo_backend(m::MaybeHaloArray) = halo_backend(getdata(m))
 getdata(m::MaybeHaloArray) = m.data
 function unwrap(m::MaybeHaloArray)
     if m.active

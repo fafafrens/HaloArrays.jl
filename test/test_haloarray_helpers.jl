@@ -165,4 +165,24 @@ struct CustomBoundaryForTest <: HaloArrays.AbstractBoundaryCondition end
         @test !is_root(distributed; root=1)
     end
 
+    @testset "halo_backend traits" begin
+        topology = CartesianTopology(MPI.COMM_SELF, (1,); periodic=(false,))
+        distributed = HaloArray(Float64, (4,), 1, topology; boundary_condition=:repeating)
+        local_field = LocalHaloArray(Float64, (4,), 1; boundary_condition=:repeating)
+        threaded = ThreadedHaloArray(Float64, (2,), 1; dims=(2,), boundary_condition=:repeating)
+
+        @test halo_backend(distributed) isa MPIHaloBackend
+        @test halo_backend(local_field) isa LocalHaloBackend
+        @test halo_backend(threaded) isa ThreadedHaloBackend
+        @test halo_backend(MultiHaloArray((; rho=distributed, mom=similar(distributed)))) isa MPIHaloBackend
+        @test halo_backend(MultiHaloArray((; rho=local_field, mom=similar(local_field)))) isa LocalHaloBackend
+        @test halo_backend(MultiHaloArray((; rho=threaded, mom=similar(threaded)))) isa ThreadedHaloBackend
+        @test halo_backend(ArrayOfHaloArray([local_field, similar(local_field)])) isa LocalHaloBackend
+        @test halo_backend(ArrayOfHaloArray([threaded, similar(threaded)])) isa ThreadedHaloBackend
+        @test halo_backend(MaybeHaloArray(threaded)) isa ThreadedHaloBackend
+
+        @test_throws ArgumentError MultiHaloArray((; rho=local_field, mom=threaded))
+        @test_throws ArgumentError ArrayOfHaloArray(Any[local_field, threaded])
+    end
+
 end

@@ -6,6 +6,22 @@ abstract type AbstractSerialHaloArray{T,N} <: AbstractSingleHaloArray{T,N} end
 
 abstract type AbstractHaloCollection{T,N} <: AbstractHaloArray{T,N} end
 
+abstract type AbstractHaloBackend end
+struct MPIHaloBackend <: AbstractHaloBackend end
+struct LocalHaloBackend <: AbstractHaloBackend end
+struct ThreadedHaloBackend <: AbstractHaloBackend end
+
+"""
+    halo_backend(x) -> AbstractHaloBackend
+
+Return a singleton trait describing the storage/execution backend of a halo
+array or halo collection. Use this for dispatch when code needs separate MPI,
+local, or threaded implementations while still accepting collection wrappers.
+"""
+function halo_backend end
+
+@inline halo_backend(halo::AbstractSingleHaloArray) = halo_backend(typeof(halo))
+
 """
     owned_size(halo)
 

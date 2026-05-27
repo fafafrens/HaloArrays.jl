@@ -28,6 +28,8 @@ MPI-backed features require an MPI runtime (OpenMPI or MPICH).
 - `MultiHaloArray`: named collection of MPI-backed halo fields.
 - `LocalMultiHaloArray`: named collection of local halo fields.
 - `CartesianTopology`: MPI Cartesian topology helper.
+- `halo_backend`: backend trait helper for dispatching on MPI, local, or
+  threaded storage.
 
 `size(u)` and `axes(u)` describe the global logical domain for every halo
 container. Local owned data is accessed through `owned_size(u)`, `owned_axes(u)`,
@@ -207,6 +209,29 @@ Use a multi-array container when:
 
 Keep independent arrays when fields require different halo widths, different grid layouts, or different topologies.
 
+## Backend Traits
+
+Use `halo_backend(u)` when an algorithm needs separate implementations for MPI,
+local, and threaded storage while still accepting collection wrappers. It returns
+one of:
+
+```julia
+MPIHaloBackend()
+LocalHaloBackend()
+ThreadedHaloBackend()
+```
+
+The trait is defined for `HaloArray`, `LocalHaloArray`, `ThreadedHaloArray`,
+`MultiHaloArray`, `ArrayOfHaloArray`, and `MaybeHaloArray`. Collections require
+all fields to use the same backend, so backend dispatch is unambiguous.
+
+```julia
+update!(du, u, p) = update!(halo_backend(u), du, u, p)
+
+update!(::Union{MPIHaloBackend,LocalHaloBackend}, du, u, p) = serial_update!(du, u, p)
+update!(::ThreadedHaloBackend, du, u, p) = threaded_update!(du, u, p)
+```
+
 ## Face Loops
 
 `FaceRanges(u)` gives the index ranges needed by finite-volume style face
@@ -248,6 +273,7 @@ part only; select a field first, then apply the ranges to that field.
 - Domain and layout: `interior_size`, `storage_size`, `halo_width`, `global_size`, `interior_range`
 - Index mapping: `owned_to_global_index`, `global_to_storage_index`
 - Face loops: `FaceRanges`, `get_left_face`, `get_internal_face`, `get_right_face`
+- Backend dispatch: `halo_backend`, `MPIHaloBackend`, `LocalHaloBackend`, `ThreadedHaloBackend`
 - Data movement and reduction: `gather_haloarray`, `mapreduce_haloarray_dims`
 - HDF5 helpers: `create_haloarray_output_file`, `write_haloarray_timestep!`, `gather_and_save_haloarray`
 

@@ -1,7 +1,7 @@
 using HaloArrays
 using DiffEqBase: ODEProblem
 using MPI
-using OhMyThreads: tforeach, tmapreduce
+using OhMyThreads: tforeach
 using OrdinaryDiffEq
 using Printf
 using StaticArrays
@@ -10,7 +10,7 @@ if !MPI.Initialized()
     MPI.Init()
 end
 
-const _HydroSerialArray = Union{HaloArray,LocalHaloArray}
+const _HydroFlatBackend = Union{MPIHaloBackend,LocalHaloBackend}
 
 ideal_hydro_boundary_conditions(boundary_condition) = (;
     rho=boundary_condition,
@@ -87,7 +87,7 @@ function apply_hydro_fluxes!(du_data, u_data, ranges::FaceRanges, dim, scale, ga
     return du_data
 end
 
-function _ideal_hydro_rhs_serial!(du, u, p)
+function _ideal_hydro_rhs!(::_HydroFlatBackend, du, u, p)
     ranges = FaceRanges(u)
     u_data = parent(u)
     du_data = parent(du)
@@ -98,7 +98,7 @@ function _ideal_hydro_rhs_serial!(du, u, p)
     return du
 end
 
-function _ideal_hydro_rhs_threaded!(du, u, p)
+function _ideal_hydro_rhs!(::ThreadedHaloBackend, du, u, p)
     ranges = FaceRanges(u)
 
     tforeach(1:tile_count(u); scheduler=:static) do tile_id
@@ -111,14 +111,13 @@ function _ideal_hydro_rhs_threaded!(du, u, p)
     return du
 end
 
+_ideal_hydro_rhs!(du, u, p) = _ideal_hydro_rhs!(halo_backend(u), du, u, p)
+
 function ideal_hydro_rhs!(du, u, p, t)
     fill!(du, zero(eltype(du)))
     synchronize_halo!(u)
-    return _ideal_hydro_rhs!(du, u, p, u[:rho])
+    return _ideal_hydro_rhs!(du, u, p)
 end
-
-_ideal_hydro_rhs!(du, u, p, ::ThreadedHaloArray) = _ideal_hydro_rhs_threaded!(du, u, p)
-_ideal_hydro_rhs!(du, u, p, ::_HydroSerialArray) = _ideal_hydro_rhs_serial!(du, u, p)
 
 function initial_hydro_state(global_i, global_j, nx, ny, gamma)
     x = (global_i - 0.5) / nx
@@ -134,17 +133,7 @@ function initial_hydro_state(global_i, global_j, nx, ny, gamma)
     return rho, rho * vx, rho * vy, energy
 end
 
-function fill_pressure_bump!(u; gamma=1.4)
-    return fill_pressure_bump!(u, u[:rho]; gamma)
-end
-
-fill_pressure_bump!(u, ::ThreadedHaloArray; gamma=1.4) =
-    fill_pressure_bump_threaded!(u; gamma)
-
-fill_pressure_bump!(u, ::_HydroSerialArray; gamma=1.4) =
-    fill_pressure_bump_serial!(u; gamma)
-
-function fill_pressure_bump_serial!(u; gamma=1.4)
+function fill_pressure_bump!(::_HydroFlatBackend, u; gamma=1.4)
     nx, ny = global_size(u[:rho])
     h = halo_width(u[:rho])
     data = parent(u)
@@ -164,7 +153,7 @@ function fill_pressure_bump_serial!(u; gamma=1.4)
     return u
 end
 
-function fill_pressure_bump_threaded!(u; gamma=1.4)
+function fill_pressure_bump!(::ThreadedHaloBackend, u; gamma=1.4)
     nx, ny = global_size(u[:rho])
     h = halo_width(u[:rho])
     tile_cells = tile_size(u[:rho])
@@ -191,6 +180,8 @@ function fill_pressure_bump_threaded!(u; gamma=1.4)
     synchronize_halo!(u)
     return u
 end
+
+fill_pressure_bump!(u; gamma=1.4) = fill_pressure_bump!(halo_backend(u), u; gamma)
 
 function max_signal_speed(u, gamma)
     return mapreduce(
