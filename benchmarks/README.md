@@ -17,6 +17,40 @@ problem size.
 `--local-size` is still accepted by `halo_exchange.jl` as a deprecated alias for
 `--owned-size`, but new commands should use `--owned-size`.
 
+For MPI benchmarks that use HDF5, prefer the launcher bundled through MPI.jl so
+MPI.jl, HDF5_jll, and `mpiexec` all use the same MPI library:
+
+```sh
+julia --project=. -e 'using MPI; MPI.MPIPreferences.use_jll_binary("OpenMPI_jll")'
+julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+julia --project=. -e 'using MPI; run(`$(MPI.mpiexec()) -n 4 julia --project=. benchmarks/gather_hdf5.jl --owned-size=64,64 --output=/private/tmp/haloarrays_bench`)'
+```
+
+The first command writes a local `LocalPreferences.toml`; restart Julia after
+running it. The second command refreshes artifacts such as the MPI-enabled HDF5
+build for the selected MPI ABI. This repository lists `MPIPreferences` in
+`[extras]` so local preferences are visible to MPI.jl.
+
+If you install a system MPI, make sure every MPI-linked library in the process
+uses that same implementation. For Homebrew OpenMPI on macOS with
+`brew install hdf5-mpi`:
+
+```sh
+julia --project=. -e 'using MPI; MPI.MPIPreferences.use_system_binary(; mpiexec="mpiexec", extra_paths=["/opt/homebrew/lib"])'
+julia --project=. -e 'using HDF5; HDF5.API.set_libraries!("/opt/homebrew/lib/libhdf5.dylib", "/opt/homebrew/lib/libhdf5_hl.dylib")'
+julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+```
+
+A PMIx error usually means `mpiexec` and the MPI library loaded by Julia are from
+different MPI implementations. A crash involving both `/opt/homebrew/.../libmpi`
+and `~/.julia/artifacts/.../libmpi` usually means system MPI was mixed with an
+MPI-enabled JLL such as HDF5_jll.
+
+When using system HDF5, build it with parallel HDF5 enabled and link it against
+the same MPI installation used by MPI.jl. Check with `otool -L
+/path/to/system/libhdf5.dylib` on macOS, or `ldd /path/to/system/libhdf5.so` on
+Linux, before running the benchmark.
+
 ## Halo Exchange
 
 ```sh

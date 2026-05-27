@@ -19,6 +19,7 @@ Icon?
 
 # Julia Pkg build artifacts
 Manifest.toml
+LocalPreferences.toml
 deps/build.log
 deps/deps.jl
 deps/usr/
