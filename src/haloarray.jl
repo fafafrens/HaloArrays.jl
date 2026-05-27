@@ -33,6 +33,7 @@ mutable struct HaloArray{T,N,A,Halo,B,BCondition} <: AbstractDistributedHaloArra
     boundary_condition::BCondition
 end
 
+@inline halo_backend(::Type{<:HaloArray}) = MPIHaloBackend()
 
 function HaloArray{T,N,arraytype,Halo}(::UndefInitializer,boundary_condition) where {T,N,arraytype<:AbstractArray{T,N},Halo}
     data=arraytype(undef,ntuple(i -> 2*Halo, Val(N))...)

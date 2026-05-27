@@ -3,6 +3,8 @@ mutable struct LocalHaloArray{T,N,A,Halo,BCondition} <: AbstractSerialHaloArray{
     boundary_condition::BCondition
 end
 
+@inline halo_backend(::Type{<:LocalHaloArray}) = LocalHaloBackend()
+
 function LocalHaloArray(data::AbstractArray{T,N}, halo::Int, boundary_condition) where {T,N}
     bc = normalize_boundary_condition(boundary_condition, N)
     return LocalHaloArray{T,N,typeof(data),halo,typeof(bc)}(data, bc)

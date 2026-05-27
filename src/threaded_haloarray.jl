@@ -88,6 +88,8 @@ struct ThreadedHaloArray{T,N,A,Halo,Topo,BCondition} <: AbstractSerialHaloArray{
     boundary_condition::BCondition
 end
 
+@inline halo_backend(::Type{<:ThreadedHaloArray}) = ThreadedHaloBackend()
+
 function ThreadedHaloArray(::Type{T}, tile_size::NTuple{N,<:Integer}, halo::Integer;
         dims::NTuple{N,<:Integer},
         boundary_condition=:repeating) where {T,N}

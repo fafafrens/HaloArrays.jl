@@ -9,6 +9,7 @@ function _check_multihaloarray_compatible(field_names, field_values)
     ref_ndims = _spatial_ndims(ref)
     ref_size = _spatial_interior_size(ref)
     ref_halo_width = halo_width(ref)
+    ref_backend = halo_backend(ref)
 
     if !all(_spatial_ndims(a) == ref_ndims for a in field_values)
         throw(ArgumentError("All MultiHaloArray fields must have the same spatial dimensionality"))
@@ -20,6 +21,9 @@ function _check_multihaloarray_compatible(field_names, field_values)
         end
         if halo_width(a) != ref_halo_width
             throw(DimensionMismatch("Field `$(name)` has halo width $(halo_width(a)) != $ref_halo_width"))
+        end
+        if !(halo_backend(a) isa typeof(ref_backend))
+            throw(ArgumentError("Field `$(name)` has backend $(typeof(halo_backend(a))) != $(typeof(ref_backend))"))
         end
     end
 
@@ -147,6 +151,7 @@ n_field(halos::MultiHaloArray{T,N,A,D}) where {T,N,A,D} = length(halos.arrays)
     NamedTuple{keys(halos.arrays)}(map(a -> tile_parent(a, tile_id), values(halos.arrays)))
 @inline tile_coordinates(halos::MultiHaloArray, tile_id::Integer) =
     tile_coordinates(first(values(halos.arrays)), tile_id)
+@inline halo_backend(halos::MultiHaloArray) = halo_backend(first(values(halos.arrays)))
 
 to_tuple(mha::MultiHaloArray) = (mha.arrays...,)
 

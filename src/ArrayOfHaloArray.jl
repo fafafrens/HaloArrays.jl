@@ -35,6 +35,7 @@ function _check_arrayofhaloarray_compatible(arrays::AbstractArray)
     ref_ndims = ndims(ref)
     ref_interior_size = interior_size(ref)
     ref_halo_width = halo_width(ref)
+    ref_backend = halo_backend(ref)
 
     for I in CartesianIndices(arrays)
         a = arrays[I]
@@ -44,6 +45,8 @@ function _check_arrayofhaloarray_compatible(arrays::AbstractArray)
             throw(DimensionMismatch("Field `$I` has interior size $(interior_size(a)) != $ref_interior_size"))
         halo_width(a) == ref_halo_width ||
             throw(DimensionMismatch("Field `$I` has halo width $(halo_width(a)) != $ref_halo_width"))
+        halo_backend(a) isa typeof(ref_backend) ||
+            throw(ArgumentError("Field `$I` has backend $(typeof(halo_backend(a))) != $(typeof(ref_backend))"))
     end
 
     return nothing
@@ -130,6 +133,7 @@ Base.ndims(::Type{<:ArrayOfHaloArray{T,N,Shape,A,D}}) where {T,N,Shape,A,D} = D
 @inline field_shape(::ArrayOfHaloArray{T,N,Shape}) where {T,N,Shape} = Shape
 @inline n_field(mha::ArrayOfHaloArray) = length(mha.arrays)
 @inline Base.parent(mha::ArrayOfHaloArray) = mha.arrays
+@inline halo_backend(mha::ArrayOfHaloArray) = halo_backend(first(parent(mha)))
 
 @inline function Base.size(mha::ArrayOfHaloArray)
     return global_size(mha)
