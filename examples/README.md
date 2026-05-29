@@ -40,6 +40,19 @@ julia --project=. examples/heat_diffusion_local_3d.jl
 julia --project=. examples/local_and_threaded_halo_arrays.jl
 ```
 
+## Local CPU and Metal GPU Heat Diffusion
+
+`local_cpu_gpu_heat_2d.jl` solves the same 2D periodic heat problem with a
+CPU-backed `LocalHaloArray` and a Metal-backed `LocalHaloArray`. The GPU update
+uses KernelAbstractions, colored face regions for flux accumulation, and the
+owned-cell region API for the final cell update.
+
+```bash
+julia --project=examples examples/local_cpu_gpu_heat_2d.jl
+```
+
+This example requires an Apple GPU supported by Metal.jl.
+
 ## MPI Heat Diffusion
 
 These examples use `HaloArray`, MPI Cartesian topologies, periodic halo
