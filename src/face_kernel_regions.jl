@@ -1,39 +1,3 @@
-@inline _shifted_face(indices, offset) = Iterators.map(I -> I + offset, indices)
-@inline _face_pairs(indices, offset) = zip(indices, _shifted_face(indices, offset))
-
-"""
-    get_left_face_pairs(ranges, dim)
-
-Return `(lower, upper)` index pairs for the lower-side `ghost | owned` face in
-dimension `dim`.
-"""
-@inline get_left_face_pairs(ranges::FaceRanges, dim::Int) =
-    _face_pairs(get_left_face(ranges, dim), get_unit_vector(ranges, dim))
-@inline get_left_face_pairs(ranges::FaceRanges, ::Dim{D}) where {D} =
-    get_left_face_pairs(ranges, D)
-
-"""
-    get_internal_face_pairs(ranges, dim)
-
-Return `(lower, upper)` index pairs for owned-cell internal faces in dimension
-`dim`.
-"""
-@inline get_internal_face_pairs(ranges::FaceRanges, dim::Int) =
-    _face_pairs(get_internal_face(ranges), get_unit_vector(ranges, dim))
-@inline get_internal_face_pairs(ranges::FaceRanges, ::Dim{D}) where {D} =
-    get_internal_face_pairs(ranges, D)
-
-"""
-    get_right_face_pairs(ranges, dim)
-
-Return `(lower, upper)` index pairs for the upper-side `owned | ghost` face in
-dimension `dim`.
-"""
-@inline get_right_face_pairs(ranges::FaceRanges, dim::Int) =
-    _face_pairs(get_right_face(ranges, dim), get_unit_vector(ranges, dim))
-@inline get_right_face_pairs(ranges::FaceRanges, ::Dim{D}) where {D} =
-    get_right_face_pairs(ranges, D)
-
 """
     FaceKernelRegion
 
