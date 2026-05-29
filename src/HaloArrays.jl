@@ -18,6 +18,7 @@ include("threaded_multihaloarray.jl")
 include("multihaloarray.jl")
 include("local_multihaloarray.jl")
 include("face_ranges.jl")
+include("face_pair_ranges.jl")
 include("maybe.jl")
 include("maybehaloarray.jl")
 include("interior_broadcast.jl")
@@ -82,9 +83,16 @@ export interior_view,
     internal_face_range,
     right_face_range,
     FaceRanges,
+    FaceKernelRegion,
     get_left_face,
     get_internal_face,
     get_right_face,
+    get_left_face_pairs,
+    get_internal_face_pairs,
+    get_right_face_pairs,
+    get_left_face_region,
+    get_internal_face_region,
+    get_right_face_region,
     get_unit_vector,
     owned_to_global_index,
     global_to_storage_index,
