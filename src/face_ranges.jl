@@ -139,6 +139,62 @@ get_unit_vector(ranges::FaceRanges) = ranges.unit_vector
 get_unit_vector(ranges::FaceRanges, dim::Int) = ranges.unit_vector[dim]
 get_unit_vector(ranges::FaceRanges, ::Dim{D}) where {D} = get_unit_vector(ranges, D)
 
+@inline function _check_face_color(color::Integer)
+    (color == 0 || color == 1) ||
+        throw(ArgumentError("face color must be 0 or 1, got $color"))
+    return Int(color)
+end
+
+@inline _range_from_first_size_stride(first_index::Int, len::Int, stride::Int) =
+    first_index:stride:(first_index + stride * (len - 1))
+
+@inline function _colored_face(indices::CartesianIndices{N}, dim::Int, color::Integer) where {N}
+    checked_color = _check_face_color(color)
+    first_tuple = Tuple(first(indices))
+    region_size = size(indices)
+    delta = mod(checked_color - mod(first_tuple[dim], 2), 2)
+    colored_size_dim = region_size[dim] <= delta ? 0 : cld(region_size[dim] - delta, 2)
+
+    return CartesianIndices(ntuple(Val(N)) do d
+        len = d == dim ? colored_size_dim : region_size[d]
+        stride = d == dim ? 2 : 1
+        start = first_tuple[d] + (d == dim ? delta : 0)
+        _range_from_first_size_stride(start, len, stride)
+    end)
+end
+
+"""
+    get_colored_left_face(ranges, dim, color)
+
+Return the lower-side face cells of one race-free face color.
+"""
+get_colored_left_face(ranges::FaceRanges, dim::Int, color::Integer) =
+    _colored_face(get_left_face(ranges, dim), dim, color)
+get_colored_left_face(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
+    get_colored_left_face(ranges, D, color)
+
+"""
+    get_colored_internal_face(ranges, dim, color)
+
+Return the internal face cells of one race-free face color.
+"""
+function get_colored_internal_face(ranges::FaceRanges, dim::Int, color::Integer)
+    get_unit_vector(ranges, dim)
+    return _colored_face(get_internal_face(ranges), dim, color)
+end
+get_colored_internal_face(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
+    get_colored_internal_face(ranges, D, color)
+
+"""
+    get_colored_right_face(ranges, dim, color)
+
+Return the upper-side face cells of one race-free face color.
+"""
+get_colored_right_face(ranges::FaceRanges, dim::Int, color::Integer) =
+    _colored_face(get_right_face(ranges, dim), dim, color)
+get_colored_right_face(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
+    get_colored_right_face(ranges, D, color)
+
 """
     face_offset(halo, dim)
 

@@ -15,6 +15,9 @@ const RUN_UNIT_TESTS = !_env_false("HALOARRAYS_RUN_UNIT_TESTS")
 const MPI_TESTS_REQUESTED = _env_true("HALOARRAYS_RUN_MPI_TESTS")
 const RUN_MPI_TESTS = !_env_false("HALOARRAYS_RUN_MPI_TESTS") && (MPI_TESTS_REQUESTED || MPI_SIZE > 1)
 const HAS_DIFFEQ_TEST_DEPS = Base.find_package("DiffEqBase") !== nothing
+const HAS_METAL_TEST_DEPS =
+    Base.find_package("Metal") !== nothing && Base.find_package("KernelAbstractions") !== nothing
+const RUN_METAL_TESTS = _env_true("HALOARRAYS_RUN_METAL_TESTS")
 
 # Helper to include test files relative to this directory
 function include_test(name)
@@ -44,6 +47,15 @@ end
             include_test("test_linear_advection_diffeq.jl")
         else
             @info "Skipping DiffEq tests because optional test dependencies are unavailable"
+        end
+        if RUN_METAL_TESTS
+            if HAS_METAL_TEST_DEPS
+                include_test("test_metal_local_haloarray.jl")
+            else
+                @test HAS_METAL_TEST_DEPS
+            end
+        else
+            @info "Skipping Metal tests (set HALOARRAYS_RUN_METAL_TESTS=true to enable)"
         end
     else
         @info "Skipping unit tests (set HALOARRAYS_RUN_UNIT_TESTS=true to enable)"

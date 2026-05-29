@@ -268,11 +268,91 @@ The helper works for `HaloArray`, `LocalHaloArray`, `ThreadedHaloArray`, and
 the collection wrappers. For collections, the face ranges describe the spatial
 part only; select a field first, then apply the ranges to that field.
 
+Use the colored face helpers when a face update writes both adjacent owned
+cells in-place and must avoid same-color write conflicts:
+
+```julia
+for color in 0:1
+    for IL in get_colored_internal_face(ranges, dim, color)
+        IR = IL + e
+        flux = numerical_flux(udata[IL], udata[IR])
+        dudata[IL] -= flux
+        dudata[IR] += flux
+    end
+end
+```
+
+## Cell Loops
+
+`CellRanges(u)` gives the owned-cell range in parent-storage indices. For
+ordinary out-of-place stencil updates, use the full owned-cell range:
+
+```julia
+ranges = CellRanges(u)
+udata = parent(u)
+vdata = parent(v)
+
+for I in get_owned_cells(ranges)
+    vdata[I] = stencil_value(udata, I)
+end
+```
+
+For nearest-neighbor in-place red-black updates, use the colored cell subranges.
+Each color is returned as a tuple of strided `CartesianIndices`, so the inner CPU
+loop has no parity branch:
+
+```julia
+for color in 0:1
+    for cells in get_colored_owned_cell_ranges(ranges, color)
+        for I in cells
+            udata[I] = stencil_value(udata, I)
+        end
+    end
+end
+```
+
+Cell colors use `mod(sum(Tuple(I)), 2)`. This two-color pattern is intended for
+nearest-neighbor stencils. Wider stencils may need a different coloring.
+
+## Kernel Regions
+
+The range APIs are also available as compact launch metadata for GPU-style or
+KernelAbstractions-style kernels.
+
+For face kernels, use `FaceKernelRegion` or `ColoredFaceKernelRegion`:
+
+```julia
+region = get_colored_internal_face_region(FaceRanges(u), dim, color)
+
+J = @index(Global, Cartesian)
+IL = region.first + CartesianIndex((Tuple(J) .- 1) .* Tuple(region.stride))
+IR = IL + region.offset
+```
+
+For cell kernels, use `CellKernelRegion` or `ColoredCellKernelRegion`. The
+colored cell region compresses one launch dimension by two, reconstructs the
+physical cell with `cell_index`, and uses `is_cell_index_inbounds` for the final
+upper-bound check:
+
+```julia
+region = get_colored_owned_cell_region(CellRanges(u), color, Dim(2))
+
+I = cell_index(region, @index(Global, NTuple))
+if is_cell_index_inbounds(region, I)
+    udata[I...] = stencil_value(udata, I)
+end
+```
+
+This lets GPU kernels launch roughly half as many threads per color while
+keeping the checkerboard rule shared with the CPU cell-range API.
+
 ## Core Utility Functions
 
 - Domain and layout: `interior_size`, `storage_size`, `halo_width`, `global_size`, `interior_range`
 - Index mapping: `owned_to_global_index`, `global_to_storage_index`
 - Face loops: `FaceRanges`, `get_left_face`, `get_internal_face`, `get_right_face`
+- Cell loops: `CellRanges`, `get_owned_cells`, `get_colored_owned_cell_ranges`
+- Kernel regions: `FaceKernelRegion`, `CellKernelRegion`, `ColoredFaceKernelRegion`, `ColoredCellKernelRegion`
 - Backend dispatch: `halo_backend`, `MPIHaloBackend`, `LocalHaloBackend`, `ThreadedHaloBackend`
 - Data movement and reduction: `gather_haloarray`, `mapreduce_haloarray_dims`
 - HDF5 helpers: `create_haloarray_output_file`, `write_haloarray_timestep!`, `gather_and_save_haloarray`

@@ -18,7 +18,9 @@ include("threaded_multihaloarray.jl")
 include("multihaloarray.jl")
 include("local_multihaloarray.jl")
 include("face_ranges.jl")
+include("cell_ranges.jl")
 include("face_kernel_regions.jl")
+include("cell_kernel_regions.jl")
 include("maybe.jl")
 include("maybehaloarray.jl")
 include("interior_broadcast.jl")
@@ -83,13 +85,29 @@ export interior_view,
     internal_face_range,
     right_face_range,
     FaceRanges,
+    CellRanges,
     FaceKernelRegion,
+    ColoredFaceKernelRegion,
+    CellKernelRegion,
+    ColoredCellKernelRegion,
     get_left_face,
     get_internal_face,
     get_right_face,
+    get_colored_left_face,
+    get_colored_internal_face,
+    get_colored_right_face,
     get_left_face_region,
     get_internal_face_region,
     get_right_face_region,
+    get_colored_left_face_region,
+    get_colored_internal_face_region,
+    get_colored_right_face_region,
+    get_owned_cells,
+    get_colored_owned_cell_ranges,
+    get_owned_cell_region,
+    get_colored_owned_cell_region,
+    cell_index,
+    is_cell_index_inbounds,
     get_unit_vector,
     owned_to_global_index,
     global_to_storage_index,

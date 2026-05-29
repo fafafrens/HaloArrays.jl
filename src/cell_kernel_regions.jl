@@ -1,0 +1,158 @@
+"""
+    CellKernelRegion
+
+Compact owned-cell metadata for launch-style loops. `first` is the first owned
+cell in storage coordinates and `size` is the owned-cell extent.
+"""
+struct CellKernelRegion{N}
+    first::CartesianIndex{N}
+    size::NTuple{N,Int}
+end
+
+"""
+    ColoredCellKernelRegion
+
+Compact metadata for race-free colored cell kernels.
+
+`size` is the launch size, compressed by two in `compressed_dim`.
+`full_size` is the uncompressed owned-cell extent. GPU kernels reconstruct the
+physical cell from the launch index and do a final bound check in the
+compressed dimension.
+"""
+struct ColoredCellKernelRegion{N,C}
+    first::CartesianIndex{N}
+    size::NTuple{N,Int}
+    full_size::NTuple{N,Int}
+    color::Int
+    compressed_dim::Int
+end
+
+@inline CellKernelRegion(indices::CartesianIndices{N}) where {N} =
+    CellKernelRegion(first(indices), size(indices))
+
+@inline function _check_cell_compressed_dim(::Val{N}, compressed_dim::Integer) where {N}
+    dim = Int(compressed_dim)
+    1 <= dim <= N ||
+        throw(ArgumentError("compressed_dim must be a spatial dimension in 1:$N, got $compressed_dim"))
+    return dim
+end
+
+@inline function ColoredCellKernelRegion(first::CartesianIndex{N},
+                                         size::NTuple{N,Int},
+                                         full_size::NTuple{N,Int},
+                                         color::Integer,
+                                         compressed_dim::Integer) where {N}
+    checked_color = _check_cell_color(color)
+    compressed = _check_cell_compressed_dim(Val(N), compressed_dim)
+    return ColoredCellKernelRegion{N,compressed}(
+        first,
+        size,
+        full_size,
+        checked_color,
+        compressed,
+    )
+end
+
+"""
+    cell_index(region, J)
+
+Map a launch-local index `J` to the corresponding storage-space cell index.
+
+For `ColoredCellKernelRegion`, `J` lives in the compressed launch region and
+the returned cell is adjusted so `mod(sum(I), 2) == region.color`.
+"""
+@inline function cell_index(region::CellKernelRegion{N},
+                            J::NTuple{N,<:Integer}) where {N}
+    first_tuple = Tuple(region.first)
+    return ntuple(d -> first_tuple[d] + Int(J[d]) - 1, Val(N))
+end
+
+@inline cell_index(region::CellKernelRegion{N}, J::CartesianIndex{N}) where {N} =
+    CartesianIndex(cell_index(region, Tuple(J)))
+
+@inline function cell_index(region::ColoredCellKernelRegion{N,C},
+                            J::NTuple{N,<:Integer}) where {N,C}
+    first_tuple = Tuple(region.first)
+    base_tuple = ntuple(Val(N)) do d
+        d == C ? first_tuple[d] + 2 * (Int(J[d]) - 1) :
+                 first_tuple[d] + Int(J[d]) - 1
+    end
+    transverse_parity = sum(ntuple(d -> d == C ? 0 : mod(base_tuple[d], 2), Val(N)))
+    wanted_compressed_parity = mod(region.color - transverse_parity, 2)
+    delta = mod(wanted_compressed_parity - mod(base_tuple[C], 2), 2)
+
+    return ntuple(d -> d == C ? base_tuple[d] + delta : base_tuple[d], Val(N))
+end
+
+@inline cell_index(region::ColoredCellKernelRegion{N},
+                   J::CartesianIndex{N}) where {N} =
+    CartesianIndex(cell_index(region, Tuple(J)))
+
+@inline _cell_region_full_size(region::CellKernelRegion) = region.size
+@inline _cell_region_full_size(region::ColoredCellKernelRegion) = region.full_size
+
+"""
+    is_cell_index_inbounds(region, I)
+
+Return whether a storage-space cell index `I` lies inside the owned-cell extent
+described by `region`. This is mainly needed by compressed colored GPU kernels,
+where the last launch index may reconstruct one cell past the owned boundary.
+"""
+@inline function is_cell_index_inbounds(region::Union{CellKernelRegion{N},ColoredCellKernelRegion{N}},
+                                        I::NTuple{N,<:Integer}) where {N}
+    first_tuple = Tuple(region.first)
+    full_size = _cell_region_full_size(region)
+    checks = ntuple(Val(N)) do d
+        first_tuple[d] <= Int(I[d]) <= first_tuple[d] + full_size[d] - 1
+    end
+    return all(checks)
+end
+
+@inline is_cell_index_inbounds(region::Union{CellKernelRegion{N},ColoredCellKernelRegion{N}},
+                               I::CartesianIndex{N}) where {N} =
+    is_cell_index_inbounds(region, Tuple(I))
+
+@inline function ColoredCellKernelRegion(indices::CartesianIndices{N},
+                                         color::Integer,
+                                         compressed_dim::Integer=1) where {N}
+    checked_color = _check_cell_color(color)
+    compressed = _check_cell_compressed_dim(Val(N), compressed_dim)
+    full_size = size(indices)
+    launch_size = ntuple(d -> d == compressed ? cld(full_size[d], 2) : full_size[d], Val(N))
+
+    return ColoredCellKernelRegion(
+        first(indices),
+        launch_size,
+        full_size,
+        checked_color,
+        compressed,
+    )
+end
+
+"""
+    get_owned_cell_region(ranges)
+
+Return compact launch metadata for the owned-cell region.
+"""
+@inline get_owned_cell_region(ranges::CellRanges) = CellKernelRegion(get_owned_cells(ranges))
+
+"""
+    get_colored_owned_cell_region(ranges, color; compressed_dim=1)
+    get_colored_owned_cell_region(ranges, color, compressed_dim)
+
+Return compact launch metadata for one checkerboard cell color. The launch
+region is compressed in `compressed_dim`; kernels should reconstruct the
+physical cell index and check the compressed dimension upper bound.
+"""
+@inline get_colored_owned_cell_region(ranges::CellRanges,
+                                      color::Integer;
+                                      compressed_dim::Integer=1) =
+    get_colored_owned_cell_region(ranges, color, compressed_dim)
+@inline get_colored_owned_cell_region(ranges::CellRanges,
+                                      color::Integer,
+                                      compressed_dim::Integer) =
+    ColoredCellKernelRegion(get_owned_cells(ranges), color, compressed_dim)
+@inline get_colored_owned_cell_region(ranges::CellRanges,
+                                      color::Integer,
+                                      ::Dim{D}) where {D} =
+    get_colored_owned_cell_region(ranges, color, D)

@@ -102,6 +102,30 @@ heat-step style stencil for `ThreadedHaloArray`.
 julia --project=. benchmarks/threaded.jl --owned-size=128,128 --tile-dims=2,2
 ```
 
+## Metal Colored Cells
+
+Benchmarks a 2D Metal red-black cell stencil using a naive full launch with a
+parity branch versus `ColoredCellKernelRegion` compressed launches. The optional
+manual kernels are hardcoded reference implementations used to check that the
+generic helper path compiles to comparable code.
+
+This benchmark requires `Metal.jl` and `KernelAbstractions.jl` in the active
+Julia environment. One way to create a local benchmark environment is:
+
+```sh
+julia --project=/private/tmp/halo-metal-probe -e 'using Pkg; Pkg.develop(path=pwd()); Pkg.add(["Metal", "KernelAbstractions"])'
+julia --project=/private/tmp/halo-metal-probe benchmarks/metal_colored_cells.jl --sizes=128,256,512,1024
+```
+
+Useful options:
+
+- `--sizes=128,256,512,1024`
+- `--steps=50`
+- `--samples=10`
+- `--warmups=3`
+- `--include-manual=true`
+- `--csv=/tmp/metal_colored_cells.csv`
+
 ## Threaded Synchronization Variants
 
 Compares benchmark-only implementations of threaded halo synchronization:
