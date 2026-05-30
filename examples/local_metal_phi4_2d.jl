@@ -125,7 +125,7 @@ end
 
 function make_random_buffers(phi)
     ranges = CellRanges(phi)
-    region0 = get_colored_owned_cell_region(ranges, 0; compressed_dim = 1)
+    region0 = get_colored_owned_cell_region(ranges, 0; compressed_dim = 2)
 
     proposal = Metal.zeros(Float32, region0.size...)
     accept = Metal.zeros(Float32, region0.size...)
@@ -154,7 +154,7 @@ function phi4_sweep!(kernel!, backend, phi, params, buffers::RandomBuffers)
         synchronize_halo!(phi)
         KA.synchronize(backend)
 
-        region = get_colored_owned_cell_region(ranges, color; compressed_dim = 1)
+        region = get_colored_owned_cell_region(ranges, color; compressed_dim = 2)
         #any(==(0), region.size) && continue
 
         refill_random_buffers!(buffers)
@@ -210,6 +210,7 @@ function run_phi4_metal_haloarray_2d(;
     phi = initialize_phi4_field(n, halo)
 
     backend = KA.get_backend(parent(phi))
+    @show backend
     kernel! = phi4_metropolis_color_kernel!(backend, groupsize)
 
     params = Phi4Params(
