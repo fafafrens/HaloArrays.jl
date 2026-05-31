@@ -3,6 +3,8 @@
     interior_range(first(values(halo.arrays)))
 @inline _cell_spatial_interior_range(halo::ArrayOfHaloArray) =
     interior_range(first(parent(halo)))
+@inline _cell_spatial_interior_range(arr::AbstractArray{<:AbstractSingleHaloArray}) =
+    interior_range(first(arr))
 
 @inline function _check_cell_color(color::Integer)
     (color == 0 || color == 1) ||

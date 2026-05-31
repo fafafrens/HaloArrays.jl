@@ -28,7 +28,6 @@ include("interior_broadcast_marray.jl")
 include("interior_broadcast_maybe.jl")
 include("boundary.jl")
 include("halo_exchange.jl")
-include("flux_contribution_exchange.jl")
 include("gather.jl")
 include("reduction.jl")
 include("save_hdf5.jl")
@@ -128,7 +127,6 @@ export halo_exchange!,
     finish_halo_exchange!,
     synchronize_halo!,
     synchronize_halo_threads!,
-    synchronize_flux_contributions!,
     get_send_view,
     get_recv_view
 
