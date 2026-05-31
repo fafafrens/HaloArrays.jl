@@ -90,4 +90,22 @@ using HaloArrays
     @test any(x -> x == 60, threaded_array_fields)
 
     @test mapreduce(identity, +, threaded_u; dims=1)[] == 21
+
+    @testset "_combine_threaded_reduction" begin
+        # 2-arg: folds over all elements starting from the first
+        @test HaloArrays._combine_threaded_reduction(+, [1, 2, 3, 4]) == 10
+        @test HaloArrays._combine_threaded_reduction(*, [2, 3, 4]) == 24
+        @test HaloArrays._combine_threaded_reduction(max, [3, 1, 4, 1, 5]) == 5
+
+        # single-element: returns first element unchanged
+        @test HaloArrays._combine_threaded_reduction(+, [42]) == 42
+
+        # 3-arg: prepends an initial result (used when tile 1 is computed separately)
+        @test HaloArrays._combine_threaded_reduction(+, 100, [1, 2, 3]) == 106
+        @test HaloArrays._combine_threaded_reduction(*, 2, [3, 4]) == 24
+        @test HaloArrays._combine_threaded_reduction(max, 0, [3, 1, 4]) == 4
+
+        # empty tail: returns initial result unchanged
+        @test HaloArrays._combine_threaded_reduction(+, 7, Int[]) == 7
+    end
 end

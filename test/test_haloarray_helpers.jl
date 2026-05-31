@@ -505,4 +505,79 @@ end
         @test_throws ArgumentError ArrayOfHaloArray(Any[local_field, threaded])
     end
 
+    @testset "CellKernelRegion cell_index and is_cell_index_inbounds" begin
+        u = LocalHaloArray(Float64, (4,), 1; boundary_condition=:repeating)
+        cr = CellRanges(u)
+        region = get_owned_cell_region(cr)
+
+        # first owned cell is at storage index halo+1 = 2
+        @test cell_index(region, (1,)) == (2,)
+        @test cell_index(region, (4,)) == (5,)   # last owned cell
+        @test cell_index(region, CartesianIndex(2)) == CartesianIndex(3)
+
+        @test is_cell_index_inbounds(region, (2,))   # first owned
+        @test is_cell_index_inbounds(region, (5,))   # last owned
+        @test !is_cell_index_inbounds(region, (1,))  # left ghost
+        @test !is_cell_index_inbounds(region, (6,))  # right ghost
+
+        # 2-D: halo=1, owned (3,3), storage 2:4 in each dim
+        u2 = LocalHaloArray(Float64, (3, 3), 1; boundary_condition=:repeating)
+        cr2 = CellRanges(u2)
+        r2 = get_owned_cell_region(cr2)
+
+        @test cell_index(r2, (1, 1)) == (2, 2)
+        @test cell_index(r2, (3, 3)) == (4, 4)
+        @test is_cell_index_inbounds(r2, (2, 2))
+        @test !is_cell_index_inbounds(r2, (1, 2))   # ghost in dim 1
+        @test !is_cell_index_inbounds(r2, (2, 5))   # out of bounds in dim 2
+    end
+
+    @testset "ColoredCellKernelRegion cell_index and is_cell_index_inbounds" begin
+        # 1-D: 4 owned cells, halo=1 → storage 2:5
+        u = LocalHaloArray(Float64, (4,), 1; boundary_condition=:repeating)
+        cr = CellRanges(u)
+
+        r0 = get_colored_owned_cell_region(cr, 0)   # color 0: even storage index
+        r1 = get_colored_owned_cell_region(cr, 1)   # color 1: odd storage index
+
+        # color 0 maps J=(1,) → storage 2, J=(2,) → storage 4
+        @test cell_index(r0, (1,)) == (2,)
+        @test cell_index(r0, (2,)) == (4,)
+        # color 1 maps J=(1,) → storage 3, J=(2,) → storage 5
+        @test cell_index(r1, (1,)) == (3,)
+        @test cell_index(r1, (2,)) == (5,)
+
+        # verify each result has the correct color: mod(i, 2) == color
+        for (region, color) in ((r0, 0), (r1, 1))
+            for j in 1:region.size[1]
+                I = cell_index(region, (j,))
+                @test mod(I[1], 2) == color
+                @test is_cell_index_inbounds(region, I)
+            end
+        end
+
+        # launch size is compressed: ceil(4/2) = 2
+        @test r0.size == (2,)
+        @test r1.size == (2,)
+        # full (uncompressed) size is 4
+        @test r0.full_size == (4,)
+
+        # 2-D: 4×4 owned cells, compressed_dim=2
+        u2 = LocalHaloArray(Float64, (4, 4), 1; boundary_condition=:repeating)
+        cr2 = CellRanges(u2)
+        r2c0 = get_colored_owned_cell_region(cr2, 0; compressed_dim=2)
+
+        # launch size: (4, ceil(4/2)) = (4, 2)
+        @test r2c0.size == (4, 2)
+        @test r2c0.full_size == (4, 4)
+
+        # every reconstructed cell should have color 0: mod(i+j, 2) == 0
+        for ji in 1:r2c0.size[1], jj in 1:r2c0.size[2]
+            I = cell_index(r2c0, (ji, jj))
+            if is_cell_index_inbounds(r2c0, I)
+                @test mod(sum(I), 2) == 0
+            end
+        end
+    end
+
 end
