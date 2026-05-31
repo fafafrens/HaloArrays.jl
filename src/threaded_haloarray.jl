@@ -52,8 +52,8 @@ function ThreadedCartesianTopology(dims::NTuple{N,<:Integer}; periodic=ntuple(_ 
     return ThreadedCartesianTopology{N}(tile_dims, tile_coords, neighbors, periodic_tuple)
 end
 
-@inline Base.ndims(::ThreadedCartesianTopology{N}) where {N} = N
 @inline isactive(::ThreadedCartesianTopology) = true
+# Base.ndims inherited from AbstractCartesianTopology{N}
 @inline is_root(::ThreadedCartesianTopology; root::Integer=0) = true
 @inline tile_count(topology::ThreadedCartesianTopology) = prod(topology.dims)
 @inline tile_coordinates(topology::ThreadedCartesianTopology, tile_id::Integer) = topology.tile_coords[tile_id]

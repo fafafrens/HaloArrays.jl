@@ -5,7 +5,8 @@ using LinearAlgebra
 
 # import (not using) for names we add new methods to in this extension
 import HaloArrays
-import HaloArrays: CartesianTopology, HaloArray
+import HaloArrays: CartesianTopology, HaloArray,
+    start_halo_exchange_async_unsafe!, end_halo_exchange_async_wait_unsafe!
 
 using HaloArrays:
     AbstractBoundaryCondition, Periodic, Repeating,

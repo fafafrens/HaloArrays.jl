@@ -8,7 +8,7 @@ function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,BCondition}, s::Side{s
     
     mode = halo.boundary_condition[d][side]
     nbrank = halo.topology.neighbors[d][side]
-    if nbrank == MPI.PROC_NULL
+    if nbrank < 0  # MPI.PROC_NULL == -1: no neighbour → physical boundary
         boundary_condition!(halo, s, dim, mode)
     end
     return nothing

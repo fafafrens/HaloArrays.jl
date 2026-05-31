@@ -33,6 +33,7 @@ end
 
 Return `true` if the topology is active on this process.
 """
+@inline Base.ndims(::AbstractCartesianTopology{N}) where {N} = N
 isactive(cart::CartesianTopology) = cart.active
 
 """
