@@ -128,12 +128,10 @@ end
 # ---- AbstractHaloCollection helpers (Group 3) -------------------------
 # _first_field: the reference field used for geometry queries
 # _fields:      all fields as an iterable (for operations like isactive)
-
-_first_field(mha::MultiHaloArray) = first(values(mha.arrays))
-_first_field(mha::ArrayOfHaloArray) = first(parent(mha))
-
-_fields(mha::MultiHaloArray) = values(mha.arrays)
-_fields(mha::ArrayOfHaloArray) = parent(mha)
+# Concrete methods are defined in ArrayOfHaloArray.jl and multihaloarray.jl
+# (those types don't exist at this point in the load order).
+function _first_field end
+function _fields end
 
 @inline halo_backend(mha::AbstractHaloCollection) = halo_backend(_first_field(mha))
 @inline halo_width(mha::AbstractHaloCollection)   = halo_width(_first_field(mha))

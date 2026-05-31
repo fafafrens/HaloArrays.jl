@@ -193,6 +193,11 @@ Base.ndims(::Type{<:ArrayOfHaloArray{T,N,Shape,A,D}}) where {T,N,Shape,A,D} = D
 @inline field_shape(::ArrayOfHaloArray{T,N,Shape}) where {T,N,Shape} = Shape
 @inline n_field(mha::ArrayOfHaloArray) = length(mha.arrays)
 @inline Base.parent(mha::ArrayOfHaloArray) = mha.arrays
+
+# AbstractHaloCollection helpers (concrete methods; stubs in abstract_haloarray.jl)
+@inline _first_field(mha::ArrayOfHaloArray) = first(parent(mha))
+@inline _fields(mha::ArrayOfHaloArray)      = parent(mha)
+
 # halo_backend, halo_width, tile_count, tile_size, tile_coordinates, neighbor_tile_id,
 # is_root, isactive inherited from AbstractHaloCollection (abstract_haloarray.jl)
 

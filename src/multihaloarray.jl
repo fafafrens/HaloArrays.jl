@@ -139,7 +139,11 @@ n_field(halos::MultiHaloArray{T,N,A,D}) where {T,N,A,D} = length(halos.arrays)
 @inline storage_size(halos::MultiHaloArray) = (n_field(halos), _spatial_storage_size(first(values(halos.arrays)))...)
 @inline storage_size(halos::MultiHaloArray,i) = storage_size(halos)[i]
 @inline halo_width(halo::MultiHaloArray, i) = map(halo_width, halo.arrays)
-@inline Base.parent(halo::MultiHaloArray)  = map(parent,halo.arrays)
+@inline Base.parent(halo::MultiHaloArray)  = map(parent, halo.arrays)
+
+# AbstractHaloCollection helpers (concrete methods; stubs in abstract_haloarray.jl)
+@inline _first_field(mha::MultiHaloArray) = first(values(mha.arrays))
+@inline _fields(mha::MultiHaloArray)      = values(mha.arrays)
 @inline Base.axes(x::MultiHaloArray) = (Base.OneTo(n_field(x)), _spatial_axes(first(values(x.arrays)))...)
 @inline Base.axes(x::MultiHaloArray,i) = axes(x)[i]
 @inline owned_axes(x::MultiHaloArray) = (Base.OneTo(n_field(x)), _spatial_owned_axes(first(values(x.arrays)))...)

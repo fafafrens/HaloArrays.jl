@@ -29,6 +29,8 @@ HaloArraysHDF5MPIExt    = ["HDF5", "MPI"]
 
 [extras]
 DiffEqBase = "2b5f629d-d688-5b77-993f-72d75c75574e"
+HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
+MPI = "da04e1cc-30fd-572f-bb4f-1f8673147195"
 MPIPreferences = "3da0fdf6-3ccc-4f1b-acd9-58baa6c99267"
 OrdinaryDiffEq = "1dea7af3-3e70-54e6-95c3-0bf5283fa5ed"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
