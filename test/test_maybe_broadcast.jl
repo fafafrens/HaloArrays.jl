@@ -2,7 +2,7 @@ using Test
 using MPI
 using HaloArrays
 
-@testset "MaybeHaloArray and MaybeActive" begin
+@testset "MaybeHaloArray" begin
     topology = CartesianTopology(MPI.COMM_SELF, (1,); periodic=(false,))
     ha = HaloArray(Int, (4,), 1, topology; boundary_condition=:repeating)
     ha_interior = interior_view(ha)
@@ -104,11 +104,8 @@ using HaloArrays
     @test_throws ArgumentError maybe_multi .+ multi
     @test_throws ArgumentError multi .+ maybe_multi
 
-    active_value = active(7)
-    inactive_value = inactive(7)
-    @test isactive(active_value)
-    @test !isactive(inactive_value)
-    @test get(active_value, 0) == 7
-    @test get(inactive_value, 0) == 0
-    @test unsafe_get(inactive_value) == 7
+    u = LocalHaloArray(Float64, (4,), 1; boundary_condition=:repeating)
+    @test isactive(active(u))
+    @test !isactive(inactive(u))
+    @test unsafe_get(MaybeHaloArray(u)) === u
 end
