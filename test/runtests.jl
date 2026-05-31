@@ -39,6 +39,7 @@ end
         include_test("test_ideal_hydro_example.jl")
         include_test("test_mharray.jl")
         include_test("test_arrayofhaloarray.jl")
+        include_test("test_fallbacks.jl")
         include_test("test_maybe_broadcast.jl")
         include_test("test_local_threaded_reduction.jl")
         include_test("test_hdf5_local_threaded.jl")

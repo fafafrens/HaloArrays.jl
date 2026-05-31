@@ -1,8 +1,6 @@
 __precompile__()
 module HaloArrays
 
-using MPI
-using HDF5
 using LinearAlgebra
 using OhMyThreads: tforeach, tmap, tmapreduce
 using StaticArrays
@@ -28,9 +26,27 @@ include("interior_broadcast_marray.jl")
 include("interior_broadcast_maybe.jl")
 include("boundary.jl")
 include("halo_exchange.jl")
-include("gather.jl")
 include("reduction.jl")
-include("save_hdf5.jl")
+
+# Stubs for functions defined in extensions — declared here so extensions can extend them
+# and so that `export` resolves at load time.
+function inactive_cartesian_topology end
+function mapreduce_haloarray_dims end
+function mapreduce_mhaloarray_dims end
+function gather_haloarray end
+function save_array_hdf5 end
+function gather_and_save_haloarray end
+function gather_and_append_haloarray! end
+function create_dataset_from_haloarray end
+function append_haloarray! end
+function append_haloarray_to_file! end
+function create_fixedsize_dataset_from_haloarray end
+function write_haloarray_timestep! end
+function create_haloarray_output_file end
+# HDF5 internal helpers extended in HaloArraysHDF5Ext / HaloArraysHDF5MPIExt
+function _hdf5_comm end
+function _hdf5_dataset_dims end
+function _hdf5_chunk_dims end
 
 # Core types
 export HaloArray,

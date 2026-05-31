@@ -5,8 +5,6 @@ authors = ["Eduardo Grossi"]
 
 [deps]
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
-MPI = "da04e1cc-30fd-572f-bb4f-1f8673147195"
-HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
 OhMyThreads = "67456a42-1dca-4109-a031-0a68de7e3ad5"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
@@ -20,9 +18,14 @@ StaticArrays = "1"
 
 [weakdeps]
 DiffEqBase = "2b5f629d-d688-5b77-993f-72d75c75574e"
+MPI  = "da04e1cc-30fd-572f-bb4f-1f8673147195"
+HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
 
 [extensions]
 HaloArraysDiffEqBaseExt = "DiffEqBase"
+HaloArraysMPIExt        = "MPI"
+HaloArraysHDF5Ext       = "HDF5"
+HaloArraysHDF5MPIExt    = ["HDF5", "MPI"]
 
 [extras]
 DiffEqBase = "2b5f629d-d688-5b77-993f-72d75c75574e"
@@ -32,4 +35,4 @@ Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test", "DiffEqBase", "OrdinaryDiffEq", "Printf"]
+test = ["Test", "DiffEqBase", "OrdinaryDiffEq", "Printf", "MPI", "HDF5"]
