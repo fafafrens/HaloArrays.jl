@@ -55,16 +55,8 @@ end
     ntuple(i -> (Halo+1):(storage_size(halo,i)-Halo), Val(N))
 end
 
-@inline function full_range(halo::HaloArray{T,N}) where {T,N}
-    ntuple(i -> 1:storage_size(halo,i), Val(N))
-end
-
 @inline function interior_view(halo::HaloArray)
     @views halo.data[interior_range(halo)...]
-end
-
-function full_view(halo::HaloArray)
-    @views halo.data[full_range(halo)...]
 end
 
 @inline Base.length(halo::HaloArray)          = prod(size(halo))
@@ -127,15 +119,6 @@ function Base.setindex!(halo::HaloArray, value, I::Vararg{Integer})
     storage_idx = _owned_global_to_storage_index(halo, I)
     @inbounds parent(halo)[storage_idx...] = value
     return halo
-end
-
-@inline function is_in_rank(halo::HaloArray{T,N}, global_idx::NTuple{N,<:Integer}) where {T,N}
-    owner_coords(halo, global_idx) == halo.topology.cart_coords
-end
-
-@inline function owner_coordinates(halo::HaloArray{T,N}, global_idx::NTuple{N,<:Integer}) where {T,N}
-    owned_dims = interior_size(halo)
-    ntuple(i -> (global_idx[i]-1) ÷ owned_dims[i], Val(N))
 end
 
 # ---- versors ----------------------------------------------------------
@@ -213,7 +196,7 @@ end
 
 # validate_boundary_condition is inherited from AbstractCartesianTopology (abstract_haloarray.jl)
 
-# ---- owned-dims helper (used by Base.similar in extension) ------------
+# ---- owned-dims helper (used by Base.similar in mpi_support.jl) ------
 
 function _global_to_owned_dims(halo::HaloArray{T,N}, dims::NTuple{M,<:Integer}) where {T,N,M}
     M == N || throw(DimensionMismatch("HaloArray similar dims must have $N dimensions"))
@@ -262,7 +245,7 @@ end
 Base.:/(halo::HaloArray, x::Number) = halo ./ x
 Base.:*(halo::HaloArray, x::Number) = halo .* x
 Base.:*(x::Number, halo::HaloArray) = x .* halo
-# LinearAlgebra.norm for HaloArray is defined in HaloArraysMPIExt (requires mapreduce)
+# LinearAlgebra.norm for HaloArray is defined in mpi_support.jl (requires mapreduce)
 
 function Base.foreach(f, halo::HaloArray)
     foreach(f, interior_view(halo))
