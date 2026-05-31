@@ -193,7 +193,8 @@ Base.ndims(::Type{<:ArrayOfHaloArray{T,N,Shape,A,D}}) where {T,N,Shape,A,D} = D
 @inline field_shape(::ArrayOfHaloArray{T,N,Shape}) where {T,N,Shape} = Shape
 @inline n_field(mha::ArrayOfHaloArray) = length(mha.arrays)
 @inline Base.parent(mha::ArrayOfHaloArray) = mha.arrays
-@inline halo_backend(mha::ArrayOfHaloArray) = halo_backend(first(parent(mha)))
+# halo_backend, halo_width, tile_count, tile_size, tile_coordinates, neighbor_tile_id,
+# is_root, isactive inherited from AbstractHaloCollection (abstract_haloarray.jl)
 
 @inline function Base.size(mha::ArrayOfHaloArray)
     return global_size(mha)
@@ -220,7 +221,6 @@ end
 end
 
 @inline storage_size(mha::ArrayOfHaloArray, i::Int) = storage_size(mha)[i]
-@inline halo_width(mha::ArrayOfHaloArray) = halo_width(first(mha.arrays))
 @inline halo_width(mha::ArrayOfHaloArray, i) = map(halo_width, mha.arrays)
 @inline global_size(mha::ArrayOfHaloArray) = (field_shape(mha)..., global_size(first(mha.arrays))...)
 
@@ -358,20 +358,8 @@ function interior_view(mha::ArrayOfHaloArray)
     return map(interior_view, mha.arrays)
 end
 
-function isactive(mha::ArrayOfHaloArray)
-    return all(isactive, mha.arrays)
-end
-
-function is_root(mha::ArrayOfHaloArray; root::Integer=0)
-    return is_root(first(mha.arrays); root=root)
-end
-
-@inline tile_count(mha::ArrayOfHaloArray) = tile_count(first(parent(mha)))
-@inline tile_size(mha::ArrayOfHaloArray) = tile_size(first(parent(mha)))
-@inline tile_coordinates(mha::ArrayOfHaloArray, tile_id::Integer) =
-    tile_coordinates(first(parent(mha)), tile_id)
-@inline neighbor_tile_id(mha::ArrayOfHaloArray, tile_id::Integer, dim::Integer, side::Integer) =
-    neighbor_tile_id(first(parent(mha)), tile_id, dim, side)
+# isactive, is_root, tile_count, tile_size, tile_coordinates, neighbor_tile_id
+# inherited from AbstractHaloCollection (abstract_haloarray.jl)
 
 function Base.all(f::F, mha::ArrayOfHaloArray) where {F<:Function}
     return all(field -> all(f, field), mha.arrays)

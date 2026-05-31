@@ -138,22 +138,16 @@ n_field(halos::MultiHaloArray{T,N,A,D}) where {T,N,A,D} = length(halos.arrays)
 @inline global_size(halos::MultiHaloArray) = (n_field(halos), _spatial_global_size(first(values(halos.arrays)))...)
 @inline storage_size(halos::MultiHaloArray) = (n_field(halos), _spatial_storage_size(first(values(halos.arrays)))...)
 @inline storage_size(halos::MultiHaloArray,i) = storage_size(halos)[i]
-@inline halo_width(halo::MultiHaloArray) = halo_width(first(values(halo.arrays)))
-@inline halo_width(halo::MultiHaloArray,i)= map(halo_width,halo.arrays)
+@inline halo_width(halo::MultiHaloArray, i) = map(halo_width, halo.arrays)
 @inline Base.parent(halo::MultiHaloArray)  = map(parent,halo.arrays)
 @inline Base.axes(x::MultiHaloArray) = (Base.OneTo(n_field(x)), _spatial_axes(first(values(x.arrays)))...)
 @inline Base.axes(x::MultiHaloArray,i) = axes(x)[i]
 @inline owned_axes(x::MultiHaloArray) = (Base.OneTo(n_field(x)), _spatial_owned_axes(first(values(x.arrays)))...)
 @inline owned_axes(x::MultiHaloArray,i) = owned_axes(x)[i]
-@inline tile_size(halos::MultiHaloArray) = tile_size(first(values(halos.arrays)))
-@inline tile_count(halos::MultiHaloArray) = tile_count(first(values(halos.arrays)))
 @inline tile_parent(halos::MultiHaloArray, tile_id::Integer) =
     NamedTuple{keys(halos.arrays)}(map(a -> tile_parent(a, tile_id), values(halos.arrays)))
-@inline tile_coordinates(halos::MultiHaloArray, tile_id::Integer) =
-    tile_coordinates(first(values(halos.arrays)), tile_id)
-@inline neighbor_tile_id(halos::MultiHaloArray, tile_id::Integer, dim::Integer, side::Integer) =
-    neighbor_tile_id(first(values(halos.arrays)), tile_id, dim, side)
-@inline halo_backend(halos::MultiHaloArray) = halo_backend(first(values(halos.arrays)))
+# halo_backend, halo_width, tile_size, tile_count, tile_coordinates, neighbor_tile_id
+# inherited from AbstractHaloCollection (abstract_haloarray.jl)
 
 to_tuple(mha::MultiHaloArray) = (mha.arrays...,)
 
@@ -286,13 +280,7 @@ function interior_view(mha::MultiHaloArray, tile_id::Integer)
     return NamedTuple{keys(mha.arrays)}(map(a -> interior_view(a, tile_id), values(mha.arrays)))
 end
 
-function isactive(mha::MultiHaloArray)
-    return all(isactive, values(mha.arrays))
-end
-
-function is_root(mha::MultiHaloArray; root::Integer=0)
-    return is_root(first(values(mha.arrays)); root=root)
-end
+# isactive, is_root inherited from AbstractHaloCollection (abstract_haloarray.jl)
 
 function active_fields(mha::MultiHaloArray)
     return (; (name => isactive(ha) for (name, ha) in mha.arrays)...)

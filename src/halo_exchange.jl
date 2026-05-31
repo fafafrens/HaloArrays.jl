@@ -22,70 +22,35 @@ function synchronize_halo!(halo::LocalHaloArray)
     return halo
 end
 
-# ---- MultiHaloArray (delegates to individual fields) ------------------
+# ---- AbstractHaloCollection (covers MultiHaloArray + ArrayOfHaloArray) --
 
-function halo_exchange!(halo::MultiHaloArray)
+function halo_exchange!(halo::AbstractHaloCollection)
     foreach_field!(halo_exchange!, halo)
     return halo
 end
 
-function start_halo_exchange!(halo::MultiHaloArray)
+function start_halo_exchange!(halo::AbstractHaloCollection)
     foreach_field!(start_halo_exchange!, halo)
     return halo
 end
 
-function finish_halo_exchange!(halo::MultiHaloArray)
+function finish_halo_exchange!(halo::AbstractHaloCollection)
     foreach_field!(finish_halo_exchange!, halo)
     return halo
 end
 
-function synchronize_halo!(halo::MultiHaloArray)
+function synchronize_halo!(halo::AbstractHaloCollection)
     halo_exchange!(halo)
     boundary_condition!(halo)
     return halo
 end
 
-# ---- ArrayOfHaloArray (delegates to individual fields) ----------------
-
-function halo_exchange!(halo::ArrayOfHaloArray)
-    foreach_field!(halo_exchange!, halo)
-    return halo
-end
-
-function start_halo_exchange!(halo::ArrayOfHaloArray)
-    foreach_field!(start_halo_exchange!, halo)
-    return halo
-end
-
-function finish_halo_exchange!(halo::ArrayOfHaloArray)
-    foreach_field!(finish_halo_exchange!, halo)
-    return halo
-end
-
-function synchronize_halo!(halo::ArrayOfHaloArray)
-    halo_exchange!(halo)
-    boundary_condition!(halo)
-    return halo
-end
-
-# Internal async helpers that delegate (used by MultiHaloArray / ArrayOfHaloArray
-# when their fields are HaloArrays; the HaloArray methods are in the MPI extension)
-function start_halo_exchange_async_unsafe!(halo::MultiHaloArray)
+function start_halo_exchange_async_unsafe!(halo::AbstractHaloCollection)
     foreach_field!(start_halo_exchange_async_unsafe!, halo)
     return nothing
 end
 
-function end_halo_exchange_async_wait_unsafe!(halo::MultiHaloArray)
-    foreach_field!(end_halo_exchange_async_wait_unsafe!, halo)
-    return nothing
-end
-
-function start_halo_exchange_async_unsafe!(halo::ArrayOfHaloArray)
-    foreach_field!(start_halo_exchange_async_unsafe!, halo)
-    return nothing
-end
-
-function end_halo_exchange_async_wait_unsafe!(halo::ArrayOfHaloArray)
+function end_halo_exchange_async_wait_unsafe!(halo::AbstractHaloCollection)
     foreach_field!(end_halo_exchange_async_wait_unsafe!, halo)
     return nothing
 end

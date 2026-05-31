@@ -94,27 +94,7 @@ Base.similar(halo::LocalHaloArray, dims::Dims{M}) where {M} = similar(halo, elty
 Base.similar(halo::LocalHaloArray, dims::NTuple{M,<:Integer}) where {M} =
     similar(halo, eltype(halo), dims)
 
-function Base.copyto!(dest::LocalHaloArray, src::LocalHaloArray)
-    copyto!(parent(dest), parent(src))
-    return dest
-end
-
-function Base.copy(src::LocalHaloArray)
-    dest = similar(src)
-    copyto!(dest, src)
-    return dest
-end
-
-function Base.zero(halo::LocalHaloArray)
-    z = similar(halo)
-    fill!(z, zero(eltype(halo)))
-    return z
-end
-
-function Base.fill!(halo::LocalHaloArray, value)
-    fill!(parent(halo), value)
-    return halo
-end
+# Base.copy, Base.zero, Base.fill!, Base.copyto! inherited from AbstractSingleHaloArray
 
 function fill_interior(halo::LocalHaloArray, value)
     fill!(interior_view(halo), value)

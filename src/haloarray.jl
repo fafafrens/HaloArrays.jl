@@ -225,27 +225,7 @@ end
 
 # ---- mutation ---------------------------------------------------------
 
-function Base.copyto!(dest::HaloArray, src::HaloArray)
-    copyto!(parent(dest), parent(src))
-    return dest
-end
-
-function Base.copy(src::HaloArray)
-    new_halo = similar(src)   # defined in MPI extension
-    copyto!(new_halo, src)
-    return new_halo
-end
-
-function Base.zero(halo::HaloArray)
-    z = similar(halo)         # defined in MPI extension
-    fill!(z, zero(eltype(halo)))
-    return z
-end
-
-function Base.fill!(halo::HaloArray, num)
-    fill!(parent(halo), num)
-    return halo
-end
+# Base.copy, Base.zero, Base.fill!, Base.copyto! inherited from AbstractSingleHaloArray
 
 function fill_interior(halo::HaloArray, num)
     fill!(interior_view(halo), num)

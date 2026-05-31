@@ -98,6 +98,56 @@ function validate_boundary_condition(topology::AbstractCartesianTopology, bounda
     return true
 end
 
+# ---- AbstractSingleHaloArray defaults (Group 1) -----------------------
+# These work for HaloArray and LocalHaloArray.
+# ThreadedHaloArray has more specific dispatches for fill! and copyto!
+# that use tforeach and therefore override these.
+
+function Base.copyto!(dest::AbstractSingleHaloArray, src::AbstractSingleHaloArray)
+    copyto!(parent(dest), parent(src))
+    return dest
+end
+
+function Base.copy(src::AbstractSingleHaloArray)
+    dest = similar(src)
+    copyto!(dest, src)
+    return dest
+end
+
+function Base.zero(halo::AbstractSingleHaloArray)
+    z = similar(halo)
+    fill!(z, zero(eltype(halo)))
+    return z
+end
+
+function Base.fill!(halo::AbstractSingleHaloArray, value)
+    fill!(parent(halo), value)
+    return halo
+end
+
+# ---- AbstractHaloCollection helpers (Group 3) -------------------------
+# _first_field: the reference field used for geometry queries
+# _fields:      all fields as an iterable (for operations like isactive)
+
+_first_field(mha::MultiHaloArray) = first(values(mha.arrays))
+_first_field(mha::ArrayOfHaloArray) = first(parent(mha))
+
+_fields(mha::MultiHaloArray) = values(mha.arrays)
+_fields(mha::ArrayOfHaloArray) = parent(mha)
+
+@inline halo_backend(mha::AbstractHaloCollection) = halo_backend(_first_field(mha))
+@inline halo_width(mha::AbstractHaloCollection)   = halo_width(_first_field(mha))
+@inline tile_count(mha::AbstractHaloCollection)   = tile_count(_first_field(mha))
+@inline tile_size(mha::AbstractHaloCollection)    = tile_size(_first_field(mha))
+@inline tile_coordinates(mha::AbstractHaloCollection, tile_id::Integer) =
+    tile_coordinates(_first_field(mha), tile_id)
+@inline neighbor_tile_id(mha::AbstractHaloCollection, tile_id::Integer,
+        dim::Integer, side::Integer) =
+    neighbor_tile_id(_first_field(mha), tile_id, dim, side)
+@inline is_root(mha::AbstractHaloCollection; root::Integer=0) =
+    is_root(_first_field(mha); root=root)
+@inline isactive(mha::AbstractHaloCollection) = all(isactive, _fields(mha))
+
 @inline function _check_global_scalar_indices(halo::AbstractHaloArray, I::Tuple)
     length(I) == ndims(halo) || throw(BoundsError(halo, I))
     all(d -> first(axes(halo, d)) <= I[d] <= last(axes(halo, d)), eachindex(I)) ||

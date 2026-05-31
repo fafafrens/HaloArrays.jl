@@ -458,11 +458,7 @@ Base.similar(halo::ThreadedHaloArray, dims::Dims{M}) where {M} = similar(halo, e
 Base.similar(halo::ThreadedHaloArray, dims::NTuple{M,<:Integer}) where {M} =
     similar(halo, eltype(halo), dims)
 
-function Base.zero(halo::ThreadedHaloArray)
-    z = similar(halo)
-    fill!(z, zero(eltype(halo)))
-    return z
-end
+# Base.zero inherited from AbstractSingleHaloArray
 
 function Base.copyto!(dest::ThreadedHaloArray, src::ThreadedHaloArray)
     size(dest) == size(src) || throw(DimensionMismatch("ThreadedHaloArray copyto! requires matching global sizes"))
@@ -479,8 +475,4 @@ end
     return nothing
 end
 
-function Base.copy(halo::ThreadedHaloArray)
-    copied = similar(halo)
-    copyto!(copied, halo)
-    return copied
-end
+# Base.copy inherited from AbstractSingleHaloArray
