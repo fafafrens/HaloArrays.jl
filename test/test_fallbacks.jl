@@ -38,11 +38,11 @@ using HaloArrays
 end
 
 @testset "ArrayOfHaloArray tile fallbacks" begin
-    nthreads = max(1, Threads.nthreads())
-    tile_size = (8,)
+    nthreads  = max(1, Threads.nthreads())
+    tsz       = (8,)       # renamed to avoid shadowing tile_size()
     tile_dims = (nthreads,)
 
-    vel = ArrayOfHaloArray(ThreadedHaloArray, Float64, (2,), tile_size, 1;
+    vel = ArrayOfHaloArray(ThreadedHaloArray, Float64, (2,), tsz, 1;
         dims=tile_dims, boundary_condition=:periodic)
 
     @testset "tile_count" begin
@@ -68,7 +68,7 @@ end
 
     @testset "CellRanges on ArrayOfHaloArray" begin
         cr = CellRanges(vel)
-        @test size(get_owned_cells(cr)) == tile_size .* tile_dims
+        @test size(get_owned_cells(cr)) == tsz .* tile_dims
     end
 end
 
