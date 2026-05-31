@@ -107,5 +107,5 @@ using HaloArrays
     u = LocalHaloArray(Float64, (4,), 1; boundary_condition=:repeating)
     @test isactive(active(u))
     @test !isactive(inactive(u))
-    @test unsafe_get(MaybeHaloArray(u)) === u
+    @test getdata(MaybeHaloArray(u)) === u
 end

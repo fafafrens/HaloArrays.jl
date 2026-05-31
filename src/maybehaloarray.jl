@@ -57,8 +57,7 @@ isactive(m::MaybeHaloArray) = m.active
 is_root(m::MaybeHaloArray; root::Integer=0) =
     isactive(m) && is_root(getdata(m); root=root)
 halo_backend(m::MaybeHaloArray) = halo_backend(getdata(m))
-getdata(m::MaybeHaloArray)    = m.data
-unsafe_get(m::MaybeHaloArray) = m.data    # no active check; use getdata for the same effect
+getdata(m::MaybeHaloArray) = m.data
 active(x::AbstractHaloArray)   = MaybeHaloArray(x, true)
 inactive(x::AbstractHaloArray) = MaybeHaloArray(x, false)
 

@@ -14,9 +14,7 @@ include("haloarray.jl")
 include("local_haloarray.jl")
 include("threaded_haloarray.jl")
 include("ArrayOfHaloArray.jl")
-include("threaded_multihaloarray.jl")
 include("multihaloarray.jl")
-include("local_multihaloarray.jl")
 include("face_ranges.jl")
 include("cell_ranges.jl")
 include("face_kernel_regions.jl")
@@ -141,8 +139,7 @@ export isactive,
     getdata,
     unwrap,
     active,
-    inactive,
-    unsafe_get
+    inactive
 
 # HDF5 I/O helpers
 export create_dataset_from_haloarray,

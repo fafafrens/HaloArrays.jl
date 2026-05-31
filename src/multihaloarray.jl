@@ -283,3 +283,61 @@ end
 function active_fields(mha::MultiHaloArray)
     return (; (name => isactive(ha) for (name, ha) in mha.arrays)...)
 end
+
+# ---- LocalMultiHaloArray constructors -----------------------------------
+
+function LocalMultiHaloArray(arrs::NamedTuple; check=nothing)
+    field_values = values(arrs)
+    isempty(field_values) && throw(ArgumentError("LocalMultiHaloArray requires at least one field"))
+    all(a -> a isa LocalHaloArray, field_values) ||
+        throw(ArgumentError("All fields must be LocalHaloArray"))
+    return MultiHaloArray(arrs; check=check)
+end
+
+function LocalMultiHaloArray(::Type{T}, owned_dims::NTuple{N,<:Integer}, halo::Integer;
+        boundary_conditions::NamedTuple{names,<:Tuple}) where {T,N,names}
+    normalized_owned_dims = ntuple(d -> Int(owned_dims[d]), Val(N))
+    return MultiHaloArray(LocalHaloArray, T, normalized_owned_dims, Int(halo);
+        boundary_conditions=boundary_conditions)
+end
+
+function LocalMultiHaloArray(owned_dims::NTuple{N,<:Integer}, halo::Integer,
+        bcs::NamedTuple{names,<:Tuple}) where {N,names}
+    return LocalMultiHaloArray(Float64, owned_dims, halo; boundary_conditions=bcs)
+end
+
+function LocalMultiHaloArray(owned_dims::NTuple{N,<:Integer}, halo::Integer;
+        boundary_conditions::NamedTuple{names,<:Tuple}) where {N,names}
+    return LocalMultiHaloArray(Float64, owned_dims, halo; boundary_conditions=boundary_conditions)
+end
+
+# ---- ThreadedMultiHaloArray constructors --------------------------------
+
+function ThreadedMultiHaloArray(arrs::NamedTuple; check=nothing)
+    field_values = values(arrs)
+    isempty(field_values) && throw(ArgumentError("ThreadedMultiHaloArray requires at least one field"))
+    all(a -> a isa ThreadedHaloArray, field_values) ||
+        throw(ArgumentError("All fields must be ThreadedHaloArray"))
+    ref = first(field_values)
+    for (name, a) in zip(keys(arrs), field_values)
+        tile_size(a) == tile_size(ref) ||
+            throw(DimensionMismatch("Field `$(name)` has tile_size $(tile_size(a)) != $(tile_size(ref))"))
+        halo_width(a) == halo_width(ref) ||
+            throw(DimensionMismatch("Field `$(name)` has halo width $(halo_width(a)) != $(halo_width(ref))"))
+        a.topology.dims == ref.topology.dims ||
+            throw(DimensionMismatch("Field `$(name)` has topology dims $(a.topology.dims) != $(ref.topology.dims)"))
+        tile_count(a) == tile_count(ref) ||
+            throw(DimensionMismatch("Field `$(name)` has tile_count $(tile_count(a)) != $(tile_count(ref))"))
+    end
+    return MultiHaloArray(arrs; check=check)
+end
+
+function ThreadedMultiHaloArray(::Type{T}, tile_size::NTuple{N,<:Integer}, halo::Integer;
+        dims::NTuple{N,<:Integer},
+        boundary_conditions::NamedTuple{names,<:Tuple}) where {T,N,names}
+    return MultiHaloArray(ThreadedHaloArray, T, tile_size, halo;
+        dims=dims, boundary_conditions=boundary_conditions)
+end
+
+ThreadedMultiHaloArray(tile_size::NTuple{N,<:Integer}, halo::Integer; kwargs...) where {N} =
+    ThreadedMultiHaloArray(Float64, tile_size, halo; kwargs...)
