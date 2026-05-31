@@ -333,10 +333,7 @@ function Base.map(f, mha::ArrayOfHaloArray)
     return ArrayOfHaloArray(arrs)
 end
 
-function foreach_field!(f!, mha::ArrayOfHaloArray)
-    foreach(f!, mha.arrays)
-    return nothing
-end
+# foreach_field!(f!, ::AbstractHaloCollection) inherited from abstract_haloarray.jl
 
 function foreach_field!(f!, mha::ArrayOfHaloArray, others::Vararg{ArrayOfHaloArray})
     all(other -> field_shape(other) == field_shape(mha), others) ||

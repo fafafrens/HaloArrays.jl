@@ -195,15 +195,7 @@ Base.similar(halo::HaloArray, dims::Dims{M}) where {M} = similar(halo, eltype(ha
 Base.similar(halo::HaloArray, dims::NTuple{M,<:Integer}) where {M} =
     similar(halo, eltype(halo), dims)
 
-function LinearAlgebra.norm(halo::HaloArray, p::Real=2)
-    if p == 2
-        return sqrt(mapreduce(abs2, +, halo))
-    elseif p == Inf
-        return mapreduce(abs, max, halo)
-    else
-        return mapreduce(x -> abs(x)^p, +, halo)^(1/p)
-    end
-end
+# LinearAlgebra.norm inherited from AbstractSingleHaloArray (abstract_haloarray.jl)
 
 # ============================================================
 # Halo exchange

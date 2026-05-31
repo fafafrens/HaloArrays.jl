@@ -20,16 +20,12 @@ function LocalHaloArray(owned_dims::NTuple{N,Int}, halo::Int; boundary_condition
     return LocalHaloArray(Float64, owned_dims, halo; boundary_condition)
 end
 
-@inline Base.length(halo::LocalHaloArray) = length(interior_view(halo))
-@inline Base.size(halo::LocalHaloArray) = global_size(halo)
-@inline Base.size(halo::LocalHaloArray, i::Int) = size(halo)[i]
+# size, axes, length inherited from AbstractSingleHaloArray
 @inline Base.eltype(::LocalHaloArray{T}) where {T} = T
 @inline Base.eltype(::Type{<:LocalHaloArray{T}}) where {T} = T
 @inline Base.ndims(::LocalHaloArray{T,N}) where {T,N} = N
 @inline Base.ndims(::Type{<:LocalHaloArray{T,N}}) where {T,N} = N
 @inline Base.parent(halo::LocalHaloArray) = halo.data
-@inline Base.axes(halo::LocalHaloArray) = map(Base.OneTo, size(halo))
-@inline Base.axes(halo::LocalHaloArray, d::Int) = Base.OneTo(size(halo, d))
 @inline owned_axes(halo::LocalHaloArray) = axes(interior_view(halo))
 @inline owned_axes(halo::LocalHaloArray, d::Int) = axes(interior_view(halo), d)
 @inline Base.eachindex(halo::LocalHaloArray) = eachindex(interior_view(halo))
@@ -94,12 +90,9 @@ Base.similar(halo::LocalHaloArray, dims::Dims{M}) where {M} = similar(halo, elty
 Base.similar(halo::LocalHaloArray, dims::NTuple{M,<:Integer}) where {M} =
     similar(halo, eltype(halo), dims)
 
-# Base.copy, Base.zero, Base.fill!, Base.copyto! inherited from AbstractSingleHaloArray
-
-function fill_interior(halo::LocalHaloArray, value)
-    fill!(interior_view(halo), value)
-    return halo
-end
+# Base.copy, Base.zero, Base.fill!, Base.copyto!, fill_interior,
+# fill_from_local_indices!, Base.foreach, arithmetic, norm
+# inherited from AbstractSingleHaloArray
 
 function Base.map!(f, dest::LocalHaloArray, src::Vararg{LocalHaloArray,N}) where {N}
     dest_interior = interior_view(dest)
@@ -114,32 +107,6 @@ function Base.map(f, src::Vararg{LocalHaloArray,N}) where {N}
     return dest
 end
 
-Base.:/(halo::LocalHaloArray, x::Number) = halo ./ x
-Base.:*(halo::LocalHaloArray, x::Number) = halo .* x
-Base.:*(x::Number, halo::LocalHaloArray) = x .* halo
-
-function LinearAlgebra.norm(halo::LocalHaloArray, p::Real=2)
-    if p == 2
-        return sqrt(mapreduce(abs2, +, interior_view(halo)))
-    elseif p == Inf
-        return mapreduce(abs, max, interior_view(halo))
-    else
-        return mapreduce(x -> abs(x)^p, +, interior_view(halo))^(1 / p)
-    end
-end
-
-function Base.foreach(f, halo::LocalHaloArray)
-    foreach(f, interior_view(halo))
-    return nothing
-end
-
-function fill_from_local_indices!(f, halo::LocalHaloArray)
-    interior = interior_view(halo)
-    for I in CartesianIndices(interior)
-        interior[I] = f(Tuple(I)...)
-    end
-    return nothing
-end
 
 function fill_from_global_indices!(f, halo::LocalHaloArray)
     interior = interior_view(halo)

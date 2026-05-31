@@ -59,11 +59,7 @@ end
     @views halo.data[interior_range(halo)...]
 end
 
-@inline Base.length(halo::HaloArray)          = prod(size(halo))
-@inline Base.size(halo::HaloArray)            = global_size(halo)
-@inline Base.size(halo::HaloArray, i::Int)    = size(halo)[i]
-@inline Base.axes(halo::HaloArray)            = map(Base.OneTo, size(halo))
-@inline Base.axes(halo::HaloArray, i::Int)    = Base.OneTo(size(halo, i))
+# size, axes, length inherited from AbstractSingleHaloArray
 @inline owned_axes(halo::HaloArray)           = axes(interior_view(halo))
 @inline owned_axes(halo::HaloArray, i::Int)   = axes(interior_view(halo), i)
 @inline Base.eachindex(halo::HaloArray)       = eachindex(interior_view(halo))
@@ -210,10 +206,8 @@ end
 
 # Base.copy, Base.zero, Base.fill!, Base.copyto! inherited from AbstractSingleHaloArray
 
-function fill_interior(halo::HaloArray, num)
-    fill!(interior_view(halo), num)
-    return halo
-end
+# fill_interior, fill_from_local_indices!, Base.foreach, arithmetic,
+# LinearAlgebra.norm inherited from AbstractSingleHaloArray
 
 function Base.map!(f, dest::HaloArray, src::HaloArray)
     @views map!(f, interior_view(dest), interior_view(src))
@@ -242,14 +236,6 @@ function Base.map(f, src::Vararg{HaloArray,Nsrc}) where {Nsrc}
     return dest
 end
 
-Base.:/(halo::HaloArray, x::Number) = halo ./ x
-Base.:*(halo::HaloArray, x::Number) = halo .* x
-Base.:*(x::Number, halo::HaloArray) = x .* halo
-# LinearAlgebra.norm for HaloArray is defined in mpi_support.jl (requires mapreduce)
-
-function Base.foreach(f, halo::HaloArray)
-    foreach(f, interior_view(halo))
-end
 
 # ---- fill helpers -----------------------------------------------------
 
@@ -264,13 +250,6 @@ function fill_from_global_indices!(f, halo::HaloArray{T,N,A,Halo}) where {T,N,A,
     return halo
 end
 
-function fill_from_local_indices!(f, halo::HaloArray)
-    interior = interior_view(halo)
-    for I in CartesianIndices(interior)
-        interior[I] = f(Tuple(I)...)
-    end
-    return nothing
-end
 
 # ---- show -------------------------------------------------------------
 

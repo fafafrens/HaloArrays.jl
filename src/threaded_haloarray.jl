@@ -101,12 +101,8 @@ ThreadedHaloArray(tile_size::NTuple{N,<:Integer}, halo::Integer; kwargs...) wher
 @inline Base.ndims(::ThreadedHaloArray{T,N}) where {T,N} = N
 @inline Base.ndims(::Type{<:ThreadedHaloArray{T,N}}) where {T,N} = N
 @inline Base.parent(halo::ThreadedHaloArray) = halo.data
-@inline Base.length(halo::ThreadedHaloArray) = prod(size(halo))
 @inline owned_size(halo::ThreadedHaloArray) = ntuple(d -> halo.tile_size[d] * halo.topology.dims[d], Val(ndims(halo)))
-@inline Base.size(halo::ThreadedHaloArray) = global_size(halo)
-@inline Base.size(halo::ThreadedHaloArray, d::Int) = size(halo)[d]
-@inline Base.axes(halo::ThreadedHaloArray) = map(Base.OneTo, size(halo))
-@inline Base.axes(halo::ThreadedHaloArray, d::Int) = Base.OneTo(size(halo, d))
+# size, axes, length inherited from AbstractSingleHaloArray
 @inline owned_axes(halo::ThreadedHaloArray) = map(Base.OneTo, owned_size(halo))
 @inline owned_axes(halo::ThreadedHaloArray, d::Int) = Base.OneTo(owned_size(halo, d))
 @inline interior_size(halo::ThreadedHaloArray) = owned_size(halo)
@@ -459,6 +455,16 @@ Base.similar(halo::ThreadedHaloArray, dims::NTuple{M,<:Integer}) where {M} =
     similar(halo, eltype(halo), dims)
 
 # Base.zero inherited from AbstractSingleHaloArray
+
+# interior_view(::ThreadedHaloArray) returns a Vector of tile views, so the
+# AbstractSingleHaloArray foreach would iterate over tiles not cells.
+# This override iterates over individual elements across all tiles.
+function Base.foreach(f, halo::ThreadedHaloArray)
+    for tile_id in 1:tile_count(halo)
+        foreach(f, interior_view(halo, tile_id))
+    end
+    return nothing
+end
 
 function Base.copyto!(dest::ThreadedHaloArray, src::ThreadedHaloArray)
     size(dest) == size(src) || throw(DimensionMismatch("ThreadedHaloArray copyto! requires matching global sizes"))

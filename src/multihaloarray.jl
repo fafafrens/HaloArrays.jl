@@ -238,13 +238,7 @@ function Base.map(f, mha::MultiHaloArray)
     return MultiHaloArray(new_ntuple)
 end
 
-function foreach_field!(f!, mha::MultiHaloArray)
-    for  arr in values(mha.arrays)
-        f!(arr)
-    end
-
-    return nothing
-end
+# foreach_field!(f!, ::AbstractHaloCollection) inherited from abstract_haloarray.jl
 
 
 function foreach_field!(f!, mha::MultiHaloArray, etc::Vararg{MultiHaloArray})

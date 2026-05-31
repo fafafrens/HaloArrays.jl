@@ -98,10 +98,47 @@ function validate_boundary_condition(topology::AbstractCartesianTopology, bounda
     return true
 end
 
-# ---- AbstractSingleHaloArray defaults (Group 1) -----------------------
-# These work for HaloArray and LocalHaloArray.
-# ThreadedHaloArray has more specific dispatches for fill! and copyto!
-# that use tforeach and therefore override these.
+# ---- AbstractSingleHaloArray defaults ---------------------------------
+# ThreadedHaloArray overrides fill!, copyto!, fill_interior,
+# fill_from_local_indices!, and Base.foreach with tforeach variants.
+
+@inline Base.size(halo::AbstractSingleHaloArray)         = global_size(halo)
+@inline Base.size(halo::AbstractSingleHaloArray, i::Int) = size(halo)[i]
+@inline Base.axes(halo::AbstractSingleHaloArray)         = map(Base.OneTo, size(halo))
+@inline Base.axes(halo::AbstractSingleHaloArray, i::Int) = Base.OneTo(size(halo, i))
+@inline Base.length(halo::AbstractSingleHaloArray)       = prod(size(halo))
+
+Base.:/(halo::AbstractSingleHaloArray, x::Number) = halo ./ x
+Base.:*(halo::AbstractSingleHaloArray, x::Number) = halo .* x
+Base.:*(x::Number, halo::AbstractSingleHaloArray) = x .* halo
+
+function LinearAlgebra.norm(halo::AbstractSingleHaloArray, p::Real=2)
+    if p == 2
+        return sqrt(mapreduce(abs2, +, halo))
+    elseif p == Inf
+        return mapreduce(abs, max, halo)
+    else
+        return mapreduce(x -> abs(x)^p, +, halo)^(1/p)
+    end
+end
+
+function Base.foreach(f, halo::AbstractSingleHaloArray)
+    foreach(f, interior_view(halo))
+    return nothing
+end
+
+function fill_interior(halo::AbstractSingleHaloArray, value)
+    fill!(interior_view(halo), value)
+    return halo
+end
+
+function fill_from_local_indices!(f, halo::AbstractSingleHaloArray)
+    interior = interior_view(halo)
+    for I in CartesianIndices(interior)
+        interior[I] = f(Tuple(I)...)
+    end
+    return nothing
+end
 
 function Base.copyto!(dest::AbstractSingleHaloArray, src::AbstractSingleHaloArray)
     copyto!(parent(dest), parent(src))
@@ -145,6 +182,11 @@ function _fields end
 @inline is_root(mha::AbstractHaloCollection; root::Integer=0) =
     is_root(_first_field(mha); root=root)
 @inline isactive(mha::AbstractHaloCollection) = all(isactive, _fields(mha))
+
+function foreach_field!(f!, mha::AbstractHaloCollection)
+    foreach(f!, _fields(mha))
+    return nothing
+end
 
 @inline function _check_global_scalar_indices(halo::AbstractHaloArray, I::Tuple)
     length(I) == ndims(halo) || throw(BoundsError(halo, I))
