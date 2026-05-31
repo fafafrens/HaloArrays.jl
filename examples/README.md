@@ -148,6 +148,21 @@ julia --project=. examples/scalar_field_heatbath_local_threaded_2d.jl
 mpiexec -n 4 julia --project=. examples/scalar_field_heatbath_mpi_2d.jl
 ```
 
+## Local and Threaded SU(2) Wilson
+
+This example runs a 2D pure SU(2) Wilson plaquette Metropolis update on the CPU
+with both `LocalHaloArray` and `ThreadedHaloArray`. Gauge links are stored as an
+`ArrayOfHaloArray` with field shape `(4, 2)` for quaternion component and link
+direction.
+
+```bash
+julia --project=. examples/local_threaded_su2_wilson_2d.jl
+JULIA_NUM_THREADS=4 julia --project=. examples/local_threaded_su2_wilson_2d.jl
+```
+
+The threaded run defaults to `tile_dims=(Threads.nthreads(), 1)`, so choose a
+lattice size divisible by the number of Julia threads when changing the example.
+
 ## DiffEq Examples
 
 The DiffEq examples use `DiffEqBase` and `OrdinaryDiffEq` from

@@ -166,6 +166,26 @@ function ArrayOfHaloArray(::Type{ThreadedHaloArray}, tile_size::NTuple{N,<:Integ
         dims=dims, boundary_conditions=boundary_conditions)
 end
 
+function ArrayOfHaloArray(::Type{ThreadedHaloArray}, ::Type{T},
+        field_shape::NTuple{F,<:Integer}, tile_size::NTuple{N,<:Integer},
+        halo::Integer;
+        dims::NTuple{N,<:Integer},
+        boundary_condition=:repeating,
+        boundary_conditions=nothing) where {T,F,N}
+    shape = ntuple(d -> Int(field_shape[d]), Val(F))
+    bcs = _arrayofhaloarray_boundary_conditions(shape, boundary_condition, boundary_conditions)
+    arrays = map(bcs) do bc
+        ThreadedHaloArray(T, tile_size, halo; dims=dims, boundary_condition=bc)
+    end
+    return ArrayOfHaloArray(arrays)
+end
+
+function ArrayOfHaloArray(::Type{ThreadedHaloArray},
+        field_shape::NTuple{F,<:Integer}, tile_size::NTuple{N,<:Integer},
+        halo::Integer; kwargs...) where {F,N}
+    return ArrayOfHaloArray(ThreadedHaloArray, Float64, field_shape, tile_size, halo; kwargs...)
+end
+
 Base.eltype(::ArrayOfHaloArray{T}) where {T} = T
 Base.eltype(::Type{<:ArrayOfHaloArray{T}}) where {T} = T
 Base.ndims(::ArrayOfHaloArray{T,N,Shape,A,D}) where {T,N,Shape,A,D} = D

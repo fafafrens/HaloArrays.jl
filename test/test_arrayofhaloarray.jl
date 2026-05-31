@@ -234,6 +234,23 @@ end
     @test size(resized_threaded) == (2, 8)
     @test tile_size(resized_threaded[1]) == (4,)
 
+    shaped_threaded = ArrayOfHaloArray(ThreadedHaloArray, Float32, (2, 3), (2,), 1;
+        dims=(2,), boundary_condition=:repeating)
+    @test shaped_threaded isa ArrayOfHaloArray
+    @test shaped_threaded isa AbstractArray{Float32,3}
+    @test field_shape(shaped_threaded) == (2, 3)
+    @test size(shaped_threaded) == (2, 3, 4)
+    @test storage_size(shaped_threaded) == (2, 3, 4)
+    @test all(field -> field isa ThreadedHaloArray, parent(shaped_threaded))
+
+    shaped_threaded_bcs = fill(:repeating, 2, 2)
+    shaped_threaded_bcs[1, 2] = :antireflecting
+    shaped_threaded_from_bcs = ArrayOfHaloArray(ThreadedHaloArray, Float32, (2, 2), (2,), 1;
+        dims=(2,), boundary_conditions=shaped_threaded_bcs)
+    @test field_shape(shaped_threaded_from_bcs) == (2, 2)
+    @test_throws DimensionMismatch ArrayOfHaloArray(ThreadedHaloArray, Float32, (2, 2), (2,), 1;
+        dims=(2,), boundary_conditions=fill(:repeating, 3))
+
     synchronize_halo!(threaded_fields)
     @test tile_parent(threaded_fields[1], 1) == [1, 1, 2, 3, 4]
     @test tile_parent(threaded_fields[1], 2) == [3, 4, 5, 6, 6]
