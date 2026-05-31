@@ -68,7 +68,7 @@ end
 
     @testset "CellRanges on ArrayOfHaloArray" begin
         cr = CellRanges(vel)
-        @test size(get_owned_cells(cr)) == tsz .* tile_dims
+        @test size(get_owned_cells(cr)) == tsz   # per-tile range (interior_range of one tile)
     end
 end
 

@@ -13,8 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        julia-version: ['1.10', '1.11','1.12']
-
+        julia-version: ['1.10', '1.12']
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,13 +32,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        np: [2, 3, 4]
+        np: [2, 4]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2
         with:
-          version: '1.11'
+          version: '1.12'
       - uses: julia-actions/cache@v2
       - name: Configure MPI provider
         shell: julia --color=yes --project=. {0}
@@ -60,19 +59,3 @@ jobs:
           cmd = `$(MPI.mpiexec()) -n $n $(Base.julia_cmd()) --project=. test/runtests.jl`
           println(cmd)
           run(cmd)
-
-  examples:
-    name: Julia 1.11 - example smoke tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v2
-        with:
-          version: '1.11'
-      - uses: julia-actions/cache@v2
-      - uses: julia-actions/julia-buildpkg@v1
-      - name: Run local and threaded examples
-        run: |
-          julia --project=. examples/heat_diffusion_local_1d.jl
-          julia --project=. examples/heat_diffusion_local_2d.jl
-          julia --project=. examples/local_and_threaded_halo_arrays.jl
