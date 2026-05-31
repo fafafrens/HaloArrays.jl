@@ -350,6 +350,36 @@
         @test_throws ArgumentError local_fields_dest .= local_fields .+ threaded_fields
     end
 
+    @testset "fill_from_global_indices! matches manual index loop" begin
+        nthreads = max(1, Threads.nthreads())
+        tsz = (4, 3)
+        u = ThreadedHaloArray(Float64, tsz, 1;
+            dims=(nthreads, 1), boundary_condition=:repeating)
+
+        fill_from_global_indices!(u) do I
+            Float64(I[1] * 10 + I[2])
+        end
+
+        nx, ny = tsz[1] * nthreads, tsz[2]
+        expected = [Float64(i * 10 + j) for i in 1:nx, j in 1:ny]
+        @test collect(reshape([u[i, j] for i in 1:nx, j in 1:ny], nx, ny)) == expected
+    end
+
+    @testset "fill_from_local_indices! fills per-tile interior" begin
+        nthreads = max(1, Threads.nthreads())
+        tsz = (3,)
+        u = ThreadedHaloArray(Float64, tsz, 1;
+            dims=(nthreads,), boundary_condition=:repeating)
+
+        fill_from_local_indices!(u) do i
+            Float64(i)
+        end
+
+        for tile_id in 1:tile_count(u)
+            @test collect(interior_view(u, tile_id)) == [1.0, 2.0, 3.0]
+        end
+    end
+
     @testset "threaded multi halo array compatibility checks" begin
         rho = ThreadedHaloArray(Int, (3,), 1; dims=(2,), boundary_condition=:repeating)
         bad_tile_size = ThreadedHaloArray(Int, (4,), 1; dims=(2,), boundary_condition=:repeating)

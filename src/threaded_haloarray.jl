@@ -476,3 +476,28 @@ end
 end
 
 # Base.copy inherited from AbstractSingleHaloArray
+
+function fill_from_global_indices!(f, halo::ThreadedHaloArray{T,N,A,Halo}) where {T,N,A,Halo}
+    range = interior_range(halo)
+    ts    = tile_size(halo)
+    for tile_id in 1:tile_count(halo)
+        coords = tile_coordinates(halo, tile_id)
+        data   = tile_parent(halo, tile_id)
+        for storage_I in CartesianIndices(range)
+            local_I  = ntuple(d -> storage_I[d] - Halo, Val(N))
+            global_I = ntuple(d -> (coords[d] - 1) * ts[d] + local_I[d], Val(N))
+            data[storage_I] = f(global_I)
+        end
+    end
+    return halo
+end
+
+function fill_from_local_indices!(f, halo::ThreadedHaloArray)
+    for tile_id in 1:tile_count(halo)
+        interior = interior_view(halo, tile_id)
+        for I in CartesianIndices(interior)
+            interior[I] = f(Tuple(I)...)
+        end
+    end
+    return nothing
+end
