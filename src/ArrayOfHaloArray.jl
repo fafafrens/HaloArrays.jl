@@ -112,6 +112,46 @@ function ArrayOfHaloArray(::Type{LocalHaloArray}, owned_dims::NTuple{N,Int}, hal
         boundary_conditions=boundary_conditions)
 end
 
+function _arrayofhaloarray_boundary_conditions(field_shape::NTuple{F,Int},
+        boundary_condition, boundary_conditions) where {F}
+    if boundary_conditions === nothing
+        return fill(boundary_condition, field_shape)
+    end
+
+    size(boundary_conditions) == field_shape ||
+        throw(DimensionMismatch("boundary_conditions shape $(size(boundary_conditions)) != field shape $field_shape"))
+    return boundary_conditions
+end
+
+function _local_arrayofhaloarray_field(::Type{T}, owned_dims::NTuple{N,Int},
+        halo::Int, boundary_condition, storage) where {T,N}
+    fullsize = ntuple(d -> Int(owned_dims[d]) + 2 * halo, Val(N))
+    data = storage(T, fullsize...)
+    return LocalHaloArray(data, halo, boundary_condition)
+end
+
+function ArrayOfHaloArray(::Type{LocalHaloArray}, ::Type{T},
+        field_shape::NTuple{F,<:Integer}, owned_dims::NTuple{N,<:Integer},
+        halo::Integer;
+        boundary_condition=:repeating,
+        boundary_conditions=nothing,
+        storage=zeros) where {T,F,N}
+    shape = ntuple(d -> Int(field_shape[d]), Val(F))
+    owned = ntuple(d -> Int(owned_dims[d]), Val(N))
+    h = Int(halo)
+    bcs = _arrayofhaloarray_boundary_conditions(shape, boundary_condition, boundary_conditions)
+    arrays = map(bcs) do bc
+        _local_arrayofhaloarray_field(T, owned, h, bc, storage)
+    end
+    return ArrayOfHaloArray(arrays)
+end
+
+function ArrayOfHaloArray(::Type{LocalHaloArray},
+        field_shape::NTuple{F,<:Integer}, owned_dims::NTuple{N,<:Integer},
+        halo::Integer; kwargs...) where {F,N}
+    return ArrayOfHaloArray(LocalHaloArray, Float64, field_shape, owned_dims, halo; kwargs...)
+end
+
 function ArrayOfHaloArray(::Type{ThreadedHaloArray}, ::Type{T}, tile_size::NTuple{N,<:Integer},
         halo::Integer; dims::NTuple{N,<:Integer}, boundary_conditions::AbstractArray) where {T,N}
     arrays = map(boundary_conditions) do bc

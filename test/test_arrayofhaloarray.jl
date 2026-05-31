@@ -175,6 +175,29 @@ end
     @test parent(local_fields[1]) == [1, 1, 2, 3, 3]
     @test parent(local_fields[2]) == [-10, 10, 20, 30, -30]
 
+    shaped_local = ArrayOfHaloArray(LocalHaloArray, Float32, (2, 3), (4,), 1;
+        boundary_condition=:periodic)
+    @test shaped_local isa ArrayOfHaloArray
+    @test shaped_local isa AbstractArray{Float32,3}
+    @test field_shape(shaped_local) == (2, 3)
+    @test size(shaped_local) == (2, 3, 4)
+    @test storage_size(shaped_local) == (2, 3, 6)
+    @test all(field -> field isa LocalHaloArray, parent(shaped_local))
+
+    custom_storage(T, dims...) = fill(T(7), dims...)
+    custom_local = ArrayOfHaloArray(LocalHaloArray, Float32, (2,), (3,), 1;
+        boundary_condition=:periodic, storage=custom_storage)
+    @test parent(custom_local[1]) == fill(7.0f0, 5)
+    @test parent(custom_local[2]) == fill(7.0f0, 5)
+
+    shaped_bcs = fill(:repeating, 2, 2)
+    shaped_bcs[2, 2] = :antireflecting
+    shaped_from_bcs = ArrayOfHaloArray(LocalHaloArray, Float32, (2, 2), (3,), 1;
+        boundary_conditions=shaped_bcs)
+    @test field_shape(shaped_from_bcs) == (2, 2)
+    @test_throws DimensionMismatch ArrayOfHaloArray(LocalHaloArray, Float32, (2, 2), (3,), 1;
+        boundary_conditions=fill(:repeating, 3))
+
     threaded_bcs = [:repeating, :repeating]
     threaded_fields = ArrayOfHaloArray(ThreadedHaloArray, Int, (3,), 1;
         dims=(2,), boundary_conditions=threaded_bcs)

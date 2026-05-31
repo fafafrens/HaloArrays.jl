@@ -6,6 +6,7 @@ Metal = "dde4c033-4e86-420c-a63e-0dd931031962"
 MPI = "da04e1cc-30fd-572f-bb4f-1f8673147195"
 OhMyThreads = "67456a42-1dca-4109-a031-0a68de7e3ad5"
 OrdinaryDiffEq = "1dea7af3-3e70-54e6-95c3-0bf5283fa5ed"
+PhiloxRNG = "508b8dab-2d72-462c-b792-eb7ae329b456"
 
 [compat]
 DiffEqBase = "7"
@@ -14,4 +15,5 @@ Metal = "1"
 MPI = "0.20, 0.21"
 OhMyThreads = "0.8"
 OrdinaryDiffEq = "6, 7"
+PhiloxRNG = "1"
 julia = "1.10"

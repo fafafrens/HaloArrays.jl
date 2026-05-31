@@ -254,5 +254,3 @@ end
 if abspath(PROGRAM_FILE) == @__FILE__
     main()
 end
-
-run_phi4_metal_haloarray_2d()

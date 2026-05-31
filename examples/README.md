@@ -53,6 +53,21 @@ julia --project=examples examples/local_cpu_gpu_heat_2d.jl
 
 This example requires an Apple GPU supported by Metal.jl.
 
+## Metal Monte Carlo
+
+These examples use `LocalHaloArray` storage on Metal devices together with
+colored cell regions for checkerboard updates.
+
+```bash
+julia --project=examples examples/local_metal_phi4_2d.jl
+julia --project=examples examples/local_metal_phi4_2d_philox.jl
+julia --project=examples examples/local_metal_su2_wilson_2d_arrayofhaloarray_philox.jl
+```
+
+The Philox examples use stateless per-site random numbers, so they avoid
+allocating random-number arrays during each sweep. These examples require an
+Apple GPU supported by Metal.jl.
+
 ## MPI Heat Diffusion
 
 These examples use `HaloArray`, MPI Cartesian topologies, periodic halo
