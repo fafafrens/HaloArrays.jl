@@ -282,10 +282,9 @@ println("=" ^ 60)
 vel2 = ArrayOfHaloArray(ThreadedHaloArray, Float64, (2,), tile_size, 1;
     dims=tile_dims, boundary_condition=:periodic)
 
-interior_view(vel2[1]) .= 1.0   # but this does per-tile — use loop
 for tile_id in 1:tile_count(vel2)
-    tile_parent(vel2[1], tile_id) .= 1.0
-    tile_parent(vel2[2], tile_id) .= 0.0
+    interior_view(vel2[1], tile_id) .= 1.0
+    interior_view(vel2[2], tile_id) .= 0.0
 end
 synchronize_halo!(vel2)
 
