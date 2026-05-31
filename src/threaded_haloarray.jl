@@ -1,4 +1,4 @@
-struct ThreadedCartesianTopology{N}
+struct ThreadedCartesianTopology{N} <: AbstractCartesianTopology{N}
     dims::NTuple{N,Int}
     tile_coords::Vector{NTuple{N,Int}}
     neighbors::Vector{NTuple{N,NTuple{2,Int}}}
@@ -53,33 +53,14 @@ function ThreadedCartesianTopology(dims::NTuple{N,<:Integer}; periodic=ntuple(_ 
 end
 
 @inline Base.ndims(::ThreadedCartesianTopology{N}) where {N} = N
+@inline isactive(::ThreadedCartesianTopology) = true
 @inline is_root(::ThreadedCartesianTopology; root::Integer=0) = true
 @inline tile_count(topology::ThreadedCartesianTopology) = prod(topology.dims)
 @inline tile_coordinates(topology::ThreadedCartesianTopology, tile_id::Integer) = topology.tile_coords[tile_id]
 @inline neighbor_tile_id(topology::ThreadedCartesianTopology, tile_id::Integer, dim::Integer, side::Integer) =
     topology.neighbors[tile_id][dim][side]
 
-function validate_boundary_condition(topology::ThreadedCartesianTopology{N}, boundary_condition) where {N}
-    for d in 1:N
-        left, right = boundary_condition[d]
-
-        if !(left isa AbstractBoundaryCondition) || !(right isa AbstractBoundaryCondition)
-            error("boundary_condition[$d] must be a tuple of AbstractBoundaryCondition (got $(left), $(right))")
-        end
-
-        topo_is_periodic = topology.periodic_boundary_condition[d]
-        both_periodic = (left isa Periodic) && (right isa Periodic)
-        any_periodic = (left isa Periodic) || (right isa Periodic)
-
-        if topo_is_periodic && !both_periodic
-            error("Threaded topology is periodic in dimension $d but boundary_condition[$d] is not (both sides must be Periodic).")
-        elseif !topo_is_periodic && any_periodic
-            error("Boundary condition in dimension $d uses Periodic but threaded topology is not periodic.")
-        end
-    end
-
-    return true
-end
+# validate_boundary_condition is inherited from AbstractCartesianTopology (abstract_haloarray.jl)
 
 struct ThreadedHaloArray{T,N,A,Halo,Topo,BCondition} <: AbstractSerialHaloArray{T,N}
     data::Vector{A}

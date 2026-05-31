@@ -211,26 +211,7 @@ function make_send_buffers(data::AbstractArray{T,N}, halo::Int) where {T,N}
     ntuple(D -> ntuple(S -> similar(get_send_view(Side(S), Dim(D), data, halo)), Val(2)), Val(N))
 end
 
-# ---- boundary condition validation (pure field access) ----------------
-
-function validate_boundary_condition(topology::CartesianTopology, boundary_condition)
-    isactive(topology) || return true
-    N = length(boundary_condition)
-    for d in 1:N
-        left, right = boundary_condition[d]
-        (left isa AbstractBoundaryCondition && right isa AbstractBoundaryCondition) ||
-            error("boundary_condition[$d] must be a tuple of AbstractBoundaryCondition")
-        topo_is_periodic = topology.periodic_boundary_condition[d]
-        both_periodic = (left isa Periodic) && (right isa Periodic)
-        any_periodic  = (left isa Periodic) || (right isa Periodic)
-        if topo_is_periodic && !both_periodic
-            error("Topology is periodic in dimension $d but boundary_condition[$d] is not.")
-        elseif !topo_is_periodic && any_periodic
-            error("Boundary condition in dimension $d uses Periodic but topology is not periodic.")
-        end
-    end
-    return true
-end
+# validate_boundary_condition is inherited from AbstractCartesianTopology (abstract_haloarray.jl)
 
 # ---- owned-dims helper (used by Base.similar in extension) ------------
 

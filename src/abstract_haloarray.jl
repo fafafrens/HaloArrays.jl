@@ -1,3 +1,21 @@
+"""
+    AbstractCartesianTopology{N}
+
+Common supertype for N-dimensional Cartesian decomposition topologies.
+
+Concrete subtypes:
+- `CartesianTopology{N,C}` — MPI-backed distributed topology
+- `ThreadedCartesianTopology{N}` — shared-memory tiled topology
+
+Shared interface (all subtypes must implement):
+- `Base.ndims(::AbstractCartesianTopology{N})` → N
+- `isactive(topology)` → Bool
+- `is_root(topology; root=0)` → Bool
+- `topology.dims` → NTuple{N,Int}
+- `topology.periodic_boundary_condition` → NTuple{N,Bool}
+"""
+abstract type AbstractCartesianTopology{N} end
+
 abstract type AbstractHaloArray{T,N} <: AbstractArray{T,N} end
 
 abstract type AbstractSingleHaloArray{T,N} <: AbstractHaloArray{T,N} end
@@ -58,6 +76,27 @@ function is_root end
 @inline neighbor_tile_id(arr::AbstractArray{<:AbstractSingleHaloArray}, tile_id::Integer,
         dim::Integer, side::Integer) =
     neighbor_tile_id(first(arr), tile_id, dim, side)
+
+isactive(::AbstractCartesianTopology) = true   # default: subtypes may override
+
+function validate_boundary_condition(topology::AbstractCartesianTopology, boundary_condition)
+    isactive(topology) || return true
+    N = ndims(topology)
+    for d in 1:N
+        left, right = boundary_condition[d]
+        (left isa AbstractBoundaryCondition && right isa AbstractBoundaryCondition) ||
+            error("boundary_condition[$d] must be a tuple of AbstractBoundaryCondition (got $(left), $(right))")
+        topo_is_periodic = topology.periodic_boundary_condition[d]
+        both_periodic = (left isa Periodic) && (right isa Periodic)
+        any_periodic  = (left isa Periodic) || (right isa Periodic)
+        if topo_is_periodic && !both_periodic
+            error("Topology is periodic in dimension $d but boundary_condition[$d] is not (both sides must be Periodic).")
+        elseif !topo_is_periodic && any_periodic
+            error("Boundary condition in dimension $d uses Periodic but topology is not periodic.")
+        end
+    end
+    return true
+end
 
 @inline function _check_global_scalar_indices(halo::AbstractHaloArray, I::Tuple)
     length(I) == ndims(halo) || throw(BoundsError(halo, I))

@@ -16,7 +16,7 @@ Fields:
 
 `C` is the communicator type, typically `MPI.Comm` when MPI is loaded.
 """
-struct CartesianTopology{N,C}
+struct CartesianTopology{N,C} <: AbstractCartesianTopology{N}
     nprocs::Int
     dims::NTuple{N,Int}
     global_rank::Int
