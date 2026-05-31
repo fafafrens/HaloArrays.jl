@@ -44,6 +44,7 @@ function create_haloarray_output_file end
 function _hdf5_comm end
 function _hdf5_dataset_dims end
 function _hdf5_chunk_dims end
+function _hdf5_snapshot end
 
 # Core types
 export HaloArray,

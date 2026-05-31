@@ -11,7 +11,7 @@ using HaloArrays:
     HaloArray, ArrayOfHaloArray, MultiHaloArray, MaybeHaloArray,
     AbstractHaloArray, AbstractSerialHaloArray,
     interior_view, field_shape, isactive, getdata,
-    gather_haloarray, _hdf5_comm
+    gather_haloarray, _hdf5_comm, _hdf5_snapshot
 
 # ---- parallel file open -----------------------------------------------
 
@@ -46,7 +46,7 @@ end
 
 function _hdf5_gather_snapshot_mpi(halo::ArrayOfHaloArray; root::Int=0)
     comm = _hdf5_comm(halo)
-    comm === nothing && return _hdf5_snapshot_serial(halo)
+    comm === nothing && return _hdf5_snapshot(halo)
     rank = MPI.Comm_rank(comm)
     data = nothing
     for I in CartesianIndices(parent(halo))

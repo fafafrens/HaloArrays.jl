@@ -6,7 +6,7 @@ using HaloArrays:
     HaloArray, LocalHaloArray, ThreadedHaloArray, ArrayOfHaloArray, MultiHaloArray,
     MaybeHaloArray, AbstractSingleHaloArray, AbstractSerialHaloArray, AbstractHaloArray,
     interior_view, global_size, field_shape, tile_count, tile_size, tile_coordinates,
-    tile_parent, isactive, getdata, _hdf5_comm
+    tile_parent, isactive, getdata, _hdf5_comm, _hdf5_snapshot
 
 # ---- helpers ----------------------------------------------------------
 
@@ -46,11 +46,11 @@ end
 
 # ---- snapshots --------------------------------------------------------
 
-function _hdf5_snapshot(halo::LocalHaloArray)
+function HaloArrays._hdf5_snapshot(halo::LocalHaloArray)
     Array(interior_view(halo))
 end
 
-function _hdf5_snapshot(halo::ThreadedHaloArray{T,N}) where {T,N}
+function HaloArrays._hdf5_snapshot(halo::ThreadedHaloArray{T,N}) where {T,N}
     data = Array{T}(undef, global_size(halo))
     owned_ts = tile_size(halo)
     for tile_id in 1:tile_count(halo)
@@ -64,7 +64,7 @@ function _hdf5_snapshot(halo::ThreadedHaloArray{T,N}) where {T,N}
     return data
 end
 
-function _hdf5_snapshot(halo::ArrayOfHaloArray)
+function HaloArrays._hdf5_snapshot(halo::ArrayOfHaloArray)
     first(parent(halo)) isa HaloArray &&
         throw(ArgumentError("snapshot for MPI ArrayOfHaloArray not supported; use append_haloarray! or write_haloarray_timestep!"))
     data = Array{eltype(halo)}(undef, HaloArrays._hdf5_dataset_dims(halo))
@@ -76,7 +76,7 @@ function _hdf5_snapshot(halo::ArrayOfHaloArray)
     return data
 end
 
-function _hdf5_snapshot(halo::MultiHaloArray)
+function HaloArrays._hdf5_snapshot(halo::MultiHaloArray)
     HaloArrays._hdf5_comm(halo) === nothing ||
         throw(ArgumentError("snapshot for MPI MultiHaloArray not supported; use gather_and_save_haloarray"))
     fields = map(_hdf5_snapshot, values(halo.arrays))
