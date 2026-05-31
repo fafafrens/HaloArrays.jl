@@ -2,9 +2,13 @@ module HaloArraysMPIExt
 
 using MPI
 using LinearAlgebra
+
+# import (not using) for names we add new methods to in this extension
 import HaloArrays
+import HaloArrays: CartesianTopology, HaloArray
+
 using HaloArrays:
-    HaloArray, CartesianTopology, AbstractBoundaryCondition, Periodic, Repeating,
+    AbstractBoundaryCondition, Periodic, Repeating,
     AbstractHaloArray, AbstractDistributedHaloArray, MaybeHaloArray,
     MultiHaloArray, ArrayOfHaloArray, AbstractSingleHaloArray,
     MPIHaloBackend, Side, Dim,
@@ -16,7 +20,7 @@ using HaloArrays:
     boundary_condition!, isactive, is_root,
     _global_to_owned_dims, coords_to_color_multi,
     foreach_field!, start_halo_exchange_async_unsafe!, end_halo_exchange_async_wait_unsafe!,
-    MaybeHaloArray, isactive, getdata
+    isactive, getdata
 
 # ============================================================
 # HaloCommState — MPI request bookkeeping
