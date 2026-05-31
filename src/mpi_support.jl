@@ -309,10 +309,79 @@ function end_halo_exchange_async_wait_unsafe!(halo::HaloArray{T,N}) where {T,N}
     return nothing
 end
 
+# ---- safe (non-unsafe-request) async helpers --------------------------
+
+function _start_halo_exchange_safe!(halo::HaloArray{T,N}) where {T,N}
+    comm      = halo.topology.cart_comm
+    topo      = halo.topology
+    recv_reqs = halo.comm_state.recv_reqs
+    send_reqs = halo.comm_state.send_reqs
+    recv_bufs = halo.receive_bufs
+    send_bufs = halo.send_bufs
+    @inbounds for dim in 1:N, side in 1:2
+        nbrank = topo.neighbors[dim][side]
+        if nbrank != MPI.PROC_NULL
+            copyto!(send_bufs[dim][side], get_send_view(Side(side), dim, halo))
+            recv_reqs[dim][side] = MPI.Irecv!(recv_bufs[dim][side], comm, recv_reqs[dim][side];
+                source=nbrank, tag=tag_recv(dim, side))
+            send_reqs[dim][side] = MPI.Isend(send_bufs[dim][side], comm, send_reqs[dim][side];
+                dest=nbrank, tag=tag_send(dim, side))
+        end
+    end
+    return nothing
+end
+
+function _finish_halo_exchange_safe!(halo::HaloArray{T,N}) where {T,N}
+    topo      = halo.topology
+    recv_reqs = halo.comm_state.recv_reqs
+    send_reqs = halo.comm_state.send_reqs
+    recv_bufs = halo.receive_bufs
+    @inbounds for dim in 1:N, side in 1:2
+        nbrank = topo.neighbors[dim][side]
+        if nbrank != MPI.PROC_NULL
+            MPI.Wait(recv_reqs[dim][side])
+            copyto!(get_recv_view(Side(side), dim, halo), recv_bufs[dim][side])
+            MPI.Wait(send_reqs[dim][side])
+        end
+    end
+    return nothing
+end
+
+# ---- public exchange API ----------------------------------------------
+
 halo_exchange!(halo::HaloArray) = halo_exchange_waitall_unsafe!(halo)
 
 start_halo_exchange!(halo::HaloArray)  = start_halo_exchange_async_unsafe!(halo)
 finish_halo_exchange!(halo::HaloArray) = end_halo_exchange_async_wait_unsafe!(halo)
+
+# ---- compatibility wrappers (used by MPI tests and benchmarks) --------
+
+halo_exchange_wait!(halo::HaloArray) = halo_exchange_waitall!(halo)
+
+function start_halo_exchange_async!(halo::HaloArray)
+    _start_halo_exchange_safe!(halo)
+    return nothing
+end
+
+function end_halo_exchange_wait!(halo::HaloArray)
+    _finish_halo_exchange_safe!(halo)
+    return nothing
+end
+
+function halo_exchange_async!(halo::HaloArray)
+    start_halo_exchange_async!(halo)
+    end_halo_exchange_wait!(halo)
+    return nothing
+end
+
+function halo_exchange_async_unsafe!(halo::HaloArray)
+    start_halo_exchange_async_unsafe!(halo)
+    end_halo_exchange_async_wait_unsafe!(halo)
+    return nothing
+end
+
+halo_exchange_async_wait!(halo::HaloArray)        = end_halo_exchange_wait!(halo)
+halo_exchange_async_wait_unsafe!(halo::HaloArray) = end_halo_exchange_async_wait_unsafe!(halo)
 
 function synchronize_halo!(halo::HaloArray)
     halo_exchange!(halo)
