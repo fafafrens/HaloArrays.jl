@@ -361,6 +361,39 @@ keeping the checkerboard rule shared with the CPU cell-range API.
 offsets. `global_to_storage_index(u, I)` returns the full parent-storage index for
 owned global cells and `nothing` for cells owned by another rank.
 
+## Tutorials
+
+Step-by-step tutorials are provided in the `examples/` directory.
+Each file is self-contained and runnable.
+
+| File | What it covers |
+|---|---|
+| [`tutorial_local.jl`](examples/tutorial_local.jl) | Storage layout, boundary conditions, `CellRanges`/`FaceRanges`, heat equation, `LocalMultiHaloArray`, `ThreadedHaloArray`, `ArrayOfHaloArray` |
+| [`tutorial_mpi.jl`](examples/tutorial_mpi.jl) | `CartesianTopology`, `HaloArray`, halo exchange (blocking and async), global reductions, gather, multi-field MPI, distributed heat equation |
+| [`tutorial_threaded.jl`](examples/tutorial_threaded.jl) | `ThreadedHaloArray` tile layout, tile loop pattern, synchronisation, threaded Burgers equation, `ThreadedMultiHaloArray` |
+| [`tutorial_broadcast.jl`](examples/tutorial_broadcast.jl) | Interior-only semantics, in-place and allocating broadcast, mixing with scalars and plain arrays, `MultiHaloArray` and `ThreadedHaloArray` broadcast, unsupported patterns |
+| [`tutorial_gpu.jl`](examples/tutorial_gpu.jl) | Moving a `LocalHaloArray` to Metal/GPU, `KernelAbstractions` kernels, `CellKernelRegion`, `ColoredCellKernelRegion`, `FaceKernelRegion`, GPU heat equation |
+| [`tutorial_diffeq.jl`](examples/tutorial_diffeq.jl) | `OrdinaryDiffEq.jl` integration, `synchronize_halo!` contract in the RHS, scalar decay, heat equation with Tsit5, multi-field ODE state, `ThreadedHaloArray` as ODE state |
+
+**Running the tutorials:**
+
+```bash
+# No MPI — runs on a single process
+julia --project=. examples/tutorial_local.jl
+julia --project=. -t 4 examples/tutorial_broadcast.jl
+julia --project=. -t 4 examples/tutorial_threaded.jl
+
+# MPI — requires mpiexec
+mpiexec -n 4 julia --project=. examples/tutorial_mpi.jl
+
+# GPU — requires Metal.jl (macOS) or equivalent KernelAbstractions backend
+julia --project=. examples/tutorial_gpu.jl
+
+# OrdinaryDiffEq — requires the examples environment
+julia --project=examples -e 'using Pkg; Pkg.develop(path=pwd()); Pkg.instantiate()'
+julia --project=examples examples/tutorial_diffeq.jl
+```
+
 ## Examples
 
 Optional DiffEq examples use their own environment:

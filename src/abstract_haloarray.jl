@@ -51,6 +51,13 @@ function global_to_storage_index end
 function is_root end
 
 @inline halo_width(arr::AbstractArray{<:AbstractSingleHaloArray}) = halo_width(first(arr))
+@inline tile_count(arr::AbstractArray{<:AbstractSingleHaloArray}) = tile_count(first(arr))
+@inline tile_size(arr::AbstractArray{<:AbstractSingleHaloArray}) = tile_size(first(arr))
+@inline tile_coordinates(arr::AbstractArray{<:AbstractSingleHaloArray}, tile_id::Integer) =
+    tile_coordinates(first(arr), tile_id)
+@inline neighbor_tile_id(arr::AbstractArray{<:AbstractSingleHaloArray}, tile_id::Integer,
+        dim::Integer, side::Integer) =
+    neighbor_tile_id(first(arr), tile_id, dim, side)
 
 @inline function _check_global_scalar_indices(halo::AbstractHaloArray, I::Tuple)
     length(I) == ndims(halo) || throw(BoundsError(halo, I))

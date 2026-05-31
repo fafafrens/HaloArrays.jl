@@ -313,7 +313,7 @@ function su2_wilson_sweep!(
         key::UInt64,
         sweep::Integer,
     )
-    ranges = CellRanges(U[1, 1])
+    ranges = CellRanges(U)
 
     for color in 0:1
         synchronize_halo!(U)

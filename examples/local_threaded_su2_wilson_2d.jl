@@ -200,7 +200,7 @@ function update_direction_color!(::LocalHaloBackend, U, rng, params, dir::Int, c
     arrays = link_arrays(U)
     update! = dir == 1 ? update_x_link! : update_y_link!
 
-    for indices in get_colored_owned_cell_ranges(CellRanges(U[1, 1]), color)
+    for indices in get_colored_owned_cell_ranges(CellRanges(U), color)
         @inbounds for I in indices
             update!(arrays, I, params, rng)
         end
@@ -210,10 +210,10 @@ function update_direction_color!(::LocalHaloBackend, U, rng, params, dir::Int, c
 end
 
 function update_direction_color!(::ThreadedHaloBackend, U, rngs, params, dir::Int, color::Int)
-    regions = get_colored_owned_cell_ranges(CellRanges(U[1, 1]), color)
+    regions = get_colored_owned_cell_ranges(CellRanges(U), color)
     update! = dir == 1 ? update_x_link! : update_y_link!
 
-    tforeach(1:tile_count(U[1, 1]); scheduler=:static) do tile_id
+    tforeach(1:tile_count(U); scheduler=:static) do tile_id
         arrays = link_arrays(U, tile_id)
         rng = rngs[tile_id]
         for indices in regions
@@ -267,7 +267,7 @@ function average_plaquette(U::ArrayOfHaloArray)
 end
 
 function average_plaquette(::LocalHaloBackend, U::ArrayOfHaloArray)
-    total, count = plaquette_sum_count(link_arrays(U), get_owned_cells(CellRanges(U[1, 1])))
+    total, count = plaquette_sum_count(link_arrays(U), get_owned_cells(CellRanges(U)))
     return total / count
 end
 
@@ -275,10 +275,10 @@ function average_plaquette(::ThreadedHaloBackend, U::ArrayOfHaloArray)
     total = 0.0
     count = 0
 
-    for tile_id in 1:tile_count(U[1, 1])
+    for tile_id in 1:tile_count(U)
         tile_total, tile_count_ = plaquette_sum_count(
             link_arrays(U, tile_id),
-            get_owned_cells(CellRanges(U[1, 1])),
+            get_owned_cells(CellRanges(U)),
         )
         total += tile_total
         count += tile_count_
@@ -309,7 +309,7 @@ function run_threaded_su2_wilson_2d(; n=(32, 32), nsweeps=100, measure_every=20,
         beta=2.0f0, proposal_eps=0.35f0, seed=1234,
         tile_dims=(Base.Threads.nthreads(), 1))
     U = initialize_su2_links_2d(ThreadedHaloArray, n, 1; tile_dims)
-    rngs = [MersenneTwister(seed + tile_id) for tile_id in 1:tile_count(U[1, 1])]
+    rngs = [MersenneTwister(seed + tile_id) for tile_id in 1:tile_count(U)]
     params = SU2WilsonCPUParams(beta=Float32(beta), proposal_eps=Float32(proposal_eps))
 
     @printf("2D pure SU(2) Wilson Metropolis with ThreadedHaloArray\n")

@@ -151,6 +151,8 @@ n_field(halos::MultiHaloArray{T,N,A,D}) where {T,N,A,D} = length(halos.arrays)
     NamedTuple{keys(halos.arrays)}(map(a -> tile_parent(a, tile_id), values(halos.arrays)))
 @inline tile_coordinates(halos::MultiHaloArray, tile_id::Integer) =
     tile_coordinates(first(values(halos.arrays)), tile_id)
+@inline neighbor_tile_id(halos::MultiHaloArray, tile_id::Integer, dim::Integer, side::Integer) =
+    neighbor_tile_id(first(values(halos.arrays)), tile_id, dim, side)
 @inline halo_backend(halos::MultiHaloArray) = halo_backend(first(values(halos.arrays)))
 
 to_tuple(mha::MultiHaloArray) = (mha.arrays...,)

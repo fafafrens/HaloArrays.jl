@@ -366,6 +366,13 @@ function is_root(mha::ArrayOfHaloArray; root::Integer=0)
     return is_root(first(mha.arrays); root=root)
 end
 
+@inline tile_count(mha::ArrayOfHaloArray) = tile_count(first(parent(mha)))
+@inline tile_size(mha::ArrayOfHaloArray) = tile_size(first(parent(mha)))
+@inline tile_coordinates(mha::ArrayOfHaloArray, tile_id::Integer) =
+    tile_coordinates(first(parent(mha)), tile_id)
+@inline neighbor_tile_id(mha::ArrayOfHaloArray, tile_id::Integer, dim::Integer, side::Integer) =
+    neighbor_tile_id(first(parent(mha)), tile_id, dim, side)
+
 function Base.all(f::F, mha::ArrayOfHaloArray) where {F<:Function}
     return all(field -> all(f, field), mha.arrays)
 end
