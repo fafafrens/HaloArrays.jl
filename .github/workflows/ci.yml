@@ -45,7 +45,7 @@ jobs:
         shell: julia --color=yes --project=. {0}
         run: |
           using Pkg
-          Pkg.add("MPIPreferences")
+          Pkg.add(["MPI", "MPIPreferences"])
           using MPIPreferences
           MPIPreferences.use_jll_binary("MPICH_jll")
       - uses: julia-actions/julia-buildpkg@v1
