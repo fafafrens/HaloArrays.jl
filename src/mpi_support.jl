@@ -5,11 +5,17 @@
 # HaloCommState — MPI request bookkeeping
 # ============================================================
 
+# Outer dimension is NTuple{N,...} so the compiler can specialize exchange
+# loops on N (known at compile time from the HaloArray type parameter).
+# Inner dimension stays Vector{MPI.Request} because elements are reassigned
+# each exchange via recv_reqs[dim][side] = MPI.Irecv!(...).
+# The flat vectors are separate copies used for MPI.Waitall (which is more
+# efficient than N*2 individual MPI.Wait calls).
 struct HaloCommState{N}
-    recv_reqs::Vector{Vector{MPI.Request}}
-    send_reqs::Vector{Vector{MPI.Request}}
-    unsafe_recv_reqs_vv::Vector{Vector{MPI.UnsafeRequest}}
-    unsafe_send_reqs_vv::Vector{Vector{MPI.UnsafeRequest}}
+    recv_reqs::NTuple{N, Vector{MPI.Request}}
+    send_reqs::NTuple{N, Vector{MPI.Request}}
+    unsafe_recv_reqs_vv::NTuple{N, Vector{MPI.UnsafeRequest}}
+    unsafe_send_reqs_vv::NTuple{N, Vector{MPI.UnsafeRequest}}
     recv_reqs_flat::Vector{MPI.Request}
     send_reqs_flat::Vector{MPI.Request}
     unsafe_recv_reqs::MPI.UnsafeMultiRequest
@@ -17,20 +23,14 @@ struct HaloCommState{N}
 end
 
 function HaloCommState(N::Int)
-    recv_reqs = Vector{Vector{MPI.Request}}(undef, N)
-    send_reqs = Vector{Vector{MPI.Request}}(undef, N)
-    unsafe_recv_reqs_vv = Vector{Vector{MPI.UnsafeRequest}}(undef, N)
-    unsafe_send_reqs_vv = Vector{Vector{MPI.UnsafeRequest}}(undef, N)
-    for d in 1:N
-        recv_reqs[d] = [MPI.Request() for _ in 1:2]
-        send_reqs[d] = [MPI.Request() for _ in 1:2]
-        unsafe_recv_reqs_vv[d] = [MPI.UnsafeRequest() for _ in 1:2]
-        unsafe_send_reqs_vv[d] = [MPI.UnsafeRequest() for _ in 1:2]
-    end
-    recv_reqs_flat = vcat(recv_reqs...)
-    send_reqs_flat = vcat(send_reqs...)
-    unsafe_recv_reqs = MPI.UnsafeMultiRequest(length(recv_reqs_flat))
-    unsafe_send_reqs = MPI.UnsafeMultiRequest(length(send_reqs_flat))
+    recv_reqs         = ntuple(_ -> [MPI.Request()       for _ in 1:2], N)
+    send_reqs         = ntuple(_ -> [MPI.Request()       for _ in 1:2], N)
+    unsafe_recv_reqs_vv = ntuple(_ -> [MPI.UnsafeRequest() for _ in 1:2], N)
+    unsafe_send_reqs_vv = ntuple(_ -> [MPI.UnsafeRequest() for _ in 1:2], N)
+    recv_reqs_flat    = reduce(vcat, recv_reqs)
+    send_reqs_flat    = reduce(vcat, send_reqs)
+    unsafe_recv_reqs  = MPI.UnsafeMultiRequest(length(recv_reqs_flat))
+    unsafe_send_reqs  = MPI.UnsafeMultiRequest(length(send_reqs_flat))
     HaloCommState{N}(recv_reqs, send_reqs, unsafe_recv_reqs_vv, unsafe_send_reqs_vv,
         recv_reqs_flat, send_reqs_flat, unsafe_recv_reqs, unsafe_send_reqs)
 end
