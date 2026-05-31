@@ -6,7 +6,8 @@ using LinearAlgebra
 # import (not using) for names we add new methods to in this extension
 import HaloArrays
 import HaloArrays: CartesianTopology, HaloArray,
-    start_halo_exchange_async_unsafe!, end_halo_exchange_async_wait_unsafe!
+    start_halo_exchange_async_unsafe!, end_halo_exchange_async_wait_unsafe!,
+    subcomm_for_slices, root_topology_multi
 
 using HaloArrays:
     AbstractBoundaryCondition, Periodic, Repeating,
@@ -104,7 +105,7 @@ end
 
 # ---- sub-communicator helpers -----------------------------------------
 
-function subcomm_for_slices(cart::CartesianTopology{N}, dims_to_reduce) where {N}
+function HaloArrays.subcomm_for_slices(cart::CartesianTopology{N}, dims_to_reduce) where {N}
     coords = cart.cart_coords
     tuple_dims_to_reduce = Tuple(dims_to_reduce)
     color = coords_to_color_multi(coords, cart.dims, tuple_dims_to_reduce)
@@ -118,7 +119,7 @@ function subcomm_for_slices(cart::CartesianTopology{N}, dims_to_reduce) where {N
     return (sub_comm, coords, subrank)
 end
 
-function root_topology_multi(cart::CartesianTopology{N}, dims_to_reduce;
+function HaloArrays.root_topology_multi(cart::CartesianTopology{N}, dims_to_reduce;
         root_coord::Int=0) where {N}
     coords = cart.cart_coords
     tuple_dims_to_reduce = Tuple(dims_to_reduce)

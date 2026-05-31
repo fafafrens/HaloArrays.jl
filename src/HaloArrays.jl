@@ -31,6 +31,8 @@ include("reduction.jl")
 # Stubs for functions defined in extensions — declared here so extensions can extend them
 # and so that `export` resolves at load time.
 function inactive_cartesian_topology end
+function subcomm_for_slices end
+function root_topology_multi end
 function mapreduce_haloarray_dims end
 function mapreduce_mhaloarray_dims end
 function gather_haloarray end
