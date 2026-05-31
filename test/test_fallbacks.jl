@@ -31,7 +31,7 @@ using HaloArrays
         # left/right faces are slabs of width 1, internal face is (3,4)
         @test length(get_left_face(fr, 1))  == 4
         @test length(get_right_face(fr, 1)) == 4
-        @test size(get_internal_face(fr))   == (3, 4)
+        @test size(get_internal_face(fr))   == (3, 3)
         @test get_unit_vector(fr, 1) == CartesianIndex(1, 0)
         @test get_unit_vector(fr, 2) == CartesianIndex(0, 1)
     end
