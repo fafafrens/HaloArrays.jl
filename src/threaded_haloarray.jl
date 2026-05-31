@@ -103,6 +103,13 @@ ThreadedHaloArray(tile_size::NTuple{N,<:Integer}, halo::Integer; kwargs...) wher
 @inline Base.parent(halo::ThreadedHaloArray) = halo.data
 @inline owned_size(halo::ThreadedHaloArray) = ntuple(d -> halo.tile_size[d] * halo.topology.dims[d], Val(ndims(halo)))
 # size, axes, length inherited from AbstractSingleHaloArray
+# owned_axes uses owned_size (tiles have no single interior_view without tile_id)
+@inline owned_axes(halo::ThreadedHaloArray)         = map(Base.OneTo, owned_size(halo))
+@inline owned_axes(halo::ThreadedHaloArray, d::Int) = Base.OneTo(owned_size(halo, d))
+# eachindex/iterate use global CartesianIndices (interior_view without tile_id was removed)
+@inline Base.eachindex(halo::ThreadedHaloArray) = CartesianIndices(axes(halo))
+@inline Base.iterate(halo::ThreadedHaloArray) = iterate(CartesianIndices(axes(halo)))
+@inline Base.iterate(halo::ThreadedHaloArray, state) = iterate(CartesianIndices(axes(halo)), state)
 @inline owned_axes(halo::ThreadedHaloArray) = map(Base.OneTo, owned_size(halo))
 @inline owned_axes(halo::ThreadedHaloArray, d::Int) = Base.OneTo(owned_size(halo, d))
 @inline interior_size(halo::ThreadedHaloArray) = owned_size(halo)
@@ -444,13 +451,7 @@ Base.similar(halo::ThreadedHaloArray{T,N,A,Halo,B,BCondition}, ::Type{AA},
     dims::NTuple{M,<:Integer}) where {T,N,A,Halo,B,BCondition,AA,M} =
     similar(halo, AA, ntuple(d -> Int(dims[d]), Val(M)))
 
-Base.similar(halo::ThreadedHaloArray) = similar(halo, eltype(halo), size(halo))
-Base.similar(halo::ThreadedHaloArray, ::Type{AA}) where {AA} = similar(halo, AA, size(halo))
-Base.similar(halo::ThreadedHaloArray, dims::Dims{M}) where {M} = similar(halo, eltype(halo), dims)
-Base.similar(halo::ThreadedHaloArray, dims::NTuple{M,<:Integer}) where {M} =
-    similar(halo, eltype(halo), dims)
-
-# Base.zero inherited from AbstractSingleHaloArray
+# Base.similar dispatchers and Base.zero inherited from AbstractSingleHaloArray
 
 function Base.foreach(f, halo::ThreadedHaloArray)
     for tile_id in 1:tile_count(halo)

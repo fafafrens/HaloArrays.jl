@@ -189,11 +189,7 @@ Base.similar(halo::HaloArray{T,N,A,H,B,BC,Topo,CS}, ::Type{AA},
     dims::NTuple{M,<:Integer}) where {T,N,A,H,B,BC,Topo,CS,AA,M} =
     similar(halo, AA, ntuple(d -> Int(dims[d]), Val(M)))
 
-Base.similar(halo::HaloArray)                       = similar(halo, eltype(halo), size(halo))
-Base.similar(halo::HaloArray, ::Type{AA}) where {AA} = similar(halo, AA, size(halo))
-Base.similar(halo::HaloArray, dims::Dims{M}) where {M} = similar(halo, eltype(halo), dims)
-Base.similar(halo::HaloArray, dims::NTuple{M,<:Integer}) where {M} =
-    similar(halo, eltype(halo), dims)
+# Base.similar dispatchers inherited from AbstractSingleHaloArray
 
 # LinearAlgebra.norm inherited from AbstractSingleHaloArray (abstract_haloarray.jl)
 

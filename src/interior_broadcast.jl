@@ -80,9 +80,8 @@ find_threaded_ha(x, rest) = find_threaded_ha(rest)
 find_threaded_ha(x) = x
 
 # Unpack broadcast args per field
-unpack_ha(x::HaloArray) = interior_view(x)
-unpack_ha(x::LocalHaloArray) = interior_view(x)
-unpack_ha(x) = x 
+unpack_ha(x::AbstractSingleHaloArray) = interior_view(x)
+unpack_ha(x) = x
 @inline function unpack_ha(bc::Broadcasted{Style}) where {Style}
     Broadcasted{Style}(bc.f, unpack_args_ha(bc.args))
 end
@@ -98,8 +97,7 @@ end
 unpack_args_ha( args::Tuple{Any}) = (unpack_ha(args[1]),)
 
 unpack_ha_tile(x::ThreadedHaloArray, tile_id) = interior_view(x, tile_id)
-unpack_ha_tile(x::HaloArray, tile_id) = interior_view(x)
-unpack_ha_tile(x::LocalHaloArray, tile_id) = interior_view(x)
+unpack_ha_tile(x::AbstractSingleHaloArray, _) = interior_view(x)
 unpack_ha_tile(x, tile_id) = x
 
 @inline function unpack_ha_tile(bc::Broadcasted{Style}, tile_id) where {Style}

@@ -162,6 +162,32 @@ function Base.fill!(halo::AbstractSingleHaloArray, value)
     return halo
 end
 
+@inline owned_axes(halo::AbstractSingleHaloArray)         = axes(interior_view(halo))
+@inline owned_axes(halo::AbstractSingleHaloArray, i::Int) = axes(interior_view(halo), i)
+
+@inline versors(::AbstractSingleHaloArray{<:Any,N}) where {N} = versors(Val(N))
+
+@inline Base.eachindex(halo::AbstractSingleHaloArray)             = eachindex(interior_view(halo))
+@inline Base.iterate(halo::AbstractSingleHaloArray)               = iterate(interior_view(halo))
+@inline Base.iterate(halo::AbstractSingleHaloArray, state)        = iterate(interior_view(halo), state)
+
+Base.similar(halo::AbstractSingleHaloArray)                    = similar(halo, eltype(halo), size(halo))
+Base.similar(halo::AbstractSingleHaloArray, ::Type{AA}) where {AA} = similar(halo, AA, size(halo))
+Base.similar(halo::AbstractSingleHaloArray, dims::Dims{M}) where {M} = similar(halo, eltype(halo), dims)
+Base.similar(halo::AbstractSingleHaloArray, dims::NTuple{M,<:Integer}) where {M} =
+    similar(halo, eltype(halo), dims)
+
+function Base.map!(f, dest::AbstractSingleHaloArray, src::Vararg{AbstractSingleHaloArray,Nsrc}) where {Nsrc}
+    @views map!(f, interior_view(dest), map(interior_view, src)...)
+    return dest
+end
+
+function Base.map(f, src::Vararg{AbstractSingleHaloArray,Nsrc}) where {Nsrc}
+    dest = similar(src[1])
+    map!(f, dest, src...)
+    return dest
+end
+
 # ---- AbstractHaloCollection helpers (Group 3) -------------------------
 # _first_field: the reference field used for geometry queries
 # _fields:      all fields as an iterable (for operations like isactive)

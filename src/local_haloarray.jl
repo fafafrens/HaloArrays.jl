@@ -26,11 +26,7 @@ end
 @inline Base.ndims(::LocalHaloArray{T,N}) where {T,N} = N
 @inline Base.ndims(::Type{<:LocalHaloArray{T,N}}) where {T,N} = N
 @inline Base.parent(halo::LocalHaloArray) = halo.data
-@inline owned_axes(halo::LocalHaloArray) = axes(interior_view(halo))
-@inline owned_axes(halo::LocalHaloArray, d::Int) = axes(interior_view(halo), d)
-@inline Base.eachindex(halo::LocalHaloArray) = eachindex(interior_view(halo))
-@inline Base.iterate(halo::LocalHaloArray) = iterate(interior_view(halo))
-@inline Base.iterate(halo::LocalHaloArray, state) = iterate(interior_view(halo), state)
+# owned_axes, eachindex, iterate inherited from AbstractSingleHaloArray
 
 isactive(::LocalHaloArray) = true
 is_root(::LocalHaloArray; root::Integer=0) = (root == 0)
@@ -70,7 +66,7 @@ end
 
 @inline get_send_view(s, d, array::LocalHaloArray) = get_send_view(s, d, parent(array), halo_width(array))
 @inline get_recv_view(s, d, array::LocalHaloArray) = get_recv_view(s, d, parent(array), halo_width(array))
-@inline versors(::LocalHaloArray{T,N}) where {T,N} = versors(Val(N))
+# versors, Base.similar dispatchers, Base.map!/map inherited from AbstractSingleHaloArray
 
 function Base.similar(halo::LocalHaloArray{T,N,A,Halo,BCondition}, ::Type{AA},
         dims::Dims{M}) where {T,N,A,Halo,BCondition,AA,M}
@@ -84,22 +80,10 @@ Base.similar(halo::LocalHaloArray{T,N,A,Halo,BCondition}, ::Type{AA},
     dims::NTuple{M,<:Integer}) where {T,N,A,Halo,BCondition,AA,M} =
     similar(halo, AA, ntuple(d -> Int(dims[d]), Val(M)))
 
-Base.similar(halo::LocalHaloArray) = similar(halo, eltype(halo), size(halo))
-Base.similar(halo::LocalHaloArray, ::Type{AA}) where {AA} = similar(halo, AA, size(halo))
-Base.similar(halo::LocalHaloArray, dims::Dims{M}) where {M} = similar(halo, eltype(halo), dims)
-Base.similar(halo::LocalHaloArray, dims::NTuple{M,<:Integer}) where {M} =
-    similar(halo, eltype(halo), dims)
-
 # Base.copy, Base.zero, Base.fill!, Base.copyto!, fill_interior,
-# fill_from_local_indices!, Base.foreach, arithmetic, norm
-# inherited from AbstractSingleHaloArray
-
-function Base.map!(f, dest::LocalHaloArray, src::Vararg{LocalHaloArray,N}) where {N}
-    dest_interior = interior_view(dest)
-    src_interiors = map(interior_view, src)
-    map!(f, dest_interior, src_interiors...)
-    return dest
-end
+# fill_from_local_indices!, Base.foreach, arithmetic, norm,
+# owned_axes, eachindex, iterate, versors, Base.similar dispatchers,
+# Base.map!/map — all inherited from AbstractSingleHaloArray
 
 function Base.map(f, src::Vararg{LocalHaloArray,N}) where {N}
     dest = similar(src[1])

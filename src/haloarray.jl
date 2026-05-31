@@ -59,12 +59,8 @@ end
     @views halo.data[interior_range(halo)...]
 end
 
-# size, axes, length inherited from AbstractSingleHaloArray
-@inline owned_axes(halo::HaloArray)           = axes(interior_view(halo))
-@inline owned_axes(halo::HaloArray, i::Int)   = axes(interior_view(halo), i)
-@inline Base.eachindex(halo::HaloArray)       = eachindex(interior_view(halo))
-@inline Base.iterate(halo::HaloArray)         = iterate(interior_view(halo))
-@inline Base.iterate(halo::HaloArray, state)  = iterate(interior_view(halo), state)
+# size, axes, length, owned_axes, eachindex, iterate, versors, similar dispatchers,
+# map!/map inherited from AbstractSingleHaloArray
 
 # ---- global / topology accessors (pure field access, no MPI calls) ----
 
@@ -209,32 +205,7 @@ end
 # fill_interior, fill_from_local_indices!, Base.foreach, arithmetic,
 # LinearAlgebra.norm inherited from AbstractSingleHaloArray
 
-function Base.map!(f, dest::HaloArray, src::HaloArray)
-    @views map!(f, interior_view(dest), interior_view(src))
-    return dest
-end
-
-function Base.map!(f, dest::HaloArray, src::Vararg{HaloArray,2})
-    @views map!(f, interior_view(dest), interior_view(src[1]), interior_view(src[2]))
-    return dest
-end
-
-function Base.map!(f, dest::HaloArray, src::Vararg{HaloArray,3})
-    @views map!(f, interior_view(dest),
-        interior_view(src[1]), interior_view(src[2]), interior_view(src[3]))
-    return dest
-end
-
-function Base.map!(f, dest::HaloArray, src::Vararg{HaloArray,Nsrc}) where {Nsrc}
-    @views map!(f, interior_view(dest), map(interior_view, src)...)
-    return dest
-end
-
-function Base.map(f, src::Vararg{HaloArray,Nsrc}) where {Nsrc}
-    dest = similar(src[1])
-    map!(f, dest, src...)
-    return dest
-end
+# Base.map!/map inherited from AbstractSingleHaloArray
 
 
 # ---- fill helpers -----------------------------------------------------
