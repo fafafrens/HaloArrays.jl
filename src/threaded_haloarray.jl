@@ -164,10 +164,6 @@ end
     @views return tile_parent(halo, tile_id)[ranges...]
 end
 
-function interior_view(halo::ThreadedHaloArray)
-    return [interior_view(halo, tile_id) for tile_id in eachindex(parent(halo))]
-end
-
 @inline function full_view(halo::ThreadedHaloArray, tile_id::Integer)
     ranges = full_range(halo, tile_id)
     @views return tile_parent(halo, tile_id)[ranges...]
@@ -456,9 +452,6 @@ Base.similar(halo::ThreadedHaloArray, dims::NTuple{M,<:Integer}) where {M} =
 
 # Base.zero inherited from AbstractSingleHaloArray
 
-# interior_view(::ThreadedHaloArray) returns a Vector of tile views, so the
-# AbstractSingleHaloArray foreach would iterate over tiles not cells.
-# This override iterates over individual elements across all tiles.
 function Base.foreach(f, halo::ThreadedHaloArray)
     for tile_id in 1:tile_count(halo)
         foreach(f, interior_view(halo, tile_id))
