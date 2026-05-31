@@ -14,6 +14,7 @@ const MPI_SIZE = MPI.Comm_size(MPI_COMM)
 const RUN_UNIT_TESTS = !_env_false("HALOARRAYS_RUN_UNIT_TESTS")
 const MPI_TESTS_REQUESTED = _env_true("HALOARRAYS_RUN_MPI_TESTS")
 const RUN_MPI_TESTS = !_env_false("HALOARRAYS_RUN_MPI_TESTS") && (MPI_TESTS_REQUESTED || MPI_SIZE > 1)
+const HAS_HDF5_TEST_DEPS   = Base.find_package("HDF5") !== nothing
 const HAS_DIFFEQ_TEST_DEPS = Base.find_package("DiffEqBase") !== nothing
 const HAS_METAL_TEST_DEPS =
     Base.find_package("Metal") !== nothing && Base.find_package("KernelAbstractions") !== nothing
@@ -42,7 +43,11 @@ end
         include_test("test_fallbacks.jl")
         include_test("test_maybe_broadcast.jl")
         include_test("test_local_threaded_reduction.jl")
-        include_test("test_hdf5_local_threaded.jl")
+        if HAS_HDF5_TEST_DEPS
+            include_test("test_hdf5_local_threaded.jl")
+        else
+            @info "Skipping HDF5 tests because HDF5 is unavailable"
+        end
         if HAS_DIFFEQ_TEST_DEPS
             include_test("test_ode.jl")
             include_test("test_linear_advection_diffeq.jl")
@@ -71,7 +76,11 @@ end
             include_test("test_reduce.jl")
             include_test("test_reduce_marray.jl")
             include_test("test_gather.jl")
-            include_test("test_saving_hdf5.jl")
+            if HAS_HDF5_TEST_DEPS
+                include_test("test_saving_hdf5.jl")
+            else
+                @info "Skipping HDF5 MPI tests because HDF5 is unavailable"
+            end
         end
     else
         @info "Skipping MPI tests (run with mpiexec -n 2 or set HALOARRAYS_RUN_MPI_TESTS=true)"
