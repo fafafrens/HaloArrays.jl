@@ -110,15 +110,26 @@ println("tile_count on ArrayOfHaloArray: ", tile_count(vel))
 #   (b) applies boundary conditions at the domain edges
 #
 # This must be called before any stencil that reads ghost cells.
-# The exchange is thread-safe because each tile writes only into
-# the ghost region of its neighbour, which no other tile owns.
+# The exchange is a "pull": each tile copies its neighbours' interior
+# edges into its OWN ghost cells.  So a tile only writes the ghost
+# region it owns and only reads interior cells (which nobody writes),
+# which is why a parallel sweep over tiles is race-free.
+#
+# synchronize_halo! itself is SERIAL (a plain loop over tiles).  A
+# parallel variant exists — synchronize_halo_threads! — but for the
+# usual case (halo width 1, tiles ≈ threads) the per-tile exchange is
+# tiny and the task-spawn overhead dominates: benchmarks show the
+# serial version winning by 7–25×, and allocating nothing.  Reach for
+# synchronize_halo_threads! only when the exchange is genuinely large
+# (3-D domains, wide halos, many tiles).  See
+# benchmarks/threaded_sync_variants.jl.
 
 println()
 println("=" ^ 60)
 println("Section 3 — Halo exchange between tiles")
 println("=" ^ 60)
 
-synchronize_halo!(u)
+synchronize_halo!(u)   # serial on purpose — see note above
 
 # Verify: the ghost cell of tile 2 (left side) should equal the
 # last owned cell of tile 1.

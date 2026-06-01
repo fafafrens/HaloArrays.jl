@@ -137,6 +137,36 @@ parallelizing halo copies helps for a given tile size and halo width.
 JULIA_NUM_THREADS=4 julia --project=. benchmarks/threaded_sync_variants.jl --owned-size=2048,2048 --tile-dims=4,1 --halo=8 --boundary=repeating --timer=benchmarktools
 ```
 
+### Reference results (8 threads, Apple M-series; median, indicative only)
+
+`serial` is the production `synchronize_halo!`; `threads` is
+`synchronize_halo_threads!` (an `OhMyThreads` `tforeach`).
+
+| Config | tiles | serial | threads | winner |
+| --- | ---: | ---: | ---: | --- |
+| 2D 64², halo 1 | 4 | 0.9 µs | 24 µs | serial 25× |
+| 2D 256², halo 1 | 16 | 6.6 µs | 140 µs | serial 21× |
+| 2D 1024², halo 1 | 16 | 21 µs | 142 µs | serial 7× |
+| 2D 1024², halo 5 | 16 | 62 µs | 145 µs | serial 2.3× |
+| 2D 2048², halo 3 | 64 | 153 µs | 181 µs | serial 1.2× |
+| 3D 128³, halo 2 | 8 | 318 µs | 274 µs | threads 1.16× |
+
+The task-based `threads`/`tasks` variants carry a large fixed spawn+join
+cost (~130–180 µs here) and allocate ~4 KB per call, so the serial loop
+wins until the per-exchange work exceeds ~300 µs (3-D, wide halos, many
+tiles). The same overhead shows up in the threaded *stencil* step
+(`heat_solver_local_threaded.jl`): a 64² threaded heat step is ~120 µs
+vs ~4 µs for the local serial step. This is why `synchronize_halo!`
+(and the tutorials) default to serial.
+
+**Allocation-free threading:** [Polyester.jl](https://github.com/JuliaSIMD/Polyester.jl)
+`@batch` uses a persistent preallocated worker pool instead of spawning
+tasks. On the same 16-tile micro-workload it measured ~0.4 µs and ~80 B
+(vs ~135 µs / ~3.6 KB for `tforeach` and `@threads`), i.e. it can beat
+even the serial loop. A `@batch`-based halo sync would push the crossover
+down to much smaller tiles — at the cost of Polyester's no-nesting
+constraint (do not nest `@batch` inside another threaded region).
+
 ## Boundary Conditions
 
 Benchmarks `boundary_condition!` and `synchronize_halo!` for `LocalHaloArray`,
