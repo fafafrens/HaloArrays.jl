@@ -1,8 +1,59 @@
 # HaloArrays.jl
 
-Distributed halo-array utilities for Julia stencil and PDE codes.
+*One halo-array API for serial, shared-memory, and distributed stencil & PDE codes in Julia.*
 
-The package provides MPI-backed halo arrays, local no-MPI halo arrays, grouped multi-field arrays, boundary-condition helpers, reductions, gather, and HDF5 output utilities.
+HaloArrays.jl gives you arrays with **ghost (halo) cells** and a single, uniform
+interface for filling them — whether the data lives in one process, is tiled
+across threads, or is decomposed across MPI ranks. Write a stencil or solver
+once against `interior_view`, `synchronize_halo!`, and global `size`/`axes`
+semantics, and run it **unchanged on any backend**.
+
+The design keeps *logical* and *owned* data distinct and keeps communication out
+of indexing: `synchronize_halo!` is the only place halos are filled, so halo
+validity is predictable and the hot path stays local.
+
+## Features
+
+- **Three interchangeable backends behind one API**
+  - `LocalHaloArray` — single process, no MPI
+  - `ThreadedHaloArray` — shared memory, tiled across threads
+  - `HaloArray` — distributed over an MPI `CartesianTopology`
+- **Explicit semantics** — global `size`/`axes`, `owned_size`/`owned_axes`,
+  `interior_view`, `parent`; no hidden communication in `getindex`.
+- **Multi-field containers** (`MultiHaloArray`, `LocalMultiHaloArray`,
+  `ThreadedMultiHaloArray`, `ArrayOfHaloArray`) that exchange every field at once.
+- **Boundary conditions** — periodic, reflecting, antireflecting, repeating, or custom.
+- **Global reductions** — `sum`, `maximum`, `minimum`, `dot`, `norm`, … that
+  Allreduce (MPI) or tile-reduce (threaded) automatically — plus `gather` and
+  HDF5 output.
+- **Cell & face loop helpers** and kernel regions, GPU-ready via KernelAbstractions.
+- **Composes with the ecosystem** — a halo array is an `AbstractArray` with global
+  reductions, so it works as an OrdinaryDiffEq state and as the vector in a
+  matrix-free Krylov solve. The *same* code solves a Poisson problem serially and
+  across MPI ranks: see [`examples/poisson_operator.jl`](examples/poisson_operator.jl)
+  and [`examples/poisson_mpi.jl`](examples/poisson_mpi.jl).
+
+## At a glance
+
+```julia
+using HaloArrays
+u = LocalHaloArray(Float64, (64, 64), 1; boundary_condition=:periodic)
+interior_view(u) .= 1.0      # write owned cells
+synchronize_halo!(u)         # fill ghost cells (here: periodic wrap)
+```
+
+The identical stencil code goes distributed just by swapping the constructor —
+`synchronize_halo!` becomes an MPI halo exchange, nothing else changes:
+
+```julia
+using MPI, HaloArrays
+MPI.Init()
+topo = CartesianTopology(MPI.COMM_WORLD, (0, 0); periodic=(true, true))
+u = HaloArray(Float64, (64, 64), 1, topo; boundary_condition=:periodic)
+interior_view(u) .= MPI.Comm_rank(MPI.COMM_WORLD)
+synchronize_halo!(u)
+MPI.Finalize()
+```
 
 ## Installation
 
@@ -129,30 +180,6 @@ HaloArray(
 ```
 
 Custom boundary conditions can be passed as a subtype or instance of `AbstractBoundaryCondition`; symbol registration is not used.
-
-## Quick Example
-
-```julia
-using HaloArrays
-
-u = LocalHaloArray(Float64, (64, 64), 1; boundary_condition=:periodic)
-interior_view(u) .= 1.0
-synchronize_halo!(u)
-```
-
-MPI-backed arrays require an MPI topology:
-
-```julia
-using MPI, HaloArrays
-
-MPI.Init()
-topology = CartesianTopology(MPI.COMM_WORLD, (0, 0); periodic=(true, true))
-u = HaloArray(Float64, (64, 64), 1, topology; boundary_condition=:periodic)
-
-interior_view(u) .= MPI.Comm_rank(MPI.COMM_WORLD)
-synchronize_halo!(u)
-MPI.Finalize()
-```
 
 ## Local and Threaded Arrays
 
@@ -433,6 +460,17 @@ On machines with fewer cores than ranks, use `--oversubscribe`:
 
 ```bash
 mpiexec --oversubscribe -n 4 julia --project=. examples/heat_diffusion_mpi_2d.jl
+```
+
+Matrix-free linear operators — wrap a stencil as a `SciMLOperators.FunctionOperator`
+and solve a Poisson problem with the coordinate-free Krylov solvers in
+[`examples/krylov_solvers.jl`](examples/krylov_solvers.jl) (CG, BiCGStab, GMRES).
+The same operator and solvers run serially and across MPI ranks, because `dot`/`norm`
+are global reductions:
+
+```bash
+julia --project=examples examples/poisson_operator.jl       # serial, 3 solvers, O(h²) check
+mpiexec -n 4 julia --project=examples examples/poisson_mpi.jl  # identical solve, distributed
 ```
 
 ## Tests
