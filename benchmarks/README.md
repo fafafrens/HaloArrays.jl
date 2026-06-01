@@ -61,6 +61,11 @@ mpiexec -n 4 julia --project=. benchmarks/halo_exchange.jl --ndims=3 --owned-siz
 `blocking` is the public `halo_exchange!` path. The other method names benchmark
 compatibility wrappers and implementation variants.
 
+Reference (4 ranks, 2×2, 128², 8-core M-series; median): `blocking` ~49 µs,
+`public_split` ~51 µs, `async` ~55 µs, `waitall` ~75 µs. All variants land in
+the ~50–75 µs range; the async/split paths mainly help when overlapped with
+compute, not in this back-to-back microbenchmark.
+
 ## Reductions
 
 Benchmarks `mapreduce`, `all`, and `any` for `HaloArray`, `LocalHaloArray`,
@@ -70,6 +75,9 @@ Benchmarks `mapreduce`, `all`, and `any` for `HaloArray`, `LocalHaloArray`,
 mpiexec -n 4 julia --project=. benchmarks/reductions.jl --owned-size=128,128 --tile-dims=2,2
 ```
 
+Reference (4 ranks, 128²; median): `mpi_mapreduce` ~68 µs, `threaded` all/any
+~52 µs; the 3-field `multi` variants are ~2× (≈125–166 µs).
+
 ## Ideal Hydro
 
 Benchmarks the 2D ideal-hydrodynamics example with `LocalMultiHaloArray`,
@@ -77,10 +85,17 @@ Benchmarks the 2D ideal-hydrodynamics example with `LocalMultiHaloArray`,
 allocation bytes and diagnostics for the package-owned fill, RHS, and
 wave-speed reduction kernels.
 
+Run from the `examples` environment (the hydro solver pulls in DiffEqBase /
+OrdinaryDiffEq):
+
 ```sh
-JULIA_NUM_THREADS=4 julia --project=. benchmarks/ideal_hydro.jl --cases=local,threaded --nx=128 --ny=128 --tile-dims=2,2
-mpiexec -n 4 julia --project=. benchmarks/ideal_hydro.jl --cases=mpi --nx=128 --ny=128
+JULIA_NUM_THREADS=8 julia --project=examples benchmarks/ideal_hydro.jl --cases=local,threaded --nx=128 --ny=128 --tile-dims=2,2
+mpiexec -n 4 julia --project=examples benchmarks/ideal_hydro.jl --cases=mpi --nx=128 --ny=128
 ```
+
+Reference (8 threads, 128²; median full run): local ~62 ms, threaded ~47 ms
+(~1.3×). Unlike the tiny halo sync, a full hydro step has enough per-tile work
+to amortize the task-spawn overhead, so threading pays here.
 
 ## Gather And HDF5
 
@@ -89,6 +104,10 @@ Benchmarks MPI gather and HDF5 write paths.
 ```sh
 mpiexec -n 4 julia --project=. benchmarks/gather_hdf5.jl --owned-size=64,64 --output=/private/tmp/haloarrays_bench
 ```
+
+Reference (4 ranks, 64²; median): `gather_haloarray` ~285 µs,
+`gather_and_save` ~1.0 ms, `append_haloarray_to_file` ~4.8 ms — the HDF5 file
+write dominates by an order of magnitude.
 
 The `--output` option is a path prefix. The script writes files with suffixes
 for gather/save and append cases.
@@ -125,6 +144,15 @@ Useful options:
 - `--warmups=3`
 - `--include-manual=true`
 - `--csv=/tmp/metal_colored_cells.csv`
+
+The repository's `examples` environment already provides `Metal` and
+`KernelAbstractions`, so `julia --project=examples benchmarks/metal_colored_cells.jl`
+works without a separate probe environment.
+
+Reference (Apple M-series GPU; median): the `ColoredCellKernelRegion`
+compressed launch is ~1.24× faster than the naive full launch with a parity
+branch. The hardcoded manual kernels are ~0.9× (slightly slower), confirming
+the generic helper path is competitive.
 
 ## Threaded Synchronization Variants
 
@@ -181,6 +209,11 @@ mpiexec -n 4 julia --project=. benchmarks/boundary_conditions.jl --owned-size=12
 Use `--timer=benchmarktools` for the rank-local `LocalHaloArray` and
 `ThreadedHaloArray` cases. MPI cases always use the manual barrier/max-time
 timer.
+
+Reference (128², 8 threads; median, 0 B alloc for every case): local
+`synchronize_halo!` ~0.67 µs, threaded ~1.5 µs; `antireflecting` is the
+cheapest mode (~0.25 µs local). The threaded sync is a small constant factor
+slower here because it walks the tile collection serially.
 
 ## MPI Diagnostics
 
