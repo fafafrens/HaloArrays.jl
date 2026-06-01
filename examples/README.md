@@ -177,15 +177,24 @@ julia --project=examples examples/heat_diffusion_diffeq.jl
 
 ## Matrix-Free Poisson Operator
 
-Wraps the `-∇²` stencil as a `SciMLOperators.FunctionOperator` and solves a
-Dirichlet Poisson problem with a short conjugate-gradient driver, verifying
-O(h²) convergence against a manufactured solution. Shows that a halo array is
-a valid Krylov vector — `mul!`, `dot`, and `norm` all work, with `dot`/`norm`
-as global reductions.
+Wraps the `-∇²` stencil as a `SciMLOperators.FunctionOperator` (no new package
+types) and solves a Dirichlet Poisson problem against a manufactured solution,
+verifying O(h²) convergence. The same problem is solved three ways — CG,
+BiCGStab, and GMRES — using the coordinate-free Krylov solvers in
+`examples/krylov_solvers.jl`, which run directly on a halo array (`mul!`,
+`dot`, `norm`, broadcast). Because `dot`/`norm` are global reductions, the
+identical solver and operator give a correct *distributed* solve under MPI
+(verified: a 2-rank run reproduces the serial result exactly).
 
 ```bash
 julia --project=examples examples/poisson_operator.jl
 ```
+
+`examples/krylov_solvers.jl` is a small, reusable, coordinate-free
+implementation of CG / BiCGStab / GMRES (reimplemented from the standard
+algorithms, not copied from Krylov.jl). It works on any vector type with
+`similar`, `copy`, broadcasting, `dot`, `norm`, and `mul!` — plain arrays or
+any HaloArray backend.
 
 ## Notes
 
