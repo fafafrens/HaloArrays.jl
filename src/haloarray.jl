@@ -121,60 +121,40 @@ end
 
 @inline versors(::HaloArray{T,N}) where {T,N} = versors(Val(N))
 
-# ---- send/recv buffer views (HaloArray dispatch) ----------------------
+# ---- send/recv buffer views -------------------------------------------
+#
+# A halo exchange copies a slab of width `halo` along the exchange dimension
+# D, spanning the owned (non-halo) extent in every other dimension. The only
+# thing that differs across the send/recv × side combinations is the index
+# window along D, captured by `_send_window` / `_recv_window`.
 
-@inline function get_send_view(::Side{1}, ::Dim{D}, a::HaloArray{T,N,A,Halo}) where {D,T,N,A,Halo}
-    sr = (Halo+1):(2*Halo)
-    view(parent(a), ntuple(I -> I==D ? sr : (Halo+1):(storage_size(a,I)-Halo), Val(N))...)
-end
-@inline function get_send_view(::Side{2}, ::Dim{D}, a::HaloArray{T,N,A,Halo}) where {D,T,N,A,Halo}
-    sr = (storage_size(a,D)-2*Halo+1):(storage_size(a,D)-Halo)
-    view(parent(a), ntuple(I -> I==D ? sr : (Halo+1):(storage_size(a,I)-Halo), Val(N))...)
-end
-@inline function get_recv_view(::Side{1}, ::Dim{D}, a::HaloArray{T,N,A,Halo}) where {D,T,N,A,Halo}
-    rr = 1:Halo
-    view(parent(a), ntuple(I -> I==D ? rr : (Halo+1):(storage_size(a,I)-Halo), Val(N))...)
-end
-@inline function get_recv_view(::Side{2}, ::Dim{D}, a::HaloArray{T,N,A,Halo}) where {D,T,N,A,Halo}
-    rr = (storage_size(a,D)-Halo+1):storage_size(a,D)
-    view(parent(a), ntuple(I -> I==D ? rr : (Halo+1):(storage_size(a,I)-Halo), Val(N))...)
-end
+@inline _send_window(::Side{1}, sd::Int, halo::Int) = (halo+1):(2*halo)
+@inline _send_window(::Side{2}, sd::Int, halo::Int) = (sd-2*halo+1):(sd-halo)
+@inline _recv_window(::Side{1}, sd::Int, halo::Int) = 1:halo
+@inline _recv_window(::Side{2}, sd::Int, halo::Int) = (sd-halo+1):sd
 
-@inline function get_send_view(::Side{1}, D::Int, a::HaloArray{T,N,A,Halo}) where {T,N,A,Halo}
-    sr = (Halo+1):(2*Halo)
-    view(parent(a), ntuple(I -> I==D ? sr : (Halo+1):(storage_size(a,I)-Halo), Val(N))...)
-end
-@inline function get_send_view(::Side{2}, D::Int, a::HaloArray{T,N,A,Halo}) where {T,N,A,Halo}
-    sr = (storage_size(a,D)-2*Halo+1):(storage_size(a,D)-Halo)
-    view(parent(a), ntuple(I -> I==D ? sr : (Halo+1):(storage_size(a,I)-Halo), Val(N))...)
-end
-@inline function get_recv_view(::Side{1}, D::Int, a::HaloArray{T,N,A,Halo}) where {T,N,A,Halo}
-    rr = 1:Halo
-    view(parent(a), ntuple(I -> I==D ? rr : (Halo+1):(storage_size(a,I)-Halo), Val(N))...)
-end
-@inline function get_recv_view(::Side{2}, D::Int, a::HaloArray{T,N,A,Halo}) where {T,N,A,Halo}
-    rr = (storage_size(a,D)-Halo+1):storage_size(a,D)
-    view(parent(a), ntuple(I -> I==D ? rr : (Halo+1):(storage_size(a,I)-Halo), Val(N))...)
+# Select `window` along dimension D and the owned span (halo+1 : size-halo)
+# in every other dimension.
+@inline function _halo_window_view(window, arr::AbstractArray{<:Any,N}, D::Integer, halo::Int) where {N}
+    view(arr, ntuple(I -> I == D ? window : (halo+1):(size(arr,I)-halo), Val(N))...)
 end
 
-# ---- send/recv buffer views (plain array dispatch, used during construction) --
+# HaloArray dispatch — both compile-time `Dim{D}` and runtime `D::Int` are used
+# (the MPI exchange path passes a runtime dimension).
+@inline get_send_view(s::Side, ::Dim{D}, a::HaloArray{T,N,A,Halo}) where {D,T,N,A,Halo} =
+    _halo_window_view(_send_window(s, storage_size(a, D), Halo), parent(a), D, Halo)
+@inline get_send_view(s::Side, D::Int, a::HaloArray{T,N,A,Halo}) where {T,N,A,Halo} =
+    _halo_window_view(_send_window(s, storage_size(a, D), Halo), parent(a), D, Halo)
+@inline get_recv_view(s::Side, ::Dim{D}, a::HaloArray{T,N,A,Halo}) where {D,T,N,A,Halo} =
+    _halo_window_view(_recv_window(s, storage_size(a, D), Halo), parent(a), D, Halo)
+@inline get_recv_view(s::Side, D::Int, a::HaloArray{T,N,A,Halo}) where {T,N,A,Halo} =
+    _halo_window_view(_recv_window(s, storage_size(a, D), Halo), parent(a), D, Halo)
 
-@inline function get_send_view(::Side{1}, ::Dim{D}, arr::AbstractArray, halo::Int) where {D}
-    sr = (halo+1):(2*halo)
-    view(arr, ntuple(I -> I==D ? sr : (halo+1):(size(arr,I)-halo), Val(ndims(arr)))...)
-end
-@inline function get_send_view(::Side{2}, ::Dim{D}, arr::AbstractArray, halo::Int) where {D}
-    sr = (size(arr,D)-2*halo+1):(size(arr,D)-halo)
-    view(arr, ntuple(I -> I==D ? sr : (halo+1):(size(arr,I)-halo), Val(ndims(arr)))...)
-end
-function get_recv_view(::Side{1}, ::Dim{D}, arr::AbstractArray, halo::Int) where {D}
-    rr = 1:halo
-    view(arr, ntuple(ndims(arr)) do I; I==D ? rr : (halo+1):(size(arr,I)-halo); end...)
-end
-@inline function get_recv_view(::Side{2}, ::Dim{D}, arr::AbstractArray, halo::Int) where {D}
-    rr = (size(arr,D)-halo+1):size(arr,D)
-    view(arr, ntuple(I -> I==D ? rr : (halo+1):(size(arr,I)-halo), ndims(arr))...)
-end
+# Plain-array dispatch (used during buffer construction, before the HaloArray exists).
+@inline get_send_view(s::Side, ::Dim{D}, arr::AbstractArray, halo::Int) where {D} =
+    _halo_window_view(_send_window(s, size(arr, D), halo), arr, D, halo)
+@inline get_recv_view(s::Side, ::Dim{D}, arr::AbstractArray, halo::Int) where {D} =
+    _halo_window_view(_recv_window(s, size(arr, D), halo), arr, D, halo)
 
 # ---- buffer allocation ------------------------------------------------
 
