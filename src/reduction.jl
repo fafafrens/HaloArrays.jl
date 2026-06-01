@@ -154,5 +154,13 @@ Base.sum(f::F, halo::AbstractHaloArray) where {F<:Function} = mapreduce(f, +, ha
 Base.maximum(halo::AbstractHaloArray) = mapreduce(identity, max, halo)
 Base.minimum(halo::AbstractHaloArray) = mapreduce(identity, min, halo)
 
+# The inner product is a reduction: ⟨x,y⟩ = Σ conj(xᵢ)·yᵢ over owned cells.
+# Reusing the two-argument mapreduce makes it inherit the correct global
+# semantics on every backend — MPI Allreduce, threaded tile reduction, and
+# per-field for collections — exactly like sum/maximum above. This overrides
+# the generic AbstractArray dot, which would only reduce locally (silently
+# wrong across MPI ranks).
+LinearAlgebra.dot(x::AbstractHaloArray, y::AbstractHaloArray) = mapreduce(LinearAlgebra.dot, +, x, y)
+
 
 # mapreduce_haloarray_dims and mapreduce_mhaloarray_dims live in mpi_support.jl

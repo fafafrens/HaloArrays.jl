@@ -1,6 +1,7 @@
 using Test
 using MPI
 using HaloArrays
+using LinearAlgebra: dot, norm
 
 function _periodic_bc(::Val{N}) where {N}
     return ntuple(_ -> (Periodic(), Periodic()), Val(N))
@@ -27,6 +28,13 @@ end
     @test sum(abs2, ha) ≈ mapreduce(abs2, +, ha)
     @test maximum(ha) ≈ mapreduce(identity, max, ha)
     @test minimum(ha) ≈ mapreduce(identity, min, ha)
+
+    # dot is a global reduction (Allreduce), consistent with norm
+    wv = similar(ha)
+    interior_view(wv) .= 2.0
+    local_dot = sum(interior_view(ha) .* interior_view(wv))
+    @test dot(ha, wv) ≈ MPI.Allreduce(local_dot, MPI.SUM, topology.cart_comm)
+    @test dot(ha, ha) ≈ norm(ha)^2
     @test any(x -> x < 0, ha) == false
     @test all(x -> x >= 0, ha) == true
 

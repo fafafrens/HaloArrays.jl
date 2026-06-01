@@ -1,5 +1,6 @@
 using Test
 using HaloArrays
+using LinearAlgebra: dot, norm
 
 @testset "Local and threaded reductions" begin
     local_u = LocalHaloArray(Int, (4,), 1; boundary_condition=:repeating)
@@ -10,6 +11,9 @@ using HaloArrays
     @test mapreduce(identity, +, local_u) == 10
     @test reduce(+, local_u) == 10
     @test sum(local_u) == 10
+    # dot is a two-argument reduction over owned cells
+    @test dot(local_u, local_v) == dot([1, 2, 3, 4], [10, 20, 30, 40])   # 300
+    @test dot(local_u, local_u) == sum(abs2, interior_view(local_u))
     @test sum(abs2, local_u) == 30
     @test maximum(local_u) == 4
     @test minimum(local_u) == 1
