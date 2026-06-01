@@ -473,6 +473,39 @@ end
     return nothing
 end
 
+# ---- show -------------------------------------------------------------
+#
+# ThreadedHaloArray is an AbstractArray, but its storage is a vector of
+# per-tile arrays rather than one flat global buffer. The generic
+# AbstractArray printer assumes flat global indexing and errors, so we
+# provide our own show (mirroring HaloArray / LocalHaloArray).
+
+function Base.show(io::IO, obj::ThreadedHaloArray)
+    print(io, "ThreadedHaloArray{", eltype(obj), ",", ndims(obj), "}(global ",
+          global_size(obj), ", ", tile_count(obj), " tiles of ", tile_size(obj),
+          ", halo=", halo_width(obj), ")")
+end
+
+function Base.show(io::IO, mime::MIME"text/plain", obj::ThreadedHaloArray)
+    nt = tile_count(obj)
+    println(io, "ThreadedHaloArray{", eltype(obj), ", ", ndims(obj), "}")
+    println(io, "  global size : ", global_size(obj))
+    println(io, "  tiles       : ", nt, " (layout ", obj.topology.dims,
+            "), tile_size=", tile_size(obj))
+    println(io, "  storage/tile: ", storage_size(obj), " (halo=", halo_width(obj), ")")
+    println(io, "  boundary    : ", obj.boundary_condition)
+    maxtiles = 4
+    println(io, "  interior data by tile:")
+    for tile_id in 1:min(nt, maxtiles)
+        print(io, "    tile ", tile_id, " @ ", tile_coordinates(obj, tile_id), " => ")
+        show(io, interior_view(obj, tile_id))
+        println(io)
+    end
+    if nt > maxtiles
+        print(io, "    ⋮ (", nt - maxtiles, " more tile(s))")
+    end
+end
+
 # Base.copy inherited from AbstractSingleHaloArray
 
 function fill_from_global_indices!(f, halo::ThreadedHaloArray{T,N,A,Halo}) where {T,N,A,Halo}
