@@ -134,26 +134,29 @@ boundary_condition!(u)
 # 4. GLOBAL REDUCTIONS AND GATHER
 # ============================================================
 #
-# mapreduce_haloarray_dims performs a reduction over the OWNED
-# interior cells across all ranks and returns the global result
-# on every rank (Allreduce semantics).
+# Global SCALAR reductions over the owned interior cells of every
+# rank use the ordinary Base functions — they Allreduce internally
+# and return the same result on every rank:
+#
+#   sum(u)   maximum(u)   minimum(u)   mapreduce(f, op, u)
+#
+# To collapse only SOME axes (and keep a distributed array) use
+# mapreduce_haloarray_dims(f, op, u, dims).  Passing `dims=` to the
+# scalar functions above is intentionally rejected — a per-slice
+# global reduction needs sub-communicators, which that helper builds.
 #
 # gather_haloarray collects all subdomain data onto rank 0.
 
 section("Section 4 — Reductions and gather")
 
-global_sum = mapreduce_haloarray_dims(identity, +, u, :)
-global_max = mapreduce_haloarray_dims(identity, max, u, :)
+global_sum = sum(u)
+global_max = maximum(u)
+global_mr  = mapreduce(identity, +, u)   # collective: EVERY rank must call it
 
 if rank == 0
     println("global sum : ", global_sum)
     println("global max : ", global_max)
-end
-
-# sum / maximum / minimum also work directly
-gsum2 = sum(u)    # equivalent to the above
-if rank == 0
-    println("sum(u)     : ", gsum2)
+    println("mapreduce  : ", global_mr)   # same as sum(u)
 end
 
 # gather_haloarray assembles the full grid on rank 0 (returns nothing on others)
@@ -242,7 +245,7 @@ function run_distributed_heat_2d(; owned_dims=(16,16), alpha=1.0, nt=50, cfl=0.4
     end
     synchronize_halo!(u)
 
-    u0_max = mapreduce_haloarray_dims(identity, max, u, :)
+    u0_max = maximum(u)
 
     current, nxt = u, u_nxt
     for _ in 1:nt
@@ -253,7 +256,7 @@ function run_distributed_heat_2d(; owned_dims=(16,16), alpha=1.0, nt=50, cfl=0.4
     end
     synchronize_halo!(current)
 
-    u_max = mapreduce_haloarray_dims(identity, max, current; dims=:)
+    u_max = maximum(current)
 
     if rank == 0
         @printf("  global grid  : %d x %d  (nranks=%d)\n", n_global..., nrank)

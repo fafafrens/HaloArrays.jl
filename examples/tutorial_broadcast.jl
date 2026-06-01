@@ -263,14 +263,15 @@ println("Section 7 — Unsupported patterns")
 println("-" ^ 40)
 
 # a) Mixing ThreadedHaloArray and (Local/MPI)HaloArray in one broadcast
-#    → throws ArgumentError at style-resolution time (before any work)
-println("Mixed-backend broadcast throws at style resolution:")
+#    is unsupported and throws: a tiled array has no single interior_view,
+#    so the operation fails loudly instead of silently doing the wrong thing.
+println("Mixed-backend broadcast throws:")
 u_loc = LocalHaloArray(Float64, tile_size, 1; boundary_condition=:periodic)
 u_thr = ThreadedHaloArray(Float64, tile_size, 1; dims=(1,), boundary_condition=:periodic)
 try
     u_loc .= u_thr .+ 1.0
 catch e
-    println("  caught: ", e.msg)
+    println("  caught: ", sprint(showerror, e))   # robust for any exception type
 end
 
 # b) Broadcast does NOT refresh halos — you must call synchronize_halo!

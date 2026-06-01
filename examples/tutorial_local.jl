@@ -69,9 +69,9 @@ println("axes(u1d)   : ", axes(u1d))          # (1:4,)
 #
 # Available conditions:
 #   :periodic   — ghost cells wrap around from the other side
-#   :repeating  — ghost cells mirror the nearest owned value (zero-gradient)
-#   Reflecting()  — ghost = -interior (reflects with sign flip)
-#   Antireflecting() — ghost = interior (zero-derivative)
+#   :repeating  — ghost cells copy the nearest owned value (zero-gradient)
+#   Reflecting()     — ghost = +interior (even/mirror reflection, zero-gradient)
+#   Antireflecting() — ghost = -interior (odd reflection, zero value at the wall)
 
 println()
 println("=" ^ 60)
@@ -139,23 +139,24 @@ println("right-face range dim1: ", collect(get_right_face(fr, 1)))
 # A typical finite-volume flux loop visits every face exactly once.
 # The left and right boundary faces only update one cell (the owned
 # one); internal faces update both neighbouring cells.
+# (Wrapped in a function: a top-level `for` loop has its own scope, so
+#  accumulating into a global would error — write hot loops as functions.)
+function total_face_flux(fr, e, data)
+    total = 0.0
+    for IL in get_left_face(fr, 1)
+        total += data[IL + e] - data[IL]      # upwind example
+    end
+    for IL in get_internal_face(fr)
+        total += data[IL + e] - data[IL]
+    end
+    for IL in get_right_face(fr, 1)
+        total += data[IL + e] - data[IL]
+    end
+    return total
+end
 println()
 println("Face loop demonstration (sum of all face fluxes):")
-data = parent(u)
-total_flux = 0.0
-for IL in get_left_face(fr, 1)
-    IR = IL + e
-    total_flux += data[IR] - data[IL]        # upwind example
-end
-for IL in get_internal_face(fr)
-    IR = IL + e
-    total_flux += data[IR] - data[IL]
-end
-for IL in get_right_face(fr, 1)
-    IR = IL + e
-    total_flux += data[IR] - data[IL]
-end
-println("  total_flux = ", total_flux)
+println("  total_flux = ", total_face_flux(fr, e, parent(u)))
 
 # ============================================================
 # 4. FINITE-DIFFERENCE HEAT EQUATION (1-D)
@@ -269,12 +270,16 @@ function run_advection_multifield(; nx=64, nt=100, cfl=0.8)
         synchronize_halo!(state)
         rho_data = parent(state.rho)
         phi_data = parent(state.phi)
+        rho_new  = parent(rho_next)
+        phi_new  = parent(phi_next)
         r = interior_range(state.rho)
 
-        # First-order upwind (a > 0 → left-biased)
+        # First-order upwind (a > 0 → left-biased). The stencil reads ghost
+        # cells, so everything is indexed on the storage arrays (parent),
+        # whose interior_range is the same for source and destination.
         for I in CartesianIndices(r)
-            rho_next[I] = state.rho[I] - (a*dt/dx) * (rho_data[I] - rho_data[I-e])
-            phi_next[I] = state.phi[I] - (a*dt/dx) * (phi_data[I] - phi_data[I-e])
+            rho_new[I] = rho_data[I] - (a*dt/dx) * (rho_data[I] - rho_data[I-e])
+            phi_new[I] = phi_data[I] - (a*dt/dx) * (phi_data[I] - phi_data[I-e])
         end
 
         copyto!(interior_view(state.rho), interior_view(rho_next))

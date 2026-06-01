@@ -261,64 +261,33 @@ end
 run_reaction_diffusion()
 
 # ============================================================
-# 6. ThreadedHaloArray AS ODE STATE
+# 6. WHICH HALO CONTAINERS WORK AS ODE STATE
 # ============================================================
 #
-# Swap LocalHaloArray for ThreadedHaloArray — no other change
-# needed.  The solver uses the same broadcast and copyto!
-# interface; the parallel tile dispatch is transparent.
+# Sections 3-5 used LocalHaloArray and LocalMultiHaloArray as the
+# ODE state, and the MPI HaloArray / MultiHaloArray work the same
+# way (same broadcast + copyto! interface, solved per rank).
 #
-# The RHS must still call synchronize_halo!(u) at the top.
-# For ThreadedHaloArray this synchronises the tile ghost cells
-# in shared memory (no MPI involved).
+# ThreadedHaloArray is the exception: it is NOT currently usable as
+# an OrdinaryDiffEq state.  Its storage is a *tiled* collection of
+# arrays rather than one contiguous buffer, and the solver's
+# initialisation indexes the state as a single flat array, which the
+# tiled layout does not provide (it fails inside `_ode_init`).
+#
+# For shared-memory parallel time-stepping with ThreadedHaloArray,
+# use the explicit tile-loop pattern shown in tutorial_threaded.jl
+# (synchronize_halo! + an @tasks loop over tiles).  Reserve the
+# OrdinaryDiffEq path for Local / MPI halo arrays.
 
 println()
 println("=" ^ 60)
-println("Section 6 — ThreadedHaloArray as ODE state")
+println("Section 6 — Which halo containers work as ODE state")
 println("=" ^ 60)
-
-function run_heat_diffeq_threaded(;
-        nx=32, alpha=0.01, tspan=(0.0, 0.2),
-        tile_dims=(max(1, Threads.nthreads()),))
-
-    nx % tile_dims[1] == 0 ||
-        throw(ArgumentError("nx must be divisible by tile_dims[1]"))
-
-    tile_size = (nx ÷ tile_dims[1],)
-    dx = 1.0 / nx
-
-    u0 = ThreadedHaloArray(Float64, tile_size, 1;
-        dims=tile_dims, boundary_condition=:periodic)
-
-    # Fill using logical global index
-    for I in CartesianIndices(axes(u0))
-        u0[Tuple(I)...] = exp(-50*((I[1]/nx) - 0.5)^2)
-    end
-
-    # RHS for 1-D heat on a ThreadedHaloArray
-    function threaded_heat_rhs!(du, u, p, _t)
-        alpha_p, dx_p = p
-        synchronize_halo!(u)   # tile ghost exchange + BCs
-        data  = parent(u)
-        ddata = parent(du)
-        e = CartesianIndex(1)
-        for I in CartesianIndices(interior_range(u))
-            ddata[I] = alpha_p * (data[I+e] - 2*data[I] + data[I-e]) / dx_p^2
-        end
-        return du
-    end
-
-    p    = (alpha, dx)
-    prob = ODEProblem{true}(threaded_heat_rhs!, u0, tspan, p)
-    sol  = solve(prob, Tsit5(); reltol=1e-5, abstol=1e-7, save_everystep=false)
-
-    u_end = sol.u[end]
-    @printf("  threaded heat: nx=%d  tiles=%d  peak=%.4f\n",
-        nx, tile_count(u_end), maximum(u_end))
-    return sol
-end
-
-run_heat_diffeq_threaded()
+println("  LocalHaloArray / LocalMultiHaloArray : yes (sections 3-5)")
+println("  MPI HaloArray / MultiHaloArray       : yes (same interface)")
+println("  ThreadedHaloArray                    : no — tiled storage is")
+println("    not a flat ODE state; use the manual tile loop in")
+println("    tutorial_threaded.jl for threaded parallelism.")
 
 # ============================================================
 # 7. COMPARING DiffEq WITH MANUAL TIME-STEPPING
