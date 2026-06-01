@@ -18,7 +18,7 @@ DiffEqBase = "2b5f629d-d688-5b77-993f-72d75c75574e"
 HaloArraysDiffEqBaseExt = "DiffEqBase"
 
 [compat]
-DiffEqBase = "6"
+DiffEqBase = "6, 7"
 HDF5 = "0.16, 0.17"
 MPI = "0.20, 0.21"
 MPIPreferences = "0.1.12"

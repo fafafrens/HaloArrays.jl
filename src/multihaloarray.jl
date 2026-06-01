@@ -120,6 +120,13 @@ end
 
 Base.getindex(mha::MultiHaloArray, name::Symbol) = mha.arrays[name]
 
+# Named-field access: `state.rho` forwards to the backing field, while
+# `state.arrays` still returns the underlying NamedTuple (`arrays` is the only
+# real struct field). `getfield` is used internally to avoid recursion.
+@inline Base.getproperty(mha::MultiHaloArray, name::Symbol) =
+    name === :arrays ? getfield(mha, :arrays) : getfield(mha, :arrays)[name]
+Base.propertynames(mha::MultiHaloArray) = keys(getfield(mha, :arrays))
+
 Base.eltype(mha::MultiHaloArray{T,N,A,D}) where {T,N,A,D} = T
 Base.eltype(::Type{<:MultiHaloArray{T,N,A,D}}) where {T,N,A,D} = T
 Base.ndims(mha::MultiHaloArray{T,N,A,D}) where {T,N,A,D} = D
