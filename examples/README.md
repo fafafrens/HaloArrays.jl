@@ -175,6 +175,18 @@ julia --project=examples examples/local_and_threaded_diffeq.jl
 julia --project=examples examples/heat_diffusion_diffeq.jl
 ```
 
+## Matrix-Free Poisson Operator
+
+Wraps the `-∇²` stencil as a `SciMLOperators.FunctionOperator` and solves a
+Dirichlet Poisson problem with a short conjugate-gradient driver, verifying
+O(h²) convergence against a manufactured solution. Shows that a halo array is
+a valid Krylov vector — `mul!`, `dot`, and `norm` all work, with `dot`/`norm`
+as global reductions.
+
+```bash
+julia --project=examples examples/poisson_operator.jl
+```
+
 ## Notes
 
 - If the machine has fewer cores than MPI ranks, add `--oversubscribe` to
