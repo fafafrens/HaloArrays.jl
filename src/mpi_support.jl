@@ -385,6 +385,12 @@ for (func, commutative) in [:mapreduce => true, :mapfoldl => false, :mapfoldr =>
     @eval function Base.$func(
             f::F, op::OP, halo::HaloArray, etc::Vararg{HaloArray}; kws...,
         ) where {F<:Function,OP}
+        :dims in keys(kws) && throw(ArgumentError(
+            "Dimensional reduction with `dims=` is not supported on a distributed " *
+            "HaloArray through mapreduce/sum/maximum/minimum: it would combine the " *
+            "wrong cells across MPI ranks (a global per-slice reduction needs " *
+            "sub-communicators). Use `mapreduce_haloarray_dims(f, op, halo, dims)`, " *
+            "which returns the reduced array on its sub-topology."))
         comm   = get_comm(halo)
         ups    = map(interior_view, (halo, etc...))
         rlocal = $func(f, op, ups...; kws...)

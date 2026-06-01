@@ -71,6 +71,12 @@ end
         ha_interior[i, j] = 1000 * rank + 10 * i + j
     end
 
+    # `dims=` through mapreduce/sum/maximum is rejected on a distributed HaloArray
+    # (it would combine the wrong cells across ranks); use mapreduce_haloarray_dims.
+    @test_throws ArgumentError mapreduce(identity, +, ha; dims=1)
+    @test_throws ArgumentError sum(ha; dims=1)
+    @test_throws ArgumentError maximum(ha; dims=2)
+
     maybe_reduced = mapreduce_haloarray_dims(identity, +, ha, (1,))
 
     if topology.cart_coords[1] == 0
