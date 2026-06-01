@@ -183,9 +183,10 @@ verifying O(h²) convergence. The same problem is solved three ways — CG,
 BiCGStab, and GMRES — using the coordinate-free Krylov solvers in
 `examples/krylov_solvers.jl`, which run directly on a halo array (`mul!`,
 `dot`, `norm`, broadcast). Because `dot`/`norm` are global reductions, the
-identical solver and operator give a correct *distributed* solve under MPI —
-see `examples/poisson_mpi.jl`, where a 4-rank (2×2) run reproduces the serial
-n=64 result exactly (121 CG iterations, error 1.5e-5).
+identical solvers and operator give a correct *distributed* solve under MPI —
+see `examples/poisson_mpi.jl`, which runs all three (CG, BiCGStab, GMRES) on a
+decomposed grid. A 4-rank (2×2) run reproduces the serial n=64 result exactly
+(CG and GMRES match iteration-for-iteration; all three reach error 1.5e-5).
 
 ```bash
 julia --project=examples examples/poisson_operator.jl

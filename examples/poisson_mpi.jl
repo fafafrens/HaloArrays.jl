@@ -8,8 +8,9 @@
 #
 #     -∇²u = f   on (0,1)²,   u = 0 on the boundary
 #
-# on a grid decomposed across ranks, using the SAME coordinate-free CG from
-# examples/krylov_solvers.jl. Nothing about the solver or the operator
+# on a grid decomposed across ranks, using the SAME coordinate-free solvers
+# (CG, BiCGStab, GMRES) from examples/krylov_solvers.jl. Nothing about them or
+# the operator
 # changes for the distributed case — the only reason it works is that
 # HaloArrays.jl defines dot/norm as GLOBAL reductions (MPI Allreduce), so the
 # Krylov inner products are correct across ranks. synchronize_halo!(x) inside
@@ -71,20 +72,29 @@ function run_distributed_poisson(; owned=(32, 32))
         islinear=true, isconstant=true, issymmetric=true, isposdef=true,
         p=(inv_hx2=1 / hx^2, inv_hy2=1 / hy^2))
 
-    _, iters, res = cg!(u, L, rhs; tol=1e-10)
-
-    # global error: reduce the per-rank max over MPI
-    local_err = maximum(abs, interior_view(u) .- interior_view(uex))
-    global_err = MPI.Allreduce(local_err, MPI.MAX, COMM)
-
     if RANK == 0
-        @printf("  ranks=%d  topology=%s  global=%dx%d  CG iters=%d  residual=%.2e  max|u-u_exact|=%.3e\n",
-            NRANKS, string(topo.dims), ng..., iters, res, global_err)
+        @printf("  ranks=%d  topology=%s  global=%dx%d\n", NRANKS, string(topo.dims), ng...)
     end
-    return global_err
+
+    # Every solver is coordinate-free, so all three run distributed unchanged.
+    # GMRES is the real check: its Arnoldi basis is a set of HaloArrays and the
+    # Hessenberg is built from dot(Vᵢ, w) — those dots must be the global
+    # Allreduce for the basis to be consistent across ranks.
+    solvers = (("CG",        (uu, A, b) -> cg!(uu, A, b; tol=1e-10)),
+               ("BiCGStab",  (uu, A, b) -> bicgstab!(uu, A, b; tol=1e-10)),
+               ("GMRES(50)", (uu, A, b) -> gmres!(uu, A, b; tol=1e-10, restart=50)))
+    for (name, solve) in solvers
+        uu = similar(rhs); fill!(uu, 0.0)
+        _, iters, res = solve(uu, L, rhs)
+        local_err  = maximum(abs, interior_view(uu) .- interior_view(uex))
+        global_err = MPI.Allreduce(local_err, MPI.MAX, COMM)
+        RANK == 0 && @printf("    %-10s iters=%-4d  residual=%.2e  max|u-u_exact|=%.3e\n",
+            name, iters, res, global_err)
+    end
+    return nothing
 end
 
-RANK == 0 && println("Distributed matrix-free Poisson (MPI) — coordinate-free CG")
+RANK == 0 && println("Distributed matrix-free Poisson (MPI) — CG / BiCGStab / GMRES")
 run_distributed_poisson(; owned=(32, 32))
 MPI.Barrier(COMM)
 RANK == 0 && println("poisson_mpi complete.")
