@@ -1,12 +1,4 @@
-# mapreduce / any / all for HaloArray (MPI) live in ext/HaloArraysMPIExt.jl
-
-function _combine_threaded_reduction(op, values)
-    result = first(values)
-    for i in 2:length(values)
-        result = op(result, values[i])
-    end
-    return result
-end
+# mapreduce / any / all for HaloArray (MPI) live in mpi_support.jl
 
 function _combine_threaded_reduction(op, result, values)
     for value in values
@@ -163,4 +155,4 @@ Base.maximum(halo::AbstractHaloArray) = mapreduce(identity, max, halo)
 Base.minimum(halo::AbstractHaloArray) = mapreduce(identity, min, halo)
 
 
-# mapreduce_haloarray_dims and mapreduce_mhaloarray_dims live in ext/HaloArraysMPIExt.jl
+# mapreduce_haloarray_dims and mapreduce_mhaloarray_dims live in mpi_support.jl

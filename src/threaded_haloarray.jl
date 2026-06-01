@@ -110,8 +110,6 @@ ThreadedHaloArray(tile_size::NTuple{N,<:Integer}, halo::Integer; kwargs...) wher
 @inline Base.eachindex(halo::ThreadedHaloArray) = CartesianIndices(axes(halo))
 @inline Base.iterate(halo::ThreadedHaloArray) = iterate(CartesianIndices(axes(halo)))
 @inline Base.iterate(halo::ThreadedHaloArray, state) = iterate(CartesianIndices(axes(halo)), state)
-@inline owned_axes(halo::ThreadedHaloArray) = map(Base.OneTo, owned_size(halo))
-@inline owned_axes(halo::ThreadedHaloArray, d::Int) = Base.OneTo(owned_size(halo, d))
 @inline interior_size(halo::ThreadedHaloArray) = owned_size(halo)
 @inline halo_width(::Type{<:ThreadedHaloArray{T,N,A,Halo}}) where {T,N,A,Halo} = Halo
 @inline halo_width(::ThreadedHaloArray{T,N,A,Halo}) where {T,N,A,Halo} = Halo

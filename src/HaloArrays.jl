@@ -1,4 +1,3 @@
-__precompile__()
 module HaloArrays
 
 using MPI
