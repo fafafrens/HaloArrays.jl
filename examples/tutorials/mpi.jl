@@ -2,7 +2,7 @@
 # HaloArrays.jl — MPI tutorial
 #
 # Run with:
-#   mpiexec -n 4 julia --project tutorial_mpi.jl
+#   mpiexec -n 4 julia --project=. examples/tutorials/mpi.jl
 #
 # Sections:
 #   1. MPI setup and CartesianTopology

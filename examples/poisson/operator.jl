@@ -2,7 +2,7 @@
 # HaloArrays.jl — matrix-free Poisson solve via a SciMLOperator
 #
 # Run with:
-#   julia --project=examples examples/poisson_operator.jl
+#   julia --project=examples examples/poisson/operator.jl
 #
 # This example turns a HaloArray stencil into a composable linear operator
 # WITHOUT defining any new types in the package — we wrap a function with
@@ -22,13 +22,13 @@
 # BiCGStab/GMRES are shown to demonstrate the operator works with general
 # solvers too). Periodic would be singular.
 #
-# The solvers (examples/krylov_solvers.jl) are coordinate-free: they touch
+# The solvers (examples/poisson/krylov_solvers.jl) are coordinate-free: they touch
 # the unknown only through mul!, dot, norm and broadcast, and HaloArrays.jl
 # defines dot/norm as GLOBAL reductions. So swapping LocalHaloArray for an
 # MPI HaloArray gives a correct distributed solve with no change to the
 # solvers — the operator below works unchanged too, since it uses parent +
 # interior_range on the owned block. (A ThreadedHaloArray would need the
-# tile-loop form of the stencil; see tutorial_threaded.jl.)
+# tile-loop form of the stencil; see tutorials/threaded.jl.)
 # ============================================================
 
 using HaloArrays

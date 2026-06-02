@@ -5,7 +5,7 @@
 #   import Pkg; Pkg.add(["Metal", "KernelAbstractions"])
 #
 # Run with:
-#   julia --project tutorial_gpu.jl
+#   julia --project=examples -t 4 examples/tutorials/gpu.jl
 #
 # The approach transfers to any KernelAbstractions-compatible
 # backend (CUDA, ROCm, oneAPI) by swapping Metal for the

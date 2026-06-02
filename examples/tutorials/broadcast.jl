@@ -2,7 +2,7 @@
 # HaloArrays.jl — Broadcast tutorial
 #
 # Run with:
-#   julia --project -t 4 tutorial_broadcast.jl
+#   julia --project=. -t 4 examples/tutorials/broadcast.jl
 #
 # Sections:
 #   1. What broadcast does (and what it does NOT touch)

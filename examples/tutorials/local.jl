@@ -2,7 +2,7 @@
 # HaloArrays.jl — hands-on tutorial (single process, no MPI)
 #
 # Run the whole file, or step through sections in the REPL:
-#   julia --project=examples -t 4 examples/tutorial_local.jl
+#   julia --project=. -t 4 examples/tutorials/local.jl
 #
 #   1. What is a halo array?          (LocalHaloArray, storage layout)
 #   2. Boundary conditions

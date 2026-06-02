@@ -1,4 +1,4 @@
-# local_metal_phi4_2d_philox.jl
+# phi4_metal_philox_2d.jl
 #
 # Simple 2D phi^4 Metropolis simulation using:
 #   - HaloArrays.jl
