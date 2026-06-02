@@ -1,4 +1,4 @@
-include(joinpath(@__DIR__, "ideal_hydro_local_2d.jl"))
+include(joinpath(@__DIR__, "local_2d.jl"))
 
 using Printf
 

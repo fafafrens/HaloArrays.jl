@@ -6,7 +6,7 @@
 #     using Pkg; Pkg.develop(path=pwd()); Pkg.instantiate()'
 #
 # Run with:
-#   julia --project=examples tutorial_diffeq.jl
+#   julia --project=examples examples/tutorials/diffeq.jl
 #
 # Sections:
 #   1. Why HaloArrays works with OrdinaryDiffEq
@@ -271,10 +271,10 @@ run_reaction_diffusion()
 # collection of per-tile arrays, so `parent(u)` is the tile container,
 # not a single flat grid.  The stencil therefore loops over tiles and
 # indexes each tile's own storage via tile_parent(u, tile_id) — the
-# same pattern as the manual stepping in tutorial_threaded.jl.
+# same pattern as the manual stepping in tutorials/threaded.jl.
 #
 # Run with several threads to evaluate the RHS in parallel:
-#   julia --project=examples -t 4 tutorial_diffeq.jl
+#   julia --project=examples -t 4 examples/tutorials/diffeq.jl
 
 println()
 println("=" ^ 60)
@@ -301,7 +301,7 @@ function run_heat_diffeq_threaded(;
 
     # RHS for 1-D heat: loop over tiles and index each tile's storage.
     # (parent(u) is the tile container, so a flat parent(u)[I] stencil
-    #  would be wrong — work tile by tile, like tutorial_threaded.jl.)
+    #  would be wrong — work tile by tile, like tutorials/threaded.jl.)
     function threaded_heat_rhs!(du, u, p, _t)
         alpha_p, dx_p = p
         synchronize_halo!(u)            # tile ghost exchange + BCs

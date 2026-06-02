@@ -2,14 +2,14 @@
 # HaloArrays.jl — DISTRIBUTED matrix-free Poisson (MPI)
 #
 # Run with (e.g. 4 ranks):
-#   mpiexec -n 4 julia --project=examples examples/poisson_mpi.jl
+#   mpiexec -n 4 julia --project=examples examples/poisson/mpi.jl
 #
-# This is the MPI counterpart of examples/poisson_operator.jl. It solves
+# This is the MPI counterpart of examples/poisson/operator.jl. It solves
 #
 #     -∇²u = f   on (0,1)²,   u = 0 on the boundary
 #
 # on a grid decomposed across ranks, using the SAME coordinate-free solvers
-# (CG, BiCGStab, GMRES) from examples/krylov_solvers.jl. Nothing about them or
+# (CG, BiCGStab, GMRES) from examples/poisson/krylov_solvers.jl. Nothing about them or
 # the operator
 # changes for the distributed case — the only reason it works is that
 # HaloArrays.jl defines dot/norm as GLOBAL reductions (MPI Allreduce), so the
@@ -97,4 +97,4 @@ end
 RANK == 0 && println("Distributed matrix-free Poisson (MPI) — CG / BiCGStab / GMRES")
 run_distributed_poisson(; owned=(32, 32))
 MPI.Barrier(COMM)
-RANK == 0 && println("poisson_mpi complete.")
+RANK == 0 && println("poisson/mpi complete.")

@@ -1,4 +1,4 @@
-include(joinpath(@__DIR__, "scalar_field_heatbath_common.jl"))
+include(joinpath(@__DIR__, "scalar_common.jl"))
 
 function main()
     n = (32, 32)

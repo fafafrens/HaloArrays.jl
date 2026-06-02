@@ -2,7 +2,7 @@
 # HaloArrays.jl — ThreadedHaloArray tutorial
 #
 # Run with:
-#   julia --project -t 4 tutorial_threaded.jl
+#   julia --project=. -t 4 examples/tutorials/threaded.jl
 #
 # Sections:
 #   1. ThreadedHaloArray — tiled shared-memory layout

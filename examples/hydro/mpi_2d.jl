@@ -1,4 +1,4 @@
-include(joinpath(@__DIR__, "ideal_hydro_common.jl"))
+include(joinpath(@__DIR__, "common.jl"))
 
 function mpi_ideal_hydro_state(nx, ny; halo=1, boundary_condition=:periodic)
     topology = CartesianTopology(MPI.COMM_WORLD, (0, 0);

@@ -1,6 +1,6 @@
 using MPI
 
-include("heat_diffusion_common.jl")
+include("common.jl")
 
 function _mpi_domain_lengths(domain_length, ::Val{N}) where {N}
     return domain_length isa Number ? ntuple(_ -> domain_length, Val(N)) : Tuple(domain_length)

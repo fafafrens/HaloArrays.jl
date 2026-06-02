@@ -1,4 +1,4 @@
-# local_metal_su2_wilson_2d_arrayofhaloarray_philox.jl
+# su2_wilson_metal_2d.jl
 #
 # 2D pure SU(2) Wilson plaquette Metropolis simulation using:
 #   - HaloArrays.jl
