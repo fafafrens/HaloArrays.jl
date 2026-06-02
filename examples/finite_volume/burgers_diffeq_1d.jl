@@ -1,4 +1,4 @@
-include(joinpath(@__DIR__, "finite_volume_diffeq_common.jl"))
+include(joinpath(@__DIR__, "common.jl"))
 
 burgers_flux(u) = 0.5 * u^2
 burgers_initial_profile(x) = 0.5 + exp(-100 * (x - 0.35)^2)

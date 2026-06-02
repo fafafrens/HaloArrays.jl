@@ -30,8 +30,8 @@ validity is predictable and the hot path stays local.
 - **Composes with the ecosystem** — a halo array is an `AbstractArray` with global
   reductions, so it works as an OrdinaryDiffEq state and as the vector in a
   matrix-free Krylov solve. The *same* code solves a Poisson problem serially and
-  across MPI ranks: see [`examples/poisson_operator.jl`](examples/poisson_operator.jl)
-  and [`examples/poisson_mpi.jl`](examples/poisson_mpi.jl).
+  across MPI ranks: see [`examples/poisson/operator.jl`](examples/poisson/operator.jl)
+  and [`examples/poisson/mpi.jl`](examples/poisson/mpi.jl).
 
 ## At a glance
 
@@ -395,30 +395,30 @@ Each file is self-contained and runnable.
 
 | File | What it covers |
 |---|---|
-| [`tutorial_local.jl`](examples/tutorial_local.jl) | Storage layout, boundary conditions, `CellRanges`/`FaceRanges`, heat equation, `LocalMultiHaloArray`, `ThreadedHaloArray`, `ArrayOfHaloArray` |
-| [`tutorial_mpi.jl`](examples/tutorial_mpi.jl) | `CartesianTopology`, `HaloArray`, halo exchange (blocking and async), global reductions, gather, multi-field MPI, distributed heat equation |
-| [`tutorial_threaded.jl`](examples/tutorial_threaded.jl) | `ThreadedHaloArray` tile layout, tile loop pattern, synchronisation, threaded Burgers equation, `ThreadedMultiHaloArray` |
-| [`tutorial_broadcast.jl`](examples/tutorial_broadcast.jl) | Interior-only semantics, in-place and allocating broadcast, mixing with scalars and plain arrays, `MultiHaloArray` and `ThreadedHaloArray` broadcast, unsupported patterns |
-| [`tutorial_gpu.jl`](examples/tutorial_gpu.jl) | Moving a `LocalHaloArray` to Metal/GPU, `KernelAbstractions` kernels, `CellKernelRegion`, `ColoredCellKernelRegion`, `FaceKernelRegion`, GPU heat equation |
-| [`tutorial_diffeq.jl`](examples/tutorial_diffeq.jl) | `OrdinaryDiffEq.jl` integration, `synchronize_halo!` contract in the RHS, scalar decay, heat equation with Tsit5, multi-field ODE state, `ThreadedHaloArray` as ODE state |
+| [`tutorials/local.jl`](examples/tutorials/local.jl) | Storage layout, boundary conditions, `CellRanges`/`FaceRanges`, heat equation, `LocalMultiHaloArray`, `ThreadedHaloArray`, `ArrayOfHaloArray` |
+| [`tutorials/mpi.jl`](examples/tutorials/mpi.jl) | `CartesianTopology`, `HaloArray`, halo exchange (blocking and async), global reductions, gather, multi-field MPI, distributed heat equation |
+| [`tutorials/threaded.jl`](examples/tutorials/threaded.jl) | `ThreadedHaloArray` tile layout, tile loop pattern, synchronisation, threaded Burgers equation, `ThreadedMultiHaloArray` |
+| [`tutorials/broadcast.jl`](examples/tutorials/broadcast.jl) | Interior-only semantics, in-place and allocating broadcast, mixing with scalars and plain arrays, `MultiHaloArray` and `ThreadedHaloArray` broadcast, unsupported patterns |
+| [`tutorials/gpu.jl`](examples/tutorials/gpu.jl) | Moving a `LocalHaloArray` to Metal/GPU, `KernelAbstractions` kernels, `CellKernelRegion`, `ColoredCellKernelRegion`, `FaceKernelRegion`, GPU heat equation |
+| [`tutorials/diffeq.jl`](examples/tutorials/diffeq.jl) | `OrdinaryDiffEq.jl` integration, `synchronize_halo!` contract in the RHS, scalar decay, heat equation with Tsit5, multi-field ODE state, `ThreadedHaloArray` as ODE state |
 
 **Running the tutorials:**
 
 ```bash
 # No MPI — runs on a single process
-julia --project=. examples/tutorial_local.jl
-julia --project=. -t 4 examples/tutorial_broadcast.jl
-julia --project=. -t 4 examples/tutorial_threaded.jl
+julia --project=. examples/tutorials/local.jl
+julia --project=. -t 4 examples/tutorials/broadcast.jl
+julia --project=. -t 4 examples/tutorials/threaded.jl
 
 # MPI — requires mpiexec
-mpiexec -n 4 julia --project=. examples/tutorial_mpi.jl
+mpiexec -n 4 julia --project=. examples/tutorials/mpi.jl
 
 # GPU — requires Metal.jl (macOS) or equivalent KernelAbstractions backend
-julia --project=. examples/tutorial_gpu.jl
+julia --project=. examples/tutorials/gpu.jl
 
 # OrdinaryDiffEq — requires the examples environment
 julia --project=examples -e 'using Pkg; Pkg.develop(path=pwd()); Pkg.instantiate()'
-julia --project=examples examples/tutorial_diffeq.jl
+julia --project=examples examples/tutorials/diffeq.jl
 ```
 
 ## Examples
@@ -429,48 +429,41 @@ Optional DiffEq examples use their own environment:
 julia --project=examples -e 'using Pkg; Pkg.develop(path=pwd()); Pkg.instantiate()'
 ```
 
-Local heat-diffusion examples:
+Examples are grouped by topic: `heat/`, `finite_volume/`, `hydro/`, `lattice/`,
+and `poisson/` (plus `tutorials/`). Heat diffusion (the simplest stencil) on
+local arrays — `heat/local.jl` runs the 1-D, 2-D, and 3-D cases, and
+`heat/local_vs_threaded.jl` solves the same 2-D problem on `LocalHaloArray` vs
+`ThreadedHaloArray`, by hand and via OrdinaryDiffEq:
 
 ```bash
-julia --project=. examples/heat_diffusion_local_1d.jl
-julia --project=. examples/heat_diffusion_local_2d.jl
-julia --project=. examples/heat_diffusion_local_3d.jl
+julia --project=. examples/heat/local.jl
+julia --project=examples -t 4 examples/heat/local_vs_threaded.jl
 ```
 
-MPI heat-diffusion examples:
+MPI heat diffusion (`heat/mpi.jl` runs the 1-D, 2-D, and 3-D cases):
 
 ```bash
-mpiexec -n 4 julia --project=. examples/heat_diffusion_mpi_1d.jl
-mpiexec -n 4 julia --project=. examples/heat_diffusion_mpi_2d.jl
-mpiexec -n 4 julia --project=. examples/heat_diffusion_mpi_3d.jl
+mpiexec -n 4 julia --project=. examples/heat/mpi.jl
 ```
 
-The local, threaded, and MPI examples share their finite-difference update in
-`examples/heat_diffusion_common.jl`.
-
-DiffEq/OrdinaryDiffEq example:
-
-```bash
-julia --project=examples examples/ode_diffeq.jl
-mpiexec -n 2 julia --project=examples examples/ode_diffeq.jl
-julia --project=examples examples/local_and_threaded_diffeq.jl
-```
+The local, threaded, and MPI heat examples share their finite-difference update
+in `examples/heat/common.jl`.
 
 On machines with fewer cores than ranks, use `--oversubscribe`:
 
 ```bash
-mpiexec --oversubscribe -n 4 julia --project=. examples/heat_diffusion_mpi_2d.jl
+mpiexec --oversubscribe -n 4 julia --project=. examples/heat/mpi.jl
 ```
 
 Matrix-free linear operators — wrap a stencil as a `SciMLOperators.FunctionOperator`
 and solve a Poisson problem with the coordinate-free Krylov solvers in
-[`examples/krylov_solvers.jl`](examples/krylov_solvers.jl) (CG, BiCGStab, GMRES).
+[`examples/poisson/krylov_solvers.jl`](examples/poisson/krylov_solvers.jl) (CG, BiCGStab, GMRES).
 The same operator and solvers run serially and across MPI ranks, because `dot`/`norm`
 are global reductions:
 
 ```bash
-julia --project=examples examples/poisson_operator.jl       # serial, 3 solvers, O(h²) check
-mpiexec -n 4 julia --project=examples examples/poisson_mpi.jl  # identical solve, distributed
+julia --project=examples examples/poisson/operator.jl       # serial, 3 solvers, O(h²) check
+mpiexec -n 4 julia --project=examples examples/poisson/mpi.jl  # identical solve, distributed
 ```
 
 ## Tests

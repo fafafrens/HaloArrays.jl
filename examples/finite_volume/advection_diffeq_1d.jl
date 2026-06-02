@@ -1,4 +1,4 @@
-include(joinpath(@__DIR__, "finite_volume_diffeq_common.jl"))
+include(joinpath(@__DIR__, "common.jl"))
 
 initial_profile(x) = 1.0 + 0.25 * sin(2 * pi * x) + 0.1 * cos(4 * pi * x)
 periodic_coordinate(x) = mod(x, 1.0)

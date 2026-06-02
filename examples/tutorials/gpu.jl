@@ -141,14 +141,14 @@ end
 
 region = get_owned_cell_region(CellRanges(u_gpu))
 println("launch size (owned)  : ", region.size)
-println("storage offset       : ", region.offset)   # = (halo, halo)
+println("first owned cell     : ", region.first)   # storage coords, = (halo+1, halo+1)
 
 kernel2! = fill_index_kernel!(backend, (16, 16))
 kernel2!(parent(u_gpu), region; ndrange=region.size)
 KA.synchronize(backend)
 
 corner_val = Array(parent(u_gpu))[halo+1, halo+1]
-println("storage[2,2] (I=1,1) : ", corner_val)   # should be 101.0
+println("storage[2,2] (J=1,1) : ", corner_val)   # I=(2,2) → 2*100+2 = 202.0
 
 # ============================================================
 # 4. ColoredCellKernelRegion — CHECKERBOARD SWEEPS

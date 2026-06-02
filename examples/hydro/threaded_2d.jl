@@ -1,4 +1,4 @@
-include(joinpath(@__DIR__, "ideal_hydro_common.jl"))
+include(joinpath(@__DIR__, "common.jl"))
 
 function default_tile_dims_2d(nx, ny, nthreads=Base.Threads.nthreads())
     nthreads > 0 || throw(ArgumentError("number of threads must be positive"))

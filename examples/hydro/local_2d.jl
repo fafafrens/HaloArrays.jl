@@ -1,4 +1,4 @@
-include(joinpath(@__DIR__, "ideal_hydro_common.jl"))
+include(joinpath(@__DIR__, "common.jl"))
 
 function ideal_hydro_state(nx, ny; halo=1, boundary_condition=:periodic)
     return LocalMultiHaloArray(Float64, (nx, ny), halo;

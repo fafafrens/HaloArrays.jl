@@ -1,7 +1,7 @@
 using Test
 using HaloArrays
 
-include(joinpath(@__DIR__, "..", "examples", "heat_diffusion_common.jl"))
+include(joinpath(@__DIR__, "..", "examples", "heat", "common.jl"))
 
 @testset "Heat diffusion local examples" begin
     for dims in ((16,), (8, 7), (5, 4, 3))

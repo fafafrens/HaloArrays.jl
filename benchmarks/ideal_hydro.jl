@@ -1,5 +1,5 @@
 include("common.jl")
-include(joinpath(@__DIR__, "..", "examples", "ideal_hydro_common.jl"))
+include(joinpath(@__DIR__, "..", "examples", "hydro", "common.jl"))
 
 using Printf
 using Test
