@@ -38,7 +38,7 @@ end
         dset = create_dataset_from_haloarray(fid, "field", halo)
 
         for step in 0:2
-            fill_interior(halo, rank + step / 10)
+            fill_interior!(halo, rank + step / 10)
             append_haloarray!(dset, halo)
         end
 
@@ -70,7 +70,7 @@ end
         dset = create_fixedsize_dataset_from_haloarray(fid, "field", halo, num_timesteps)
 
         for step in 0:(num_timesteps - 1)
-            fill_interior(halo, rank + 1 + step / 10)
+            fill_interior!(halo, rank + 1 + step / 10)
             write_haloarray_timestep!(dset, halo, step)
         end
 
@@ -98,8 +98,8 @@ end
         filename = _test_hdf5_path("arrayof", comm)
         _remove_on_root(filename, comm)
 
-        fill_interior(u, rank + 1)
-        fill_interior(v, 100 + rank)
+        fill_interior!(u, rank + 1)
+        fill_interior!(v, 100 + rank)
         fields = ArrayOfHaloArray([u, v])
 
         fid = h5open(filename, "w", comm, MPI.Info())
@@ -128,8 +128,8 @@ end
         filename = filename_base * ".h5"
         _remove_on_root(filename, comm)
 
-        fill_interior(u, rank + 10)
-        fill_interior(v, rank + 110)
+        fill_interior!(u, rank + 10)
+        fill_interior!(v, rank + 110)
         fields = ArrayOfHaloArray([u, v])
 
         gather_and_save_haloarray(filename_base, fields)
@@ -158,8 +158,8 @@ end
         filename = _test_hdf5_path("multi", comm)
         _remove_on_root(filename, comm)
 
-        fill_interior(rho, rank + 20)
-        fill_interior(mom, rank + 120)
+        fill_interior!(rho, rank + 20)
+        fill_interior!(mom, rank + 120)
         fields = MultiHaloArray((; rho, mom))
 
         fid = h5open(filename, "w", comm, MPI.Info())
@@ -190,8 +190,8 @@ end
         filename = filename_base * ".h5"
         _remove_on_root(filename, comm)
 
-        fill_interior(rho, rank + 30)
-        fill_interior(mom, rank + 130)
+        fill_interior!(rho, rank + 30)
+        fill_interior!(mom, rank + 130)
         fields = MultiHaloArray((; rho, mom))
 
         gather_and_save_haloarray(filename_base, fields)
@@ -224,7 +224,7 @@ end
         filename = _test_hdf5_path("maybe_reduce_append", comm)
         _remove_on_root(filename, comm)
 
-        fill_interior(u, rank + 40)
+        fill_interior!(u, rank + 40)
         maybe_reduced = mapreduce_haloarray_dims(identity, +, u, (1,))
         append_haloarray_to_file!(filename[1:(end - 3)], "reduced", maybe_reduced)
         MPI.Barrier(comm)
@@ -256,8 +256,8 @@ end
         filename = filename_base * ".h5"
         _remove_on_root(filename, comm)
 
-        fill_interior(rho, rank + 50)
-        fill_interior(mom, rank + 150)
+        fill_interior!(rho, rank + 50)
+        fill_interior!(mom, rank + 150)
         maybe_fields = mapreduce_mhaloarray_dims(identity, +, MultiHaloArray((; rho, mom)), (1,))
         gather_and_save_haloarray(filename_base, maybe_fields)
         MPI.Barrier(comm)

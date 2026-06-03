@@ -80,7 +80,7 @@ Base.similar(halo::LocalHaloArray{T,N,A,Halo,BCondition}, ::Type{AA},
     dims::NTuple{M,<:Integer}) where {T,N,A,Halo,BCondition,AA,M} =
     similar(halo, AA, ntuple(d -> Int(dims[d]), Val(M)))
 
-# Base.copy, Base.zero, Base.fill!, Base.copyto!, fill_interior,
+# Base.copy, Base.zero, Base.fill!, Base.copyto!, fill_interior!,
 # fill_from_local_indices!, Base.foreach, arithmetic, norm,
 # owned_axes, eachindex, iterate, versors, Base.similar dispatchers,
 # Base.map!/map — all inherited from AbstractSingleHaloArray

@@ -521,3 +521,20 @@ end
 @testset "MPI HaloArray scalar indexing" begin
     _check_haloarray_scalar_indexing()
 end
+
+@testset "MPI fill_from_global_indices! — correct global offsets per rank" begin
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+
+    topology = CartesianTopology(comm, (0,); periodic=(false,))
+    ha = HaloArray(Int, (4,), 1, topology; boundary_condition=:repeating)
+
+    # Each cell should receive its 1-based global index
+    fill_from_global_indices!(ha) do I
+        I[1]
+    end
+
+    global_start = owned_to_global_index(ha, (1,))[1]
+    global_end   = owned_to_global_index(ha, (owned_size(ha, 1),))[1]
+    @test collect(interior_view(ha)) == collect(global_start:global_end)
+end

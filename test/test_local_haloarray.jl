@@ -135,3 +135,26 @@ end
     bad = LocalHaloArray(Float64, (4, 2), 1; boundary_condition=:repeating)
     @test_throws DimensionMismatch LocalMultiHaloArray((; u, bad))
 end
+
+@testset "zero halo width" begin
+    ha = LocalHaloArray(Int, (5,), 0; boundary_condition=:repeating)
+
+    @test halo_width(ha) == 0
+    @test storage_size(ha) == (5,)
+    @test interior_size(ha) == (5,)
+    @test owned_size(ha) == (5,)
+
+    interior_view(ha) .= 1:5
+    @test parent(ha) == [1, 2, 3, 4, 5]
+
+    # synchronize_halo! is a no-op with zero halo: storage unchanged
+    synchronize_halo!(ha)
+    @test parent(ha) == [1, 2, 3, 4, 5]
+
+    # 2D
+    ha2 = LocalHaloArray(Float64, (3, 4), 0; boundary_condition=:reflecting)
+    @test storage_size(ha2) == (3, 4)
+    interior_view(ha2) .= 1.0
+    synchronize_halo!(ha2)
+    @test all(==(1.0), parent(ha2))
+end

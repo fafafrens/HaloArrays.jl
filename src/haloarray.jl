@@ -209,7 +209,7 @@ end
 
 # Base.copy, Base.zero, Base.fill!, Base.copyto! inherited from AbstractSingleHaloArray
 
-# fill_interior, fill_from_local_indices!, Base.foreach, arithmetic,
+# fill_interior!, fill_from_local_indices!, Base.foreach, arithmetic,
 # LinearAlgebra.norm inherited from AbstractSingleHaloArray
 
 # Base.map!/map inherited from AbstractSingleHaloArray

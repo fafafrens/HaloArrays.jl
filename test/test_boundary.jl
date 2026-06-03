@@ -80,6 +80,18 @@ end
         @test HaloArray(Int, (3,), 1, periodic; boundary_condition=:periodic) isa HaloArray
     end
 
+    @testset "zero halo width — boundary_condition! is a no-op" begin
+        topology = _self_topology((1,))
+        ha = HaloArray(Int, (4,), 0, topology; boundary_condition=:repeating)
+
+        @test halo_width(ha) == 0
+        @test storage_size(ha) == (4,)
+        interior_view(ha) .= [1, 2, 3, 4]
+
+        boundary_condition!(ha)   # nothing to fill
+        @test parent(ha) == [1, 2, 3, 4]
+    end
+
     @testset "NoBoundaryCondition leaves ghost cells untouched" begin
         topology = _self_topology((1,))
         ha = HaloArray(

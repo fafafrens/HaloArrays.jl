@@ -101,7 +101,7 @@ function validate_boundary_condition(topology::AbstractCartesianTopology, bounda
 end
 
 # ---- AbstractSingleHaloArray defaults ---------------------------------
-# ThreadedHaloArray overrides fill!, copyto!, fill_interior,
+# ThreadedHaloArray overrides fill!, copyto!, fill_interior!,
 # fill_from_local_indices!, and Base.foreach with tforeach variants.
 
 @inline Base.size(halo::AbstractSingleHaloArray)         = global_size(halo)
@@ -129,7 +129,7 @@ function Base.foreach(f, halo::AbstractSingleHaloArray)
     return nothing
 end
 
-function fill_interior(halo::AbstractSingleHaloArray, value)
+function fill_interior!(halo::AbstractSingleHaloArray, value)
     fill!(interior_view(halo), value)
     return halo
 end

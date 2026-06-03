@@ -118,7 +118,7 @@ export interior_view,
     get_unit_vector,
     owned_to_global_index,
     global_to_storage_index,
-    fill_interior,
+    fill_interior!,
     fill_from_global_indices!,
     fill_from_local_indices!
 

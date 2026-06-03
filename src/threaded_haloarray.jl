@@ -421,7 +421,7 @@ end
 start_halo_exchange!(halo::ThreadedHaloArray) = halo_exchange!(halo)
 finish_halo_exchange!(halo::ThreadedHaloArray) = halo
 
-function fill_interior(halo::ThreadedHaloArray, value)
+function fill_interior!(halo::ThreadedHaloArray, value)
     tile_foreach(thread_backend(halo), tile_id -> _fill_threaded_interior_tile!(halo, tile_id, value),
         eachindex(parent(halo)); scheduler=:static)
     return halo

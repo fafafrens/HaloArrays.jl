@@ -29,7 +29,7 @@ using HaloArrays
     @test global_to_storage_index(ha, (owned_last,)) == (7,)
     @test_throws BoundsError owned_to_global_index(ha, (0,))
 
-    fill_interior(ha, 3.0)
+    fill_interior!(ha, 3.0)
     @test all(interior_view(ha) .== 3.0)
 
     fill_from_global_indices!(ha) do I
