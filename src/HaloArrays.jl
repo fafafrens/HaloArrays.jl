@@ -3,11 +3,12 @@ module HaloArrays
 using MPI
 using HDF5
 using LinearAlgebra
-using OhMyThreads: tforeach, tmap, tmapreduce
+using OhMyThreads: tforeach, tmapreduce
 using StaticArrays
 
 # Include library files
 include("abstract_haloarray.jl")
+include("thread_backend.jl")
 include("cartesian_topology.jl")
 include("haloarray.jl")
 include("local_haloarray.jl")
@@ -40,6 +41,10 @@ export HaloArray,
     MPIHaloBackend,
     LocalHaloBackend,
     ThreadedHaloBackend,
+    ThreadBackend,
+    OhMyThreadsBackend,
+    SerialBackend,
+    PolyesterBackend,
     LocalHaloArray,
     ThreadedHaloArray,
     ThreadedMultiHaloArray,
@@ -67,6 +72,9 @@ export interior_view,
     owned_axes,
     is_root,
     halo_backend,
+    thread_backend,
+    tile_foreach,
+    tile_mapreduce,
     field_shape,
     n_field,
     halo_width,

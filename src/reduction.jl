@@ -1,12 +1,5 @@
 # mapreduce / any / all for HaloArray (MPI) live in mpi_support.jl
 
-function _combine_threaded_reduction(op, result, values)
-    for value in values
-        result = op(result, value)
-    end
-    return result
-end
-
 for func in (:mapreduce, :mapfoldl, :mapfoldr)
     @eval function Base.$func(
             f::F, op::OP, halo::LocalHaloArray, etc::Vararg{LocalHaloArray}; kws...,
@@ -25,16 +18,10 @@ for func in (:mapreduce, :mapfoldl, :mapfoldr)
     @eval function Base.$func(
             f::F, op::OP, halo::ThreadedHaloArray, etc::Vararg{ThreadedHaloArray}; kws...,
         ) where {F<:Function, OP}
-        ntile = tile_count(halo)
-        first_interiors = map(h -> interior_view(h, 1), (halo, etc...))
-        first_result = $func(f, op, first_interiors...; kws...)
-        ntile == 1 && return first_result
-
-        tile_results = tmap(typeof(first_result), 2:ntile; scheduler=:static) do tile_id
-            interiors = map(h -> interior_view(h, tile_id), (halo, etc...))
-            $func(f, op, interiors...; kws...)
-        end
-        return _combine_threaded_reduction(op, first_result, tile_results)
+        # Reduce each tile (serially, with the user's kwargs), then combine the
+        # per-tile results with `op` across tiles via the array's thread backend.
+        per_tile(tile_id) = $func(f, op, map(h -> interior_view(h, tile_id), (halo, etc...))...; kws...)
+        return tile_mapreduce(thread_backend(halo), per_tile, op, 1:tile_count(halo); scheduler=:static)
     end
 
     @eval function Base.$func(
@@ -54,11 +41,13 @@ function Base.all(f::F, u::LocalHaloArray) where {F<:Function}
 end
 
 function Base.any(f::F, u::ThreadedHaloArray) where {F<:Function}
-    return tmapreduce(tile_id -> any(f, interior_view(u, tile_id)), |, 1:tile_count(u); scheduler=:static)
+    return tile_mapreduce(thread_backend(u), tile_id -> any(f, interior_view(u, tile_id)), |,
+        1:tile_count(u); scheduler=:static)
 end
 
 function Base.all(f::F, u::ThreadedHaloArray) where {F<:Function}
-    return tmapreduce(tile_id -> all(f, interior_view(u, tile_id)), &, 1:tile_count(u); scheduler=:static)
+    return tile_mapreduce(thread_backend(u), tile_id -> all(f, interior_view(u, tile_id)), &,
+        1:tile_count(u); scheduler=:static)
 end
 
 for func in (:mapreduce, :mapfoldl, :mapfoldr)

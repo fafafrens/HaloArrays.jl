@@ -95,13 +95,14 @@ using LinearAlgebra: dot, norm
 
     @test mapreduce(identity, +, threaded_u; dims=1)[] == 21
 
-    @testset "_combine_threaded_reduction" begin
-        # 3-arg: prepends an initial result (used when tile 1 is computed separately)
-        @test HaloArrays._combine_threaded_reduction(+, 100, [1, 2, 3]) == 106
-        @test HaloArrays._combine_threaded_reduction(*, 2, [3, 4]) == 24
-        @test HaloArrays._combine_threaded_reduction(max, 0, [3, 1, 4]) == 4
-
-        # empty tail: returns initial result unchanged
-        @test HaloArrays._combine_threaded_reduction(+, 7, Int[]) == 7
+    @testset "tile_mapreduce (cross-tile combine)" begin
+        # The per-tile results are combined with `op` via the backend's
+        # tile_mapreduce; it must match a plain mapreduce for any backend.
+        for backend in (OhMyThreadsBackend(), SerialBackend())
+            @test tile_mapreduce(backend, identity, +, [1, 2, 3]) == 6
+            @test tile_mapreduce(backend, identity, *, [3, 4]) == 12
+            @test tile_mapreduce(backend, identity, max, [3, 1, 4]) == 4
+            @test tile_mapreduce(backend, identity, +, [7]) == 7   # single tile
+        end
     end
 end

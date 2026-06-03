@@ -259,6 +259,42 @@ update!(::Union{MPIHaloBackend,LocalHaloBackend}, du, u, p) = serial_update!(du,
 update!(::ThreadedHaloBackend, du, u, p) = threaded_update!(du, u, p)
 ```
 
+## Thread Backends
+
+`halo_backend` describes *where* data lives; a **`ThreadBackend`** describes *how*
+a `ThreadedHaloArray`'s per-tile work is dispatched across threads. Choose it at
+construction with the `thread_backend` keyword (default `OhMyThreadsBackend()`):
+
+```julia
+u = ThreadedHaloArray(Float64, (32, 32), 1; dims=(2, 2),
+                      boundary_condition=:periodic,
+                      thread_backend=SerialBackend())
+
+thread_backend(u)   # SerialBackend()
+```
+
+Built-in backends:
+
+| Backend | Notes |
+|---|---|
+| `OhMyThreadsBackend()` | Default. Task-based, supports schedulers, composes/nests. |
+| `SerialBackend()`      | Runs per-tile work on the calling thread — handy for debugging races and deterministic runs. |
+| `PolyesterBackend()`   | Low-overhead `@batch`. Requires `using Polyester` (loaded via the `HaloArraysPolyesterExt` extension); constructing it otherwise raises a clear error. |
+
+The backend is part of the array's concrete type, so dispatch is resolved at
+compile time, and it propagates through `similar`, broadcast, and reductions —
+every threaded operation (`synchronize_halo_threads!`, `fill!`, broadcast, `sum`,
+`dot`, `any`/`all`, …) honours it automatically.
+
+All threaded work funnels through just two methods. Define them for your own
+`<:ThreadBackend` and the whole package uses it — no other changes needed:
+
+```julia
+struct MyBackend <: ThreadBackend end
+HaloArrays.tile_foreach(::MyBackend, f, itr; scheduler=nothing) = ...   # parallel foreach
+HaloArrays.tile_mapreduce(::MyBackend, f, op, itr; scheduler=nothing) = ...  # parallel mapreduce
+```
+
 ## Face Loops
 
 `FaceRanges(u)` gives the index ranges needed by finite-volume style face
