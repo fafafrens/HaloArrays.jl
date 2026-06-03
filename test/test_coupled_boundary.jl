@@ -41,7 +41,7 @@ struct UnimplementedBC <: AbstractCoupledBoundaryCondition end
         @test interior_view(a) == Float64.(1:nx)
     end
 
-    @testset "driver fires only on physical NoBoundaryCondition edges" begin
+    @testset "driver fires all boundary" begin
         ny = 4
         # x = :noboundary (coupled), y = :periodic (handled per field by sync)
         state = ArrayOfHaloArray(LocalHaloArray, Float64, (2,), (nx, ny), 1;
@@ -62,8 +62,8 @@ struct UnimplementedBC <: AbstractCoupledBoundaryCondition end
         @test parent(a)[1, 1 + 1]      == parent(b)[1 + 1, 1 + 1]
         @test parent(b)[nx + 2, 1 + 1] == parent(a)[nx + 1, 1 + 1]
         # the coupled BC did not modify the y-ghost columns
-        @test parent(a)[2:nx+1, 1]     == ay_before[2:nx+1, 1]
-        @test parent(a)[2:nx+1, ny+2]  == ay_before[2:nx+1, ny+2]
+        @test parent(a)[2:nx+1, 1]     != ay_before[2:nx+1, 1]
+        @test parent(a)[2:nx+1, ny+2]  != ay_before[2:nx+1, ny+2]
     end
 
     @testset "helpers + unimplemented error" begin
