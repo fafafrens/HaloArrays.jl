@@ -196,6 +196,35 @@ HaloArray(
 
 Custom boundary conditions can be passed as a subtype or instance of `AbstractBoundaryCondition`; symbol registration is not used.
 
+### Coupled boundary conditions
+
+Some schemes — characteristic reconstruction, for instance — need *all* fields'
+interior edges together to fill the ghosts (the ghost state of each field depends
+on the others). Mark those `(dim, side)` with `NoBoundaryCondition` so
+`synchronize_halo!` skips them, then fill them from the whole state with a
+coupled boundary condition: subtype `AbstractCoupledBoundaryCondition` and
+implement `apply_coupled_bc!`.
+
+```julia
+struct MyBC <: AbstractCoupledBoundaryCondition end
+function HaloArrays.apply_coupled_bc!(bc::MyBC, state, s::Side{S}, d::Dim{D}) where {S,D}
+    for field in eachfield(state)              # iterate the collection's fields
+        edge  = get_send_view(s, d, field)     # interior cells at the boundary (read)
+        ghost = get_recv_view(s, d, field)     # ghost cells (write)
+        # ... transform across fields, then write `ghost` ...
+    end
+end
+
+synchronize_halo!(state)        # periodic/reflecting edges, per field
+apply_coupled_bc!(MyBC(), state)  # fills exactly the NoBoundaryCondition physical edges
+```
+
+The two-argument `apply_coupled_bc!(bc, state)` visits every face that is both a
+physical boundary ([`is_physical_boundary`]) and configured `NoBoundaryCondition`.
+Works on `MultiHaloArray` and `ArrayOfHaloArray` with `LocalHaloArray`/MPI fields.
+See `examples/finite_volume/acoustics_characteristic_1d.jl` for a worked
+non-reflecting acoustic outflow on two coupled fields.
+
 ## Local and Threaded Arrays
 
 `LocalHaloArray` is the simplest option when running on a single process:

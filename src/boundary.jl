@@ -211,6 +211,107 @@ function boundary_condition!(mha::ArrayOfHaloArray)
 end
 
 # ============================================================
+# Coupled boundary conditions
+#
+# The per-field `boundary_condition!` above fills each field's ghosts
+# independently. A *coupled* boundary condition (e.g. characteristic
+# reconstruction) instead needs every field's interior edge at once, because the
+# ghost state of each field depends on all of them together. Mark the relevant
+# `(dim, side)` with `NoBoundaryCondition` so `synchronize_halo!` skips it, then
+# call `apply_coupled_bc!` to fill those edges from the whole state.
+# ============================================================
+
+"""
+    AbstractCoupledBoundaryCondition
+
+Supertype for boundary conditions that act on a whole multi-field state at once
+(rather than per field). Subtype it for your scheme, carrying any parameters,
+and implement [`apply_coupled_bc!`](@ref). See [`NoBoundaryCondition`](@ref) for
+opting the relevant boundaries out of the automatic per-field BC.
+"""
+abstract type AbstractCoupledBoundaryCondition end
+
+"""
+    eachfield(state::AbstractHaloCollection)
+
+Iterate the underlying field arrays of a [`MultiHaloArray`](@ref) (in declared
+order) or an [`ArrayOfHaloArray`](@ref) (in index order) uniformly — useful when
+writing a coupled boundary condition that reads/writes every field.
+"""
+@inline eachfield(state::AbstractHaloCollection) = values(state.arrays)
+
+"""
+    is_physical_boundary(field, Side(s), Dim(d)) -> Bool
+    is_physical_boundary(state::AbstractHaloCollection, Side(s), Dim(d)) -> Bool
+
+Whether the `(side, dim)` face is a real domain edge (no MPI neighbour) rather
+than an interior rank face. Always `true` for [`LocalHaloArray`](@ref). For a
+collection, delegates to its first field. Use it to apply a physical boundary
+condition only where one belongs.
+"""
+@inline is_physical_boundary(::LocalHaloArray, ::Side, ::Dim) = true
+@inline is_physical_boundary(halo::HaloArray, ::Side{S}, ::Dim{D}) where {S,D} =
+    halo.topology.neighbors[D][S] < 0
+@inline is_physical_boundary(state::AbstractHaloCollection, s::Side, d::Dim) =
+    is_physical_boundary(first(eachfield(state)), s, d)
+
+
+"""
+    apply_coupled_bc!(bc::AbstractCoupledBoundaryCondition, state)
+    apply_coupled_bc!(bc::AbstractCoupledBoundaryCondition, state, Side(s), Dim(d))
+
+Apply a coupled boundary condition to a multi-field `state` (a
+[`MultiHaloArray`](@ref) or [`ArrayOfHaloArray`](@ref)).
+
+You implement the **four-argument** method for your `bc` type; it reads each
+field's interior edge with [`get_send_view`](@ref) and writes each field's ghost
+slab with [`get_recv_view`](@ref) (use [`eachfield`](@ref) to iterate fields):
+
+```julia
+struct MyBC <: AbstractCoupledBoundaryCondition; ... end
+function HaloArrays.apply_coupled_bc!(bc::MyBC, state, s::Side{S}, d::Dim{D}) where {S,D}
+    for field in eachfield(state)
+        edge  = get_send_view(s, d, field)   # interior cells adjacent to the boundary
+        ghost = get_recv_view(s, d, field)   # ghost cells to fill
+        # ... transform across fields, write ghost ...
+    end
+end
+```
+
+The **two-argument** driver visits every face that is both a physical boundary
+([`is_physical_boundary`](@ref)) and configured [`NoBoundaryCondition`](@ref),
+and dispatches your method there — i.e. it fills exactly the edges that
+`synchronize_halo!` left untouched. Call it after `synchronize_halo!(state)`.
+
+Currently supports [`LocalHaloArray`](@ref) and MPI [`HaloArray`](@ref) fields.
+"""
+function apply_coupled_bc!(bc::AbstractCoupledBoundaryCondition,
+        state, ::Side{S}, ::Dim{D}) where {S,D}
+    throw(ArgumentError(
+        "no apply_coupled_bc! for $(typeof(bc)) at side $S dim $D; define " *
+        "`HaloArrays.apply_coupled_bc!(bc::$(nameof(typeof(bc))), state, ::Side, ::Dim)`"))
+end
+
+function apply_coupled_bc!_checked(bc, state,side::Side{s},dime::Dim{d}) where {s,d}
+           
+    if is_physical_boundary(state, side,dime)
+        apply_coupled_bc!(bc, state,side,dime)
+    end 
+    return nothing
+end 
+
+function apply_coupled_bc!(bc::AbstractCoupledBoundaryCondition, state::AbstractHaloCollection{T,N,S}) where {T,N,S}
+    
+    ntuple(Val(S)) do d
+        ntuple(Val(2)) do s
+            apply_coupled_bc!_checked(bc, state,Side(s),Dim(d))
+        end
+    end
+    #_apply_coupled_bc_dim!(bc, state, Val(_spatial_ndims(state)))
+    return nothing
+end
+
+# ============================================================
 # Helpers: symbol/type → BC instance, normalization
 # ============================================================
 

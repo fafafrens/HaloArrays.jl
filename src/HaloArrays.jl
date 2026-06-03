@@ -126,7 +126,11 @@ export interior_view,
 export boundary_condition!,
     boundary_condition_threads!,
     normalize_boundary_condition,
-    to_bc
+    to_bc,
+    AbstractCoupledBoundaryCondition,
+    apply_coupled_bc!,
+    is_physical_boundary,
+    eachfield
 
 # Halo exchange
 export halo_exchange!,
