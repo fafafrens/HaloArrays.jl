@@ -380,6 +380,22 @@
         end
     end
 
+    @testset "default dims decomposes last dimension with nthreads tiles" begin
+        nthreads = Threads.nthreads()
+        u = ThreadedHaloArray(Float64, (4,), 1; boundary_condition=:repeating)
+        @test tile_count(u) == nthreads
+        @test u.topology.dims == (nthreads,)
+
+        # 2D: only last dim is split, first stays 1
+        v = ThreadedHaloArray(Float64, (4, 4), 1; boundary_condition=:repeating)
+        @test v.topology.dims == (1, nthreads)
+        @test tile_count(v) == nthreads
+
+        # 3D: only last dim is split
+        w = ThreadedHaloArray(Float64, (4, 4, 4), 1; boundary_condition=:repeating)
+        @test w.topology.dims == (1, 1, nthreads)
+    end
+
     @testset "threaded multi halo array compatibility checks" begin
         rho = ThreadedHaloArray(Int, (3,), 1; dims=(2,), boundary_condition=:repeating)
         bad_tile_size = ThreadedHaloArray(Int, (4,), 1; dims=(2,), boundary_condition=:repeating)
@@ -391,5 +407,28 @@
         @test_throws DimensionMismatch ThreadedMultiHaloArray((; rho, bad_halo))
         @test_throws DimensionMismatch ThreadedMultiHaloArray((; rho, bad_topology))
         @test_throws ArgumentError ThreadedMultiHaloArray((; rho, local_halo=LocalHaloArray(Int, (3,), 1)))
+    end
+
+    @testset "fields shorthand and default dims for ThreadedMultiHaloArray" begin
+        nthreads = Threads.nthreads()
+
+        # fields shorthand with explicit dims
+        mha = ThreadedMultiHaloArray(Float64, (4,), 1;
+            dims=(2,), fields=(:rho, :vel), boundary_condition=:repeating)
+        @test mha isa MultiHaloArray
+        @test keys(mha.arrays) == (:rho, :vel)
+        @test all(f -> f isa ThreadedHaloArray, values(mha.arrays))
+        @test tile_count(mha) == 2
+
+        # fields shorthand with default dims (decomposes last dimension)
+        mha_default = ThreadedMultiHaloArray(Float64, (4,), 1;
+            fields=(:a, :b), boundary_condition=:repeating)
+        @test tile_count(mha_default) == nthreads
+        @test mha_default.arrays.a.topology.dims == (nthreads,)
+
+        # Float64 default eltype
+        mha_f64 = ThreadedMultiHaloArray((4,), 1;
+            fields=(:p, :q), boundary_condition=:repeating)
+        @test eltype(mha_f64) === Float64
     end
 end

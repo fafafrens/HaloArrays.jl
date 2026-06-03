@@ -69,15 +69,22 @@ function MultiHaloArray(::Type{<:HaloArray}, owned_dims::NTuple{N,Int},
 end
 
 function MultiHaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int,
-        topology::CartesianTopology{N}; boundary_conditions::NamedTuple{names,<:Tuple}) where {T,N,names}
+        topology::CartesianTopology{N};
+        boundary_conditions::Union{NamedTuple,Nothing} = nothing,
+        fields::Union{NTuple{<:Any,Symbol},Nothing} = nothing,
+        boundary_condition = :repeating) where {T,N}
+    bcs = _resolve_bcs(fields, boundary_condition, boundary_conditions)
     return MultiHaloArray(HaloArray, T, owned_dims, halo, topology;
-        boundary_conditions=boundary_conditions)
+        boundary_conditions = bcs)
 end
 
 function MultiHaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int;
-        boundary_conditions::NamedTuple{names,<:Tuple}) where {T,N,names}
+        boundary_conditions::Union{NamedTuple,Nothing} = nothing,
+        fields::Union{NTuple{<:Any,Symbol},Nothing} = nothing,
+        boundary_condition = :repeating) where {T,N}
+    bcs = _resolve_bcs(fields, boundary_condition, boundary_conditions)
     return MultiHaloArray(HaloArray, T, owned_dims, halo;
-        boundary_conditions=boundary_conditions)
+        boundary_conditions = bcs)
 end
 
 function MultiHaloArray(owned_dims::NTuple{N,Int}, halo::Int,
@@ -102,7 +109,7 @@ end
 
 function MultiHaloArray(::Type{<:ThreadedHaloArray}, ::Type{T},
         tile_size::NTuple{N,<:Integer}, halo::Integer;
-        dims::NTuple{N,<:Integer},
+        dims::NTuple{N,<:Integer} = ntuple(d -> d == N ? Threads.nthreads() : 1, Val(N)),
         boundary_conditions::NamedTuple{names,<:Tuple}) where {T,N,names}
     arrays = NamedTuple{names}(map(boundary_conditions) do bc
         ThreadedHaloArray(T, tile_size, halo; dims=dims, boundary_condition=bc)
@@ -111,7 +118,8 @@ function MultiHaloArray(::Type{<:ThreadedHaloArray}, ::Type{T},
 end
 
 function MultiHaloArray(::Type{<:ThreadedHaloArray}, tile_size::NTuple{N,<:Integer},
-        halo::Integer; dims::NTuple{N,<:Integer},
+        halo::Integer;
+        dims::NTuple{N,<:Integer} = ntuple(d -> d == N ? Threads.nthreads() : 1, Val(N)),
         boundary_conditions::NamedTuple{names,<:Tuple}) where {N,names}
     return MultiHaloArray(ThreadedHaloArray, Float64, tile_size, halo;
         dims=dims, boundary_conditions=boundary_conditions)
@@ -302,21 +310,23 @@ function LocalMultiHaloArray(arrs::NamedTuple; check=nothing)
 end
 
 function LocalMultiHaloArray(::Type{T}, owned_dims::NTuple{N,<:Integer}, halo::Integer;
-        boundary_conditions::NamedTuple{names,<:Tuple}) where {T,N,names}
+        boundary_conditions::Union{NamedTuple,Nothing} = nothing,
+        fields::Union{NTuple{<:Any,Symbol},Nothing} = nothing,
+        boundary_condition = :repeating) where {T,N}
+    bcs = _resolve_bcs(fields, boundary_condition, boundary_conditions)
     normalized_owned_dims = ntuple(d -> Int(owned_dims[d]), Val(N))
     return MultiHaloArray(LocalHaloArray, T, normalized_owned_dims, Int(halo);
-        boundary_conditions=boundary_conditions)
+        boundary_conditions = bcs)
 end
 
-function LocalMultiHaloArray(owned_dims::NTuple{N,<:Integer}, halo::Integer,
-        bcs::NamedTuple{names,<:Tuple}) where {N,names}
-    return LocalMultiHaloArray(Float64, owned_dims, halo; boundary_conditions=bcs)
-end
+# positional form kept for backward compatibility
+LocalMultiHaloArray(owned_dims::NTuple{N,<:Integer}, halo::Integer,
+        bcs::NamedTuple; kwargs...) where {N} =
+    LocalMultiHaloArray(Float64, owned_dims, halo; boundary_conditions=bcs, kwargs...)
 
-function LocalMultiHaloArray(owned_dims::NTuple{N,<:Integer}, halo::Integer;
-        boundary_conditions::NamedTuple{names,<:Tuple}) where {N,names}
-    return LocalMultiHaloArray(Float64, owned_dims, halo; boundary_conditions=boundary_conditions)
-end
+# Float64 default — kwargs forwarded to T-explicit above
+LocalMultiHaloArray(owned_dims::NTuple{N,<:Integer}, halo::Integer; kwargs...) where {N} =
+    LocalMultiHaloArray(Float64, owned_dims, halo; kwargs...)
 
 # ---- ThreadedMultiHaloArray constructors --------------------------------
 
@@ -340,11 +350,44 @@ function ThreadedMultiHaloArray(arrs::NamedTuple; check=nothing)
 end
 
 function ThreadedMultiHaloArray(::Type{T}, tile_size::NTuple{N,<:Integer}, halo::Integer;
-        dims::NTuple{N,<:Integer},
-        boundary_conditions::NamedTuple{names,<:Tuple}) where {T,N,names}
+        dims::NTuple{N,<:Integer} = ntuple(d -> d == N ? Threads.nthreads() : 1, Val(N)),
+        boundary_conditions::Union{NamedTuple,Nothing} = nothing,
+        fields::Union{NTuple{<:Any,Symbol},Nothing} = nothing,
+        boundary_condition = :repeating) where {T,N}
+    bcs = _resolve_bcs(fields, boundary_condition, boundary_conditions)
     return MultiHaloArray(ThreadedHaloArray, T, tile_size, halo;
-        dims=dims, boundary_conditions=boundary_conditions)
+        dims=dims, boundary_conditions=bcs)
 end
 
 ThreadedMultiHaloArray(tile_size::NTuple{N,<:Integer}, halo::Integer; kwargs...) where {N} =
     ThreadedMultiHaloArray(Float64, tile_size, halo; kwargs...)
+
+# ============================================================
+# Helpers for the uniform-BC shorthand (fields + boundary_condition)
+# ============================================================
+
+function _make_boundary_conditions(fields::NTuple{M,Symbol}, bc) where {M}
+    return NamedTuple{fields}(ntuple(_ -> bc, Val(M)))
+end
+
+function _resolve_bcs(
+        fields::Union{NTuple{<:Any,Symbol},Nothing},
+        bc,
+        boundary_conditions::Union{NamedTuple,Nothing})
+    fields !== nothing && return _make_boundary_conditions(fields, bc)
+    boundary_conditions !== nothing && return boundary_conditions
+    throw(ArgumentError(
+        "provide either `fields` (with `boundary_condition`) or `boundary_conditions`"))
+end
+
+# ---- Float64 shorthand for MPI MultiHaloArray with topology ---------------
+# (T-explicit version is merged into the constructor above; this adds the
+#  no-T shorthand. No conflict: topology in positional args disambiguates.)
+
+function MultiHaloArray(owned_dims::NTuple{N,Int}, halo::Int,
+        topology::CartesianTopology{N};
+        fields::NTuple{<:Any,Symbol},
+        boundary_condition = :repeating) where {N}
+    return MultiHaloArray(Float64, owned_dims, halo, topology;
+        fields = fields, boundary_condition = boundary_condition)
+end

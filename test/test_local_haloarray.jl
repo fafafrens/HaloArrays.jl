@@ -134,6 +134,18 @@ end
 
     bad = LocalHaloArray(Float64, (4, 2), 1; boundary_condition=:repeating)
     @test_throws DimensionMismatch LocalMultiHaloArray((; u, bad))
+
+    # fields + boundary_condition shorthand
+    from_fields = LocalMultiHaloArray(Float64, (3, 2), 1;
+        fields=(:rho, :vel, :e), boundary_condition=:repeating)
+    @test from_fields isa MultiHaloArray
+    @test keys(from_fields.arrays) == (:rho, :vel, :e)
+    @test all(f -> f isa LocalHaloArray, values(from_fields.arrays))
+
+    from_fields_default_type = LocalMultiHaloArray((3, 2), 1;
+        fields=(:p, :q), boundary_condition=:reflecting)
+    @test eltype(from_fields_default_type) === Float64
+    @test size(from_fields_default_type) == (2, 3, 2)
 end
 
 @testset "zero halo width" begin

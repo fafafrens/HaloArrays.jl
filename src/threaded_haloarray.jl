@@ -80,7 +80,7 @@ The thread-execution backend that dispatches this array's per-tile work.
 @inline thread_backend(halo::ThreadedHaloArray) = halo.backend
 
 function ThreadedHaloArray(::Type{T}, tile_size::NTuple{N,<:Integer}, halo::Integer;
-        dims::NTuple{N,<:Integer},
+        dims::NTuple{N,<:Integer} = ntuple(d -> d == N ? Threads.nthreads() : 1, Val(N)),
         boundary_condition=:repeating,
         thread_backend::ThreadBackend=OhMyThreadsBackend()) where {T,N}
     halo_int = Int(halo)
