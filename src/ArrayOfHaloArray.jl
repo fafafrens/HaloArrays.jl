@@ -25,7 +25,7 @@ synchronize_halo!(vel)
 
 Multi-field halo container using an `AbstractArray` to store the fields.
 """
-mutable struct ArrayOfHaloArray{T,N,Shape,A,D} <: AbstractHaloCollection{T,D}
+mutable struct ArrayOfHaloArray{T,N,Shape,A,D} <: AbstractHaloCollection{T,D,N}
     arrays::A
 end
 

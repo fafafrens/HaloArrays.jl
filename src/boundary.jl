@@ -255,8 +255,6 @@ condition only where one belongs.
 @inline is_physical_boundary(state::AbstractHaloCollection, s::Side, d::Dim) =
     is_physical_boundary(first(eachfield(state)), s, d)
 
-@inline _field_boundary_condition(field, d::Integer, side::Integer) =
-    field.boundary_condition[d][side]
 
 """
     apply_coupled_bc!(bc::AbstractCoupledBoundaryCondition, state)
@@ -287,18 +285,30 @@ and dispatches your method there — i.e. it fills exactly the edges that
 
 Currently supports [`LocalHaloArray`](@ref) and MPI [`HaloArray`](@ref) fields.
 """
-function apply_coupled_bc!(bc::AbstractCoupledBoundaryCondition, state::AbstractHaloCollection)
-    ref = first(eachfield(state))
-    for d in 1:ndims(ref), side in 1:2
-        is_physical_boundary(ref, Side(side), Dim(d)) || continue
-        _field_boundary_condition(ref, d, side) isa NoBoundaryCondition || continue
-        applicable(apply_coupled_bc!, bc, state, Side(side), Dim(d)) ||
-            throw(ArgumentError(
-                "no apply_coupled_bc! for $(typeof(bc)) at side $side dim $d; define " *
-                "`HaloArrays.apply_coupled_bc!(bc::$(nameof(typeof(bc))), state, ::Side, ::Dim)`"))
-        apply_coupled_bc!(bc, state, Side(side), Dim(d))
+function apply_coupled_bc!(bc::AbstractCoupledBoundaryCondition,
+        state, ::Side{S}, ::Dim{D}) where {S,D}
+    throw(ArgumentError(
+        "no apply_coupled_bc! for $(typeof(bc)) at side $S dim $D; define " *
+        "`HaloArrays.apply_coupled_bc!(bc::$(nameof(typeof(bc))), state, ::Side, ::Dim)`"))
+end
+
+function apply_coupled_bc!_checked(bc, state,side::Side{s},dime::Dim{d}) where {s,d}
+           
+    if is_physical_boundary(state, side,dime)
+        apply_coupled_bc!(bc, state,side,dime)
+    end 
+    return nothing
+end 
+
+function apply_coupled_bc!(bc::AbstractCoupledBoundaryCondition, state::AbstractHaloCollection{T,N,S}) where {T,N,S}
+    
+    ntuple(Val(S)) do d
+        ntuple(Val(2)) do s
+            apply_coupled_bc!_checked(bc, state,Side(s),Dim(d))
+        end
     end
-    return state
+    #_apply_coupled_bc_dim!(bc, state, Val(_spatial_ndims(state)))
+    return nothing
 end
 
 # ============================================================

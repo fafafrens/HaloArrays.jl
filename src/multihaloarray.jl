@@ -27,7 +27,7 @@ state.rho .= 1.0
 synchronize_halo!(state)   # refreshes every field
 ```
 """
-mutable struct MultiHaloArray{T,N,A,D} <: AbstractHaloCollection{T,D}
+mutable struct MultiHaloArray{T,N,A,D} <: AbstractHaloCollection{T,D,N}
     arrays::A
 end
 

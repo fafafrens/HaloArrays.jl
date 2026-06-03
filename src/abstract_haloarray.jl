@@ -22,7 +22,7 @@ abstract type AbstractSingleHaloArray{T,N} <: AbstractHaloArray{T,N} end
 abstract type AbstractDistributedHaloArray{T,N} <: AbstractSingleHaloArray{T,N} end
 abstract type AbstractSerialHaloArray{T,N} <: AbstractSingleHaloArray{T,N} end
 
-abstract type AbstractHaloCollection{T,N} <: AbstractHaloArray{T,N} end
+abstract type AbstractHaloCollection{T,N,S} <: AbstractHaloArray{T,N} end
 
 abstract type AbstractHaloBackend end
 struct MPIHaloBackend <: AbstractHaloBackend end
