@@ -86,6 +86,8 @@ function validate_boundary_condition(topology::AbstractCartesianTopology, bounda
         left, right = boundary_condition[d]
         (left isa AbstractBoundaryCondition && right isa AbstractBoundaryCondition) ||
             error("boundary_condition[$d] must be a tuple of AbstractBoundaryCondition (got $(left), $(right))")
+        # NoBoundaryCondition opts out of automatic BC; skip periodicity consistency check.
+        (left isa NoBoundaryCondition || right isa NoBoundaryCondition) && continue
         topo_is_periodic = topology.periodic_boundary_condition[d]
         both_periodic = (left isa Periodic) && (right isa Periodic)
         any_periodic  = (left isa Periodic) || (right isa Periodic)

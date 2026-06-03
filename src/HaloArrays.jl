@@ -60,6 +60,7 @@ export HaloArray,
     Antireflecting,
     Repeating,
     Periodic,
+    NoBoundaryCondition,
     Side,
     Dim
 

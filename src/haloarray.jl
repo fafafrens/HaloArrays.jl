@@ -1,9 +1,11 @@
 abstract type AbstractBoundaryCondition end
 
-struct Reflecting    <: AbstractBoundaryCondition end
-struct Antireflecting <: AbstractBoundaryCondition end
-struct Repeating     <: AbstractBoundaryCondition end
-struct Periodic      <: AbstractBoundaryCondition end
+struct Reflecting       <: AbstractBoundaryCondition end
+struct Antireflecting  <: AbstractBoundaryCondition end
+struct Repeating       <: AbstractBoundaryCondition end
+struct Periodic        <: AbstractBoundaryCondition end
+# Ghost cells are left untouched; the caller applies the BC manually.
+struct NoBoundaryCondition <: AbstractBoundaryCondition end
 
 struct Side{S}; end
 @inline Side(s::Int) = Side{s}()

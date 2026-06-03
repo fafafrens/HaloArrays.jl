@@ -79,4 +79,52 @@ end
         @test_throws ErrorException HaloArray(Int, (3,), 1, periodic; boundary_condition=:repeating)
         @test HaloArray(Int, (3,), 1, periodic; boundary_condition=:periodic) isa HaloArray
     end
+
+    @testset "NoBoundaryCondition leaves ghost cells untouched" begin
+        topology = _self_topology((1,))
+        ha = HaloArray(
+            Int,
+            (4,),
+            2,
+            topology;
+            boundary_condition=:noboundary,
+        )
+
+        fill!(parent(ha), -99)
+        interior_view(ha) .= [10, 20, 30, 40]
+
+        boundary_condition!(ha)
+
+        # Ghost cells must remain unchanged after synchronize_halo!
+        @test parent(ha)[1:2] == [-99, -99]
+        @test parent(ha)[7:8] == [-99, -99]
+        @test parent(ha)[3:6] == [10, 20, 30, 40]
+    end
+
+    @testset "NoBoundaryCondition bypasses periodicity validation" begin
+        periodic = _self_topology((1,); periodic=(true,))
+        # NoBoundaryCondition should be accepted even on a periodic topology
+        @test HaloArray(Int, (4,), 1, periodic; boundary_condition=:noboundary) isa HaloArray
+    end
+
+    @testset "NoBoundaryCondition per-side mix with other BCs" begin
+        topology = _self_topology((1,))
+        ha = HaloArray(
+            Int,
+            (4,),
+            1,
+            topology;
+            boundary_condition=((NoBoundaryCondition(), Reflecting()),),
+        )
+
+        fill!(parent(ha), -99)
+        interior_view(ha) .= [10, 20, 30, 40]
+
+        boundary_condition!(ha)
+
+        # Low ghost: untouched; high ghost: reflecting
+        @test parent(ha)[1] == -99
+        @test parent(ha)[6] == 40
+        @test parent(ha)[2:5] == [10, 20, 30, 40]
+    end
 end

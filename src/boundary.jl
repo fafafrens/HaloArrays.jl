@@ -174,6 +174,12 @@ function boundary_condition!(halo::LocalHaloArray, s::Side{2}, d::Dim{dim}, ::Pe
     return nothing
 end
 
+# ---- NoBoundaryCondition ----------------------------------------
+# Ghost cells are left unchanged; the user fills them via a custom function.
+
+boundary_condition!(::AbstractSingleHaloArray, ::Side, ::Dim, ::NoBoundaryCondition) = nothing
+boundary_condition!(::ThreadedHaloArray, ::Integer, ::Side, ::Dim, ::NoBoundaryCondition) = nothing
+
 # ============================================================
 # Collection delegators
 # ============================================================
@@ -194,10 +200,11 @@ end
 
 function to_bc(x)
     if x isa Symbol
-        x == :reflecting    && return Reflecting()
-        x == :antireflecting && return Antireflecting()
-        x == :repeating     && return Repeating()
-        x == :periodic      && return Periodic()
+        x == :reflecting       && return Reflecting()
+        x == :antireflecting   && return Antireflecting()
+        x == :repeating        && return Repeating()
+        x == :periodic         && return Periodic()
+        x == :noboundary       && return NoBoundaryCondition()
         throw(ArgumentError("Unknown boundary condition symbol: $x"))
     elseif x isa DataType && x <: AbstractBoundaryCondition
         return x()
