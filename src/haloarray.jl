@@ -1,15 +1,43 @@
+"""
+    AbstractBoundaryCondition
+
+Supertype for the rule that fills a physical-edge ghost layer when the halo is
+refreshed (by [`boundary_condition!`](@ref) / [`synchronize_halo!`](@ref)).
+
+Concrete conditions: [`Periodic`](@ref), [`Repeating`](@ref),
+[`Reflecting`](@ref), [`Antireflecting`](@ref), [`NoBoundaryCondition`](@ref).
+A condition is given per `(dimension, side)`; constructors also accept the
+symbols `:periodic`, `:repeating`, `:reflecting`, `:antireflecting`.
+"""
 abstract type AbstractBoundaryCondition end
 
+"Even/mirror reflection about the wall: `ghost = +interior` (zero-gradient)."
 struct Reflecting       <: AbstractBoundaryCondition end
+"""Odd reflection about the wall: `ghost = -interior` (the field vanishes at the
+wall) — e.g. a velocity component normal to a solid wall. Cf. [`Reflecting`](@ref)."""
 struct Antireflecting  <: AbstractBoundaryCondition end
+"Zero-gradient: each ghost cell copies the nearest owned value."
 struct Repeating       <: AbstractBoundaryCondition end
+"Ghost cells wrap around from the opposite side of the domain (periodic)."
 struct Periodic        <: AbstractBoundaryCondition end
-# Ghost cells are left untouched; the caller applies the BC manually.
+"Leave ghost cells untouched; the caller fills them manually (e.g. a custom or characteristic BC)."
 struct NoBoundaryCondition <: AbstractBoundaryCondition end
 
+"""
+    Side{S}()  (S = 1 low, 2 high);  Side(s::Int)
+
+Type-level tag for the low (`1`) or high (`2`) end of a dimension, used to
+dispatch boundary/halo operations. See [`Dim`](@ref).
+"""
 struct Side{S}; end
 @inline Side(s::Int) = Side{s}()
 
+"""
+    Dim{D}();  Dim(d::Int)
+
+Type-level tag for spatial dimension `D`, used to dispatch boundary/halo
+operations on a specific axis. See [`Side`](@ref).
+"""
 struct Dim{D}; end
 @inline Dim(d::Int) = Dim{d}()
 
@@ -22,6 +50,31 @@ struct Dim{D}; end
 #   BCondition  boundary condition type
 #   Topo        topology type (CartesianTopology{N,C} when MPI is loaded)
 #   CS          comm-state type (HaloCommState{N} when MPI is loaded)
+"""
+    HaloArray(T, owned_dims, halo, topology; boundary_condition=:repeating)
+    HaloArray(T, owned_dims, halo; boundary_condition=:repeating)   # builds a topology
+
+The MPI-distributed halo array. Each rank owns an `owned_dims` patch of the
+global grid surrounded by `halo` ghost cells; [`synchronize_halo!`](@ref)
+exchanges those ghosts with neighbouring ranks over an MPI Cartesian topology
+and applies the boundary condition at the physical domain edges.
+
+`owned_dims` is the size of *this rank's* patch — the global grid is
+`owned_dims .* topology.dims`. Reductions (`sum`, `dot`, `norm`, …) are global
+(MPI `Allreduce`); scalar indexing is local-only and warns.
+
+# Arguments
+- `T`: element type (defaults to `Float64`).
+- `owned_dims::NTuple{N,Int}`: this rank's owned (interior) extent.
+- `halo::Int`: ghost-cell width on each side.
+- `topology`: a [`CartesianTopology`](@ref). If omitted, one is built over
+  `MPI.COMM_WORLD` with periodicity inferred from the boundary condition.
+- `boundary_condition`: applied at physical edges (see [`LocalHaloArray`](@ref)
+  for the accepted forms).
+
+See also [`LocalHaloArray`](@ref), [`ThreadedHaloArray`](@ref),
+[`halo_exchange!`](@ref), [`gather`](@ref).
+"""
 mutable struct HaloArray{T,N,A,Halo,B,BCondition,Topo,CS} <: AbstractDistributedHaloArray{T,N}
     data::A
     topology::Topo
@@ -35,6 +88,12 @@ end
 
 # ---- basic accessors --------------------------------------------------
 
+"""
+    halo_width(u) -> Int
+
+The ghost-cell width on each side (the same in every dimension). Encoded in the
+type, so it is a compile-time constant. Also callable on the type.
+"""
 @inline halo_width(::HaloArray{T,N,A,Halo}) where {T,N,A,Halo} = Halo
 @inline halo_width(::Type{<:HaloArray{T,N,A,Halo}}) where {T,N,A,Halo} = Halo
 
@@ -46,6 +105,13 @@ end
 
 @inline Base.parent(halo::HaloArray) = halo.data
 
+"""
+    storage_size(u[, i]) -> dims
+
+Size of the backing storage **including** ghost padding (i.e. `owned + 2*halo`
+per dimension); for [`ThreadedHaloArray`](@ref) this is the per-tile storage.
+Contrast with [`owned_size`](@ref) (ghost-free) and [`global_size`](@ref).
+"""
 @inline storage_size(halo::HaloArray)         = size(halo.data)
 @inline storage_size(halo::HaloArray, i::Int) = size(halo.data, i)
 
@@ -53,10 +119,26 @@ end
     ntuple(i -> size(halo.data, i) - 2*Halo, Val(N))
 end
 
+"""
+    interior_range(u) -> NTuple of UnitRanges
+
+The index ranges of the owned cells **within the padded storage** (`(halo+1) :
+(size-halo)` per dimension). Use it to index `parent(u)` in a stencil with
+ghost-safe offsets, e.g. `for I in CartesianIndices(interior_range(u))`. For
+[`ThreadedHaloArray`](@ref) the range is the same for every tile.
+See also [`interior_view`](@ref).
+"""
 @inline function interior_range(halo::HaloArray{T,N,A,Halo}) where {T,N,A,Halo}
     ntuple(i -> (Halo+1):(storage_size(halo,i)-Halo), Val(N))
 end
 
+"""
+    interior_view(u) -> view
+
+A mutable view of `u`'s owned (ghost-free) cells. The usual way to read/write
+initial data: `interior_view(u) .= ...`. For [`ThreadedHaloArray`](@ref) pass a
+tile id: `interior_view(u, tile_id)`. See also [`interior_range`](@ref).
+"""
 @inline function interior_view(halo::HaloArray)
     @views halo.data[interior_range(halo)...]
 end
@@ -66,6 +148,13 @@ end
 
 # ---- global / topology accessors (pure field access, no MPI calls) ----
 
+"""
+    global_size(u) -> dims
+
+Size of the **whole** grid across all ranks / tiles (`owned_size .* topology.dims`).
+For [`LocalHaloArray`](@ref) it equals [`owned_size`](@ref); for [`HaloArray`](@ref)
+(MPI) and [`ThreadedHaloArray`](@ref) it is larger than this rank's/tile's share.
+"""
 function global_size(halo::HaloArray{T,N}) where {T,N}
     local_interior = owned_size(halo)
     dims = halo.topology.dims
@@ -217,6 +306,21 @@ end
 
 # ---- fill helpers -----------------------------------------------------
 
+"""
+    fill_from_global_indices!(f, u)
+
+Set each owned cell from `f(I, J, …)` evaluated at its **global** grid index
+(1-based over the whole domain). Each rank/tile fills only the cells it owns, so
+the same `f` produces a consistent global field across MPI ranks and threads —
+the idiomatic way to set an initial condition. Cf. [`fill_from_local_indices!`](@ref).
+
+# Example
+```julia
+fill_from_global_indices!(u) do i, j
+    exp(-((i - nx/2)^2 + (j - ny/2)^2) / 50)
+end
+```
+"""
 function fill_from_global_indices!(f, halo::HaloArray{T,N,A,Halo}) where {T,N,A,Halo}
     local_shape = interior_range(halo)
     for local_I in CartesianIndices(local_shape)

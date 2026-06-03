@@ -1,3 +1,32 @@
+"""
+    MultiHaloArray(T, owned_dims, halo[, topology]; boundary_conditions)
+    MultiHaloArray(named_tuple_of_fields)
+
+A collection of several **named** halo-array fields sharing the same geometry
+(dimensionality, interior size, halo width, and backend). Access a field by
+name (`state.rho`), refresh them all with one [`synchronize_halo!`](@ref)`(state)`,
+and broadcast/reduce over all fields at once (`state .*= 2`).
+
+`boundary_conditions` is a `NamedTuple` mapping each field name to its boundary
+condition; the field names are taken from its keys. The backing fields are
+[`HaloArray`](@ref)s (MPI) here; use [`LocalMultiHaloArray`](@ref) or
+[`ThreadedMultiHaloArray`](@ref) for local/threaded fields, or pass a
+`NamedTuple` of pre-built arrays.
+
+Use this when a solver evolves several fields on one grid (e.g. `rho`, `u`, `v`,
+`p`). For an integer/matrix-indexed collection instead of names, see
+[`ArrayOfHaloArray`](@ref).
+
+# Examples
+```julia
+state = LocalMultiHaloArray(Float64, (64, 64), 1; boundary_conditions=(
+    rho = ((Periodic(), Periodic()), (Periodic(), Periodic())),
+    p   = ((Reflecting(), Reflecting()), (Periodic(), Periodic())),
+))
+state.rho .= 1.0
+synchronize_halo!(state)   # refreshes every field
+```
+"""
 mutable struct MultiHaloArray{T,N,A,D} <: AbstractHaloCollection{T,D}
     arrays::A
 end
@@ -309,6 +338,13 @@ function LocalMultiHaloArray(arrs::NamedTuple; check=nothing)
     return MultiHaloArray(arrs; check=check)
 end
 
+"""
+    LocalMultiHaloArray(T, owned_dims, halo; boundary_conditions)
+
+A [`MultiHaloArray`](@ref) whose fields are [`LocalHaloArray`](@ref)s
+(single-process). `boundary_conditions` is a `NamedTuple` of per-field boundary
+conditions, which also fixes the field names. See [`MultiHaloArray`](@ref).
+"""
 function LocalMultiHaloArray(::Type{T}, owned_dims::NTuple{N,<:Integer}, halo::Integer;
         boundary_conditions::Union{NamedTuple,Nothing} = nothing,
         fields::Union{NTuple{<:Any,Symbol},Nothing} = nothing,
@@ -349,6 +385,14 @@ function ThreadedMultiHaloArray(arrs::NamedTuple; check=nothing)
     return MultiHaloArray(arrs; check=check)
 end
 
+"""
+    ThreadedMultiHaloArray(T, tile_size, halo; dims, boundary_conditions)
+
+A [`MultiHaloArray`](@ref) whose fields are [`ThreadedHaloArray`](@ref)s sharing
+one tile layout (`dims`). `synchronize_halo!` exchanges every field's tiles in a
+single call. `boundary_conditions` is a `NamedTuple` of per-field boundary
+conditions. See [`MultiHaloArray`](@ref) and [`ThreadedHaloArray`](@ref).
+"""
 function ThreadedMultiHaloArray(::Type{T}, tile_size::NTuple{N,<:Integer}, halo::Integer;
         dims::NTuple{N,<:Integer} = ntuple(d -> d == N ? Threads.nthreads() : 1, Val(N)),
         boundary_conditions::Union{NamedTuple,Nothing} = nothing,

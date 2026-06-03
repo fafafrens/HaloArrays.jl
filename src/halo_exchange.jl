@@ -12,11 +12,43 @@
 
 # ---- LocalHaloArray (no-ops, BC only) ---------------------------------
 
+"""
+    halo_exchange!(u)
+
+Fill `u`'s ghost cells from neighbouring data: MPI neighbour exchange for
+[`HaloArray`](@ref) and inter-tile copies for [`ThreadedHaloArray`](@ref). It
+does **not** apply the physical-edge boundary condition — use
+[`synchronize_halo!`](@ref) for the full refresh, or call
+[`boundary_condition!`](@ref) afterwards. A no-op for [`LocalHaloArray`](@ref).
+
+For overlapping communication with computation, use the split
+[`start_halo_exchange!`](@ref) / [`finish_halo_exchange!`](@ref) pair.
+"""
 halo_exchange!(halo::LocalHaloArray) = halo
 
+"""
+    start_halo_exchange!(u)
+    finish_halo_exchange!(u)
+
+Non-blocking form of [`halo_exchange!`](@ref): `start_` posts the exchange and
+returns immediately so you can do ghost-free interior work, then `finish_` waits
+for it to complete. Apply [`boundary_condition!`](@ref) afterwards if needed.
+"""
 start_halo_exchange!(halo::LocalHaloArray)  = halo
 finish_halo_exchange!(halo::LocalHaloArray) = halo
 
+"""
+    synchronize_halo!(u)
+
+Fully refresh `u`'s ghost cells: run the [`halo_exchange!`](@ref) (MPI neighbours
+or thread tiles) **and** apply the [`boundary_condition!`](@ref) at the physical
+domain edges. Call this before any stencil that reads ghost cells. Works on a
+single array or a collection (refreshing every field). Returns `u`.
+
+For [`ThreadedHaloArray`](@ref), `synchronize_halo!` is serial; a parallel
+variant [`synchronize_halo_threads!`](@ref) exists but the serial version
+usually wins for the common case (halo width 1, tiles ≈ threads).
+"""
 function synchronize_halo!(halo::LocalHaloArray)
     boundary_condition!(halo)
     return halo

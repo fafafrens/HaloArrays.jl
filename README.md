@@ -55,6 +55,21 @@ synchronize_halo!(u)
 MPI.Finalize()
 ```
 
+## Documentation
+
+Every exported type and function carries a docstring — in the REPL try
+`?HaloArray`, `?synchronize_halo!`, `?interior_view`, `?ThreadedHaloArray`, or
+`?Reflecting`. The sections below are the narrative guide; the docstrings are the
+reference.
+
+## Contents
+
+- [Installation](#installation) · [Main types](#main-types) · [Typical workflow](#typical-workflow)
+- Concepts: [Global vs. local semantics](#global-and-local-semantics) · [Halo exchange](#halo-exchange) · [Boundary conditions](#boundary-conditions)
+- Backends: [Local & threaded arrays](#local-and-threaded-arrays) · [Multi-field containers](#when-multi-arrays-are-useful) · [Backend traits](#backend-traits) · [Thread backends](#thread-backends)
+- Loops & kernels: [Face loops](#face-loops) · [Cell loops](#cell-loops) · [Kernel regions](#kernel-regions) · [Core utilities](#core-utility-functions)
+- [Tutorials](#tutorials) · [Examples](#examples) · [Tests](#tests) · [Benchmarks](#benchmarks)
+
 ## Installation
 
 ```julia

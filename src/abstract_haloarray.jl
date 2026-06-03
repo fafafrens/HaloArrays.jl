@@ -129,11 +129,25 @@ function Base.foreach(f, halo::AbstractSingleHaloArray)
     return nothing
 end
 
+"""
+    fill_interior!(u, value)
+
+Set every owned (ghost-free) cell of `u` to `value`. Ghosts are left untouched —
+call [`synchronize_halo!`](@ref) afterwards if a stencil will read them.
+"""
 function fill_interior!(halo::AbstractSingleHaloArray, value)
     fill!(interior_view(halo), value)
     return halo
 end
 
+"""
+    fill_from_local_indices!(f, u)
+
+Set each owned cell from `f(i, j, …)`, where the indices are **local** to this
+rank's/tile's owned region (1-based, ghost-free). For coordinates on the global
+grid (the usual choice for initial conditions), use
+[`fill_from_global_indices!`](@ref).
+"""
 function fill_from_local_indices!(f, halo::AbstractSingleHaloArray)
     interior = interior_view(halo)
     for I in CartesianIndices(interior)

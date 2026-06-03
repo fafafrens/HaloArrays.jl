@@ -18,6 +18,22 @@ function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,BCondition},
     return nothing
 end
 
+"""
+    boundary_condition!(u)
+    boundary_condition!(u, Side(s), Dim(d))
+
+Apply the configured boundary condition to `u`'s ghost cells at the **physical**
+domain edges — all sides and dimensions, or just one `(side, dim)`. This is the
+edge-filling half of [`synchronize_halo!`](@ref); it does *not* perform the MPI
+neighbour / inter-tile exchange ([`halo_exchange!`](@ref) does that).
+
+It only touches faces that are real domain boundaries (for [`HaloArray`](@ref),
+faces with no MPI neighbour; for [`ThreadedHaloArray`](@ref), the outer tile
+edges), so it is safe to call on a decomposed grid. The condition per
+`(dimension, side)` comes from `u`'s stored boundary condition — see
+[`Periodic`](@ref), [`Reflecting`](@ref), [`Repeating`](@ref),
+[`Antireflecting`](@ref), [`NoBoundaryCondition`](@ref).
+"""
 function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,BCondition}) where {
         T,N,A,Halo,B,BCondition}
     ntuple(Val(N)) do D

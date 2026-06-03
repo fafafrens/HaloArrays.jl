@@ -1,4 +1,30 @@
-# Multi-field halo container using an AbstractArray to store the fields.
+"""
+    ArrayOfHaloArray(FieldType, T, field_shape, owned_dims, halo; boundary_condition, …)
+    ArrayOfHaloArray(array_of_fields)
+
+A collection of halo-array fields stored in an `AbstractArray` and addressed by
+**integer / Cartesian index** rather than by name — the counterpart to
+[`MultiHaloArray`](@ref). All fields share the same geometry and backend.
+
+Natural when the number of fields is decided at runtime, or when they form a
+grid/tensor layout: a conserved state vector `q = (ρ, ρu, E)` as a `(3,)` array,
+a velocity as `(2,)`, or a stress tensor as `(2, 2)`. `field_shape` is the shape
+of the field container; `FieldType` is [`LocalHaloArray`](@ref) or
+[`ThreadedHaloArray`](@ref) (MPI fields are built from a topology instead).
+
+Index fields with `arr[i]` / `arr[i, j]`; [`synchronize_halo!`](@ref) and
+broadcast act on every field at once.
+
+# Examples
+```julia
+vel = ArrayOfHaloArray(LocalHaloArray, Float64, (2,), (16, 16), 1;
+                       boundary_condition=:periodic)
+interior_view(vel[1]) .= 1.0
+synchronize_halo!(vel)
+```
+
+Multi-field halo container using an `AbstractArray` to store the fields.
+"""
 mutable struct ArrayOfHaloArray{T,N,Shape,A,D} <: AbstractHaloCollection{T,D}
     arrays::A
 end

@@ -1,3 +1,14 @@
+"""
+    MaybeHaloArray(a::AbstractHaloArray)
+
+A halo array that may be *inactive* — a wrapper carrying an `active` flag.
+
+This handles the MPI case where a rank ends up owning no data (an empty patch):
+the array is still a valid object to pass around and call collectively, but it
+reports `length 0`, iterates over nothing, and errors on scalar indexing.
+Reductions and broadcasts skip inactive values. The activity is taken from
+`isactive(a)` at construction.
+"""
 struct MaybeHaloArray{T,N,A<:AbstractHaloArray{T,N}} <: AbstractHaloArray{T,N}
     data::A
     active::Bool

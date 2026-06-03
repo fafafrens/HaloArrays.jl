@@ -62,6 +62,37 @@ end
 
 # validate_boundary_condition is inherited from AbstractCartesianTopology (abstract_haloarray.jl)
 
+"""
+    ThreadedHaloArray(T, tile_size, halo; dims, boundary_condition=:repeating,
+                      thread_backend=OhMyThreadsBackend())
+
+A shared-memory halo array: the global grid is split into a `dims` layout of
+rectangular tiles, each stored as its own padded array with `halo` ghost cells.
+Tiles exchange halos in memory (no MPI), so after [`synchronize_halo!`](@ref)
+each tile can be updated independently on its own thread.
+
+# Arguments
+- `T`: element type (defaults to `Float64` if omitted).
+- `tile_size::NTuple{N,Int}`: owned cells per tile in each dimension.
+- `halo::Int`: ghost-cell width on each side.
+- `dims::NTuple{N,Int}`: number of tiles in each dimension (the tile layout).
+  Defaults to `(1, …, Threads.nthreads())` — one tile per thread along the last
+  dimension. The global owned size is `tile_size .* dims`.
+- `boundary_condition`: applied at the physical domain edges (see
+  [`LocalHaloArray`](@ref) for the accepted forms).
+- `thread_backend::`[`ThreadBackend`](@ref): how per-tile work is dispatched
+  ([`OhMyThreadsBackend`](@ref) default, [`SerialBackend`](@ref),
+  [`PolyesterBackend`](@ref)). Retrieve it with [`thread_backend`](@ref).
+
+Work on a tile with [`tile_parent`](@ref)`(u, tile_id)` (a plain padded array)
+over the shared [`interior_range`](@ref)`(u)`; iterate `1:`[`tile_count`](@ref)`(u)`.
+
+# Examples
+```julia
+u = ThreadedHaloArray(Float64, (32, 32), 1; dims=(2, 2), boundary_condition=:periodic)
+synchronize_halo!(u)
+```
+"""
 struct ThreadedHaloArray{T,N,A,Halo,Topo,BCondition,TB<:ThreadBackend} <: AbstractSerialHaloArray{T,N}
     data::Vector{A}
     tile_size::NTuple{N,Int}
@@ -123,9 +154,27 @@ ThreadedHaloArray(tile_size::NTuple{N,<:Integer}, halo::Integer; kwargs...) wher
 @inline interior_size(halo::ThreadedHaloArray) = owned_size(halo)
 @inline halo_width(::Type{<:ThreadedHaloArray{T,N,A,Halo}}) where {T,N,A,Halo} = Halo
 @inline halo_width(::ThreadedHaloArray{T,N,A,Halo}) where {T,N,A,Halo} = Halo
+"""    tile_size(u) -> dims
+
+Owned (ghost-free) cells per tile, in each dimension. The global owned size is
+`tile_size(u) .* dims` (the tile layout)."""
 @inline tile_size(halo::ThreadedHaloArray) = halo.tile_size
+
+"""    tile_count(u) -> Int
+
+Number of tiles (`prod(dims)`). Loop a parallel sweep over `1:tile_count(u)`."""
 @inline tile_count(halo::ThreadedHaloArray) = length(parent(halo))
+
+"""    tile_parent(u, tile_id) -> Array
+
+The raw, ghost-padded storage array for tile `tile_id`. This is what you read
+and write inside a tile loop, indexed over the shared [`interior_range`](@ref)`(u)`
+(with ghost-safe stencil offsets)."""
 @inline tile_parent(halo::ThreadedHaloArray, tile_id::Integer) = parent(halo)[tile_id]
+
+"""    tile_coordinates(u, tile_id) -> NTuple
+
+The Cartesian position of tile `tile_id` within the tile layout (`dims`)."""
 @inline tile_coordinates(halo::ThreadedHaloArray, tile_id::Integer) = tile_coordinates(halo.topology, tile_id)
 @inline global_size(halo::ThreadedHaloArray) = owned_size(halo)
 @inline isactive(::ThreadedHaloArray) = true

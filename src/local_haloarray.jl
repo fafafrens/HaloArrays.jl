@@ -1,3 +1,33 @@
+"""
+    LocalHaloArray(T, owned_dims, halo; boundary_condition=:repeating)
+    LocalHaloArray(data::AbstractArray, halo, boundary_condition)
+
+A single-process halo array: a plain array padded with `halo` ghost cells on
+every side of the `owned_dims` interior, carrying the boundary condition to
+apply when the halo is refreshed.
+
+This is the simplest backend — no MPI, no threads. Logical indexing, `axes`,
+and `eachindex` address the owned cells only; the ghost padding is hidden.
+
+# Arguments
+- `T`: element type (defaults to `Float64` if omitted).
+- `owned_dims::NTuple{N,Int}`: size of the owned (interior) region.
+- `halo::Int`: ghost-cell width on each side, in each dimension.
+- `boundary_condition`: how ghosts are filled by [`synchronize_halo!`](@ref) /
+  [`boundary_condition!`](@ref). A symbol (`:periodic`, `:repeating`,
+  `:reflecting`, `:antireflecting`), a boundary-condition instance, or a
+  per-dimension tuple of `(left, right)` pairs. See [`Periodic`](@ref) etc.
+
+# Examples
+```julia
+u = LocalHaloArray(Float64, (64, 64), 1; boundary_condition=:periodic)
+interior_view(u) .= 1.0      # write the owned cells
+synchronize_halo!(u)         # fill ghost cells from the boundary condition
+```
+
+See also [`HaloArray`](@ref) (MPI), [`ThreadedHaloArray`](@ref) (threads),
+[`interior_view`](@ref), [`interior_range`](@ref).
+"""
 mutable struct LocalHaloArray{T,N,A,Halo,BCondition} <: AbstractSerialHaloArray{T,N}
     data::A
     boundary_condition::BCondition
