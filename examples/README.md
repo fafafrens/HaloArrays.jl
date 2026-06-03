@@ -86,6 +86,16 @@ julia --project=examples examples/finite_volume/burgers_diffeq_1d.jl
 julia --project=examples examples/finite_volume/advection_diffeq_1d.jl
 ```
 
+`acoustics_characteristic_1d.jl` demonstrates a **coupled** boundary condition:
+1-D linear acoustics on two fields `(p, u)` with a characteristic non-reflecting
+outflow that mixes both fields at the edge (via `AbstractCoupledBoundaryCondition`
++ `apply_coupled_bc!`). A right-moving pulse exits the domain with negligible
+reflection.
+
+```bash
+julia --project=. examples/finite_volume/acoustics_characteristic_1d.jl
+```
+
 ## Ideal hydrodynamics (`hydro/`)
 
 2-D non-relativistic ideal hydro in conservative variables, periodic halos,
