@@ -121,6 +121,33 @@ heat-step style stencil for `ThreadedHaloArray`.
 julia --project=. benchmarks/threaded.jl --owned-size=128,128 --tile-dims=2,2
 ```
 
+## Thread Backends
+
+Compares the `ThreadBackend` implementations — `OhMyThreadsBackend` (default),
+`SerialBackend`, and `PolyesterBackend` — on the operations that dispatch through
+the trait (`tile_foreach` / `tile_mapreduce`): `synchronize_halo_threads!`,
+`boundary_condition_threads!`, `fill!`, `mapreduce`, and broadcast. Each case
+reports timing and per-call allocations. **Start Julia with `-t N`** or the
+backends cannot be distinguished.
+
+```sh
+julia --project=. -t 4 benchmarks/thread_backends.jl --owned-size=256,256 --tile-dims=4,1
+```
+
+Useful options:
+
+- `--backends=ohmythreads,serial,polyester` (subset/order to run)
+- `--tile-dims=4,1` (set `prod(tile_dims)` to the thread count for best parallelism)
+- `--owned-size=256,256`, `--samples=30`, `--warmups=5`
+- `--csv=/tmp/thread_backends.csv`
+
+Indicative results (Apple M-series, 4 threads, 256×256, `tile-dims=4,1`; median):
+`PolyesterBackend` has the lowest overhead and near-zero allocation on the small
+per-tile kernels (synchronize/boundary/fill/broadcast), while `OhMyThreadsBackend`
+pays task-spawn overhead (a few KB/call); on `mapreduce` both parallel backends
+beat `SerialBackend`, which cannot parallelize the reduction. Choose the backend
+per workload via the `thread_backend=` keyword on `ThreadedHaloArray`.
+
 ## Metal Colored Cells
 
 Benchmarks a 2D Metal red-black cell stencil using a naive full launch with a

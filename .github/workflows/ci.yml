@@ -27,6 +27,28 @@ jobs:
           HALOARRAYS_RUN_UNIT_TESTS: "true"
           HALOARRAYS_RUN_MPI_TESTS: "false"
 
+  threadedtests:
+    name: Threaded tests (${{ matrix.threads }} threads)
+    strategy:
+      fail-fast: false
+      matrix:
+        threads: [2, 4]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+      - uses: julia-actions/cache@v2
+      - uses: julia-actions/julia-buildpkg@v1
+      # Runs the unit suite multithreaded so the ThreadBackend trait, the
+      # threaded reductions, and the Polyester extension are exercised in CI.
+      - uses: julia-actions/julia-runtest@v1
+        env:
+          JULIA_NUM_THREADS: ${{ matrix.threads }}
+          HALOARRAYS_RUN_UNIT_TESTS: "true"
+          HALOARRAYS_RUN_MPI_TESTS: "false"
+
   mpitests:
     name: MPI tests (${{ matrix.np }} ranks)
     strategy:
