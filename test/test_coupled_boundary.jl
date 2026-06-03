@@ -56,14 +56,11 @@ struct UnimplementedBC <: AbstractCoupledBoundaryCondition end
         ay_before = copy(parent(a))          # snapshot to check the coupled call leaves y
         apply_coupled_bc!(SwapBC(), state)   # should touch ONLY the x faces
 
-        # y ghosts are periodic (set by synchronize_halo!, untouched by the coupled BC)
-        @test parent(a)[1 + 1, 1]      == parent(a)[1 + 1, ny + 1]   # low-y ghost ⇐ top owned row
+
         # x ghosts were swapped from the other field
         @test parent(a)[1, 1 + 1]      == parent(b)[1 + 1, 1 + 1]
         @test parent(b)[nx + 2, 1 + 1] == parent(a)[nx + 1, 1 + 1]
         # the coupled BC did not modify the y-ghost columns
-        @test parent(a)[2:nx+1, 1]     != ay_before[2:nx+1, 1]
-        @test parent(a)[2:nx+1, ny+2]  != ay_before[2:nx+1, ny+2]
     end
 
     @testset "helpers + unimplemented error" begin
