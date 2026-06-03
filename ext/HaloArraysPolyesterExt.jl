@@ -24,8 +24,16 @@ function HaloArrays.tile_mapreduce(::PolyesterBackend, f, op, itr; scheduler=not
     n       = length(itr)
     nchunks = min(n, Threads.nthreads())
     chunks  = collect(Iterators.partition(itr, cld(n, nchunks)))
-    partials = Vector{typeof(mapreduce(f, op, first(chunks)))}(undef, length(chunks))
-    @batch for c in eachindex(chunks)
+
+    # Reduce the first chunk eagerly: its value gives the partials' (concrete)
+    # element type and is kept, so no work is discarded. With a single chunk
+    # (e.g. one tile, or one thread) this is the whole answer — no @batch.
+    first_result = mapreduce(f, op, chunks[1])
+    nchunks == 1 && return first_result
+
+    partials = Vector{typeof(first_result)}(undef, nchunks)
+    @inbounds partials[1] = first_result
+    @batch for c in 2:nchunks
         @inbounds partials[c] = mapreduce(f, op, chunks[c])
     end
     return reduce(op, partials)
