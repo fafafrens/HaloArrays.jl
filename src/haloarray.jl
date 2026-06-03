@@ -123,10 +123,35 @@ end
 
 # ---- send/recv buffer views -------------------------------------------
 #
-# A halo exchange copies a slab of width `halo` along the exchange dimension
-# D, spanning the owned (non-halo) extent in every other dimension. The only
-# thing that differs across the send/recv × side combinations is the index
-# window along D, captured by `_send_window` / `_recv_window`.
+# Along one dimension D (storage size `sd = owned + 2*halo`), the storage is
+#
+#     index:   1 .. halo | halo+1 ..  sd-halo  | sd-halo+1 .. sd
+#              ghost(lo)  |   owned (interior)  |    ghost(hi)
+#
+# Two width-`halo` slabs matter at each boundary side:
+#   • the GHOST slab  — the cells to WRITE   → `_recv_window` ("receive")
+#   • the EDGE slab   — the `halo` owned cells touching that ghost slab,
+#                       the cells to READ    → `_send_window` ("send")
+#
+#   Side 1 (low):   ghost = 1:halo            edge = halo+1 : 2*halo
+#   Side 2 (high):  ghost = sd-halo+1 : sd    edge = sd-2*halo+1 : sd-halo
+#
+# `get_send_view`/`get_recv_view` return *views* (writing into a recv view
+# mutates the array) of width `halo` along D, spanning the OWNED extent in
+# every other dimension. They behave identically for HaloArray (MPI) and
+# LocalHaloArray.
+#
+# Halo exchange uses them as the names suggest: copy this rank's `send` slab to
+# a neighbour, receive into the `recv` slab. For a *physical* boundary condition
+# the same views are the natural primitives: write `get_recv_view(s, d, field)`
+# (the ghosts) from `get_send_view(s, d, field)` (the adjacent interior edge) —
+# both same-shaped, so per-cell it is just `recv[k] = g(edge[k])`. The two slabs
+# straddle the boundary, so their indices run TOWARD each other: on side 1 the
+# innermost ghost recv[halo] is adjacent to the edge cell send[1] (a mirror BC
+# pairs recv[halo+1-k] with send[k]; a zeroth-order copy fills every ghost from
+# the edge cell send[1]). A coupled BC across several fields does the same, but
+# gathers send-edge values from all fields, transforms them together, and writes
+# the result into each field's recv slab.
 
 @inline _send_window(::Side{1}, sd::Int, halo::Int) = (halo+1):(2*halo)
 @inline _send_window(::Side{2}, sd::Int, halo::Int) = (sd-2*halo+1):(sd-halo)
