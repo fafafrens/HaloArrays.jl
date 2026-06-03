@@ -62,18 +62,27 @@ end
 
 # validate_boundary_condition is inherited from AbstractCartesianTopology (abstract_haloarray.jl)
 
-struct ThreadedHaloArray{T,N,A,Halo,Topo,BCondition} <: AbstractSerialHaloArray{T,N}
+struct ThreadedHaloArray{T,N,A,Halo,Topo,BCondition,TB<:ThreadBackend} <: AbstractSerialHaloArray{T,N}
     data::Vector{A}
     tile_size::NTuple{N,Int}
     topology::Topo
     boundary_condition::BCondition
+    backend::TB
 end
 
 @inline halo_backend(::Type{<:ThreadedHaloArray}) = ThreadedHaloBackend()
 
+"""
+    thread_backend(u::ThreadedHaloArray) -> ThreadBackend
+
+The thread-execution backend that dispatches this array's per-tile work.
+"""
+@inline thread_backend(halo::ThreadedHaloArray) = halo.backend
+
 function ThreadedHaloArray(::Type{T}, tile_size::NTuple{N,<:Integer}, halo::Integer;
         dims::NTuple{N,<:Integer},
-        boundary_condition=:repeating) where {T,N}
+        boundary_condition=:repeating,
+        thread_backend::ThreadBackend=OhMyThreadsBackend()) where {T,N}
     halo_int = Int(halo)
     halo_int >= 0 || throw(ArgumentError("halo width must be non-negative"))
 
@@ -82,14 +91,15 @@ function ThreadedHaloArray(::Type{T}, tile_size::NTuple{N,<:Integer}, halo::Inte
     all(d -> owned_tile_size[d] >= halo_int, 1:N) ||
         throw(ArgumentError("each tile_size entry must be at least the halo width"))
 
+    _require_thread_backend(thread_backend)
     bc = normalize_boundary_condition(boundary_condition, N)
     topology = ThreadedCartesianTopology(dims; periodic=infer_periodicity(bc))
     validate_boundary_condition(topology, bc)
     full_tile_size = ntuple(d -> owned_tile_size[d] + 2 * halo_int, Val(N))
     data = [zeros(T, full_tile_size...) for _ in 1:tile_count(topology)]
 
-    return ThreadedHaloArray{T,N,typeof(data[1]),halo_int,typeof(topology),typeof(bc)}(
-        data, owned_tile_size, topology, bc,
+    return ThreadedHaloArray{T,N,typeof(data[1]),halo_int,typeof(topology),typeof(bc),typeof(thread_backend)}(
+        data, owned_tile_size, topology, bc, thread_backend,
     )
 end
 
@@ -280,7 +290,7 @@ function halo_exchange!(halo::ThreadedHaloArray)
 end
 
 function halo_exchange_threads!(halo::ThreadedHaloArray)
-    tforeach(tile_id -> _threaded_exchange_tile!(halo, tile_id),
+    tile_foreach(thread_backend(halo), tile_id -> _threaded_exchange_tile!(halo, tile_id),
         eachindex(parent(halo)); scheduler=:static)
     return halo
 end
@@ -390,7 +400,7 @@ function boundary_condition!(halo::ThreadedHaloArray)
 end
 
 function boundary_condition_threads!(halo::ThreadedHaloArray)
-    tforeach(tile_id -> _threaded_boundary_tile!(halo, tile_id),
+    tile_foreach(thread_backend(halo), tile_id -> _threaded_boundary_tile!(halo, tile_id),
         eachindex(parent(halo)); scheduler=:static)
     return nothing
 end
@@ -403,7 +413,7 @@ function synchronize_halo!(halo::ThreadedHaloArray)
 end
 
 function synchronize_halo_threads!(halo::ThreadedHaloArray)
-    tforeach(tile_id -> _threaded_synchronize_tile!(halo, tile_id),
+    tile_foreach(thread_backend(halo), tile_id -> _threaded_synchronize_tile!(halo, tile_id),
         eachindex(parent(halo)); scheduler=:static)
     return halo
 end
@@ -412,13 +422,14 @@ start_halo_exchange!(halo::ThreadedHaloArray) = halo_exchange!(halo)
 finish_halo_exchange!(halo::ThreadedHaloArray) = halo
 
 function fill_interior(halo::ThreadedHaloArray, value)
-    tforeach(tile_id -> _fill_threaded_interior_tile!(halo, tile_id, value),
+    tile_foreach(thread_backend(halo), tile_id -> _fill_threaded_interior_tile!(halo, tile_id, value),
         eachindex(parent(halo)); scheduler=:static)
     return halo
 end
 
 function Base.fill!(halo::ThreadedHaloArray, value)
-    tforeach(tile -> fill!(tile, value), parent(halo); scheduler=:static)
+    tile_foreach(thread_backend(halo), tile_id -> fill!(tile_parent(halo, tile_id), value),
+        eachindex(parent(halo)); scheduler=:static)
     return halo
 end
 
@@ -435,18 +446,18 @@ function _global_to_tile_dims(halo::ThreadedHaloArray{T,N}, dims::NTuple{M,<:Int
     return ntuple(d -> Int(dims[d]) ÷ topo_dims[d], Val(N))
 end
 
-function Base.similar(halo::ThreadedHaloArray{T,N,A,Halo,B,BCondition}, ::Type{AA},
-        dims::Dims{M}) where {T,N,A,Halo,B,BCondition,AA,M}
+function Base.similar(halo::ThreadedHaloArray{T,N,A,Halo,Topo,BCondition}, ::Type{AA},
+        dims::Dims{M}) where {T,N,A,Halo,Topo,BCondition,AA,M}
     tile_dims = _global_to_tile_dims(halo, dims)
     full_tile_size = ntuple(d -> tile_dims[d] + 2 * halo_width(halo), Val(N))
     data = [similar(tile_parent(halo, 1), AA, full_tile_size) for _ in 1:tile_count(halo)]
-    return ThreadedHaloArray{AA,N,typeof(data[1]),Halo,typeof(halo.topology),typeof(halo.boundary_condition)}(
-        data, tile_dims, halo.topology, halo.boundary_condition,
+    return ThreadedHaloArray{AA,N,typeof(data[1]),Halo,typeof(halo.topology),typeof(halo.boundary_condition),typeof(halo.backend)}(
+        data, tile_dims, halo.topology, halo.boundary_condition, halo.backend,
     )
 end
 
-Base.similar(halo::ThreadedHaloArray{T,N,A,Halo,B,BCondition}, ::Type{AA},
-    dims::NTuple{M,<:Integer}) where {T,N,A,Halo,B,BCondition,AA,M} =
+Base.similar(halo::ThreadedHaloArray{T,N,A,Halo,Topo,BCondition}, ::Type{AA},
+    dims::NTuple{M,<:Integer}) where {T,N,A,Halo,Topo,BCondition,AA,M} =
     similar(halo, AA, ntuple(d -> Int(dims[d]), Val(M)))
 
 # Base.similar dispatchers and Base.zero inherited from AbstractSingleHaloArray
@@ -463,7 +474,7 @@ function Base.copyto!(dest::ThreadedHaloArray, src::ThreadedHaloArray)
     tile_size(dest) == tile_size(src) || throw(DimensionMismatch("ThreadedHaloArray copyto! requires matching tile sizes"))
     tile_count(dest) == tile_count(src) || throw(DimensionMismatch("ThreadedHaloArray copyto! requires matching tile counts"))
 
-    tforeach(tile_id -> _copy_threaded_tile_storage!(dest, src, tile_id),
+    tile_foreach(thread_backend(dest), tile_id -> _copy_threaded_tile_storage!(dest, src, tile_id),
         eachindex(parent(dest)); scheduler=:static)
     return dest
 end
