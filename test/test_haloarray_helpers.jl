@@ -118,6 +118,12 @@ end
         @test face_offset(ha, Dim(2)) == CartesianIndex(0, 1)
         @test get_unit_vector(dim2_ranges, Dim(2)) == CartesianIndex(0, 1)
 
+        # direction-aware internal faces keep the transverse dimension full
+        @test internal_face_range(ha, 1) == (2:4, 2:6)
+        @test internal_face_range(ha, 2) == (2:5, 2:5)
+        @test collect(get_internal_face(dim2_ranges, 1)) == collect(CartesianIndices((2:4, 2:6)))
+        @test collect(get_internal_face(dim2_ranges, Dim(2))) == collect(CartesianIndices((2:5, 2:5)))
+
         one_cell = LocalHaloArray(Int, (1,), 1; boundary_condition=:repeating)
         one_cell_ranges = FaceRanges(one_cell)
         @test collect(get_left_face(one_cell_ranges, 1)) == [CartesianIndex(1)]
@@ -128,6 +134,18 @@ end
         @test collect(HaloArrays.get_left_face(range_struct, 1)) == collect(CartesianIndices((1:1, 2:6)))
         @test collect(HaloArrays.get_internal_face(range_struct)) == collect(CartesianIndices((2:4, 2:5)))
         @test collect(HaloArrays.get_right_face(range_struct, 1)) == collect(CartesianIndices((5:5, 2:6)))
+
+        # accumulate_flux_divergence! is conservative on a 2-D uniform field:
+        # a per-direction sweep must give zero update in every row/column,
+        # including the last transverse one (regression for the dim-aware fix).
+        u = LocalHaloArray(Float64, (6, 6), 1; boundary_condition=:repeating)
+        fill!(interior_view(u), 2.0)
+        synchronize_halo!(u)
+        du = similar(u); fill!(parent(du), 0.0)
+        fr = FaceRanges(u)
+        accumulate_flux_divergence!(parent(du), parent(u), fr, 1, 1.0, (a, b) -> 0.5 * (a + b))
+        accumulate_flux_divergence!(parent(du), parent(u), fr, 2, 1.0, (a, b) -> 0.5 * (a + b))
+        @test maximum(abs, interior_view(du)) == 0.0
         @test HaloArrays.get_unit_vector(range_struct, 1) == CartesianIndex(1, 0)
 
         left_region = @inferred get_left_face_region(range_struct, Dim(1))

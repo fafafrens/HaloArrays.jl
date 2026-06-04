@@ -53,6 +53,23 @@ function internal_face_range(halo)
 end
 
 """
+    internal_face_range(halo, dim)
+
+Return the internal faces for a sweep along `dim`: only `dim` is trimmed by one
+(the owned cells that have an owned `+dim` neighbour), while every *transverse*
+dimension keeps its full owned extent. This is what a per-direction conservative
+flux update needs — unlike the dimension-independent [`internal_face_range`](@ref)`(halo)`,
+it does not drop the last transverse row/column, so the boundary-face fluxes
+cancel correctly there.
+"""
+function internal_face_range(halo, dim::Int)
+    ranges = _loop_interior_range(halo)
+    return ntuple(_loop_ndims(halo)) do d
+        d == dim ? (first(ranges[d]):(last(ranges[d]) - 1)) : (first(ranges[d]):last(ranges[d]))
+    end
+end
+
+"""
     right_face_range(halo, dim)
 
 Return the upper-side boundary face cells in dimension `dim`.
@@ -112,9 +129,10 @@ for IL in get_right_face(ranges, dim)
 end
 ```
 """
-struct FaceRanges{A,B,C,D,Halo}
+struct FaceRanges{A,B,Bd,C,D,Halo}
     left_face::A
-    internal_face::B
+    internal_face::B          # dimension-independent core (1-D loops, cell-style use)
+    internal_face_dirs::Bd    # per-direction internal faces (transverse-full) for flux sweeps
     right_face::C
     unit_vector::D
     halo::Halo
@@ -125,6 +143,7 @@ function FaceRanges(halo)
     return FaceRanges(
         ntuple(d -> CartesianIndices(left_face_range(halo, d)), spatial_ndims),
         CartesianIndices(internal_face_range(halo)),
+        ntuple(d -> CartesianIndices(internal_face_range(halo, d)), spatial_ndims),
         ntuple(d -> CartesianIndices(right_face_range(halo, d)), spatial_ndims),
         ntuple(d -> face_offset(halo, d), Val(spatial_ndims)),
         halo_width(halo),
@@ -135,6 +154,15 @@ get_left_face(ranges::FaceRanges) = ranges.left_face
 get_left_face(ranges::FaceRanges, dim::Int) = ranges.left_face[dim]
 get_left_face(ranges::FaceRanges, ::Dim{D}) where {D} = get_left_face(ranges, D)
 get_internal_face(ranges::FaceRanges) = ranges.internal_face
+"""
+    get_internal_face(ranges, dim)
+
+Internal faces for a conservative sweep along `dim` (transverse dimensions kept
+full). Use this — not the no-argument [`get_internal_face`](@ref) — when scattering
+a per-direction flux, so the last transverse row/column is not skipped.
+"""
+get_internal_face(ranges::FaceRanges, dim::Int) = ranges.internal_face_dirs[dim]
+get_internal_face(ranges::FaceRanges, ::Dim{D}) where {D} = get_internal_face(ranges, D)
 get_right_face(ranges::FaceRanges) = ranges.right_face
 get_right_face(ranges::FaceRanges, dim::Int) = ranges.right_face[dim]
 get_right_face(ranges::FaceRanges, ::Dim{D}) where {D} = get_right_face(ranges, D)
@@ -187,7 +215,7 @@ function accumulate_flux_divergence!(du, u, ranges::FaceRanges, dim, scale,
         scatter!(du, IR, scale, flux(read(u, IL), read(u, IR)))
     end
 
-    @inbounds for IL in get_internal_face(ranges)
+    @inbounds for IL in get_internal_face(ranges, dim)
         IR = IL + e
         F = flux(read(u, IL), read(u, IR))
         scatter!(du, IL, -scale, F)

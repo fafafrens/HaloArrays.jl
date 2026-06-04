@@ -71,7 +71,7 @@ function apply_hydro_fluxes!(du_data, u_data, ranges::FaceRanges, dim, scale, ga
         add_conserved!(du_data, IR, scale, flux)
     end
 
-    @inbounds for IL in get_internal_face(ranges)
+    @inbounds for IL in get_internal_face(ranges, dim)
         IR = IL + offset
         flux = rusanov_flux(conserved_cell(u_data, IL), conserved_cell(u_data, IR), dim, gamma)
         add_conserved!(du_data, IL, -scale, flux)

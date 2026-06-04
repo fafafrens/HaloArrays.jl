@@ -96,6 +96,31 @@ reflection.
 julia --project=. examples/finite_volume/acoustics_characteristic_1d.jl
 ```
 
+### Special relativistic hydrodynamics
+
+Valencia-form special relativistic Euler with a Rusanov flux and SSP-RK2. The
+`relativistic_common.jl` file holds the shared mass-based (D, S, τ) kernels; the
+other variants are self-contained. Conserved→primitive recovery is the crux:
+closed-form for μ=0, a 1-D Newton on pressure for the mass-based scheme, and a
+2-D Newton in (T, μ) when a conserved charge is present.
+
+```bash
+# 1-D
+julia --project=. examples/finite_volume/relativistic_hydro_1d.jl            # mass-based (D,S,τ), coupled outflow
+julia --project=. examples/finite_volume/relativistic_hydro_mu0_1d.jl        # conformal, charge-free (closed form)
+julia --project=. examples/finite_volume/relativistic_hydro_Tmu_1d.jl        # conserved charge, (T,μ) primitives
+julia --project=. examples/finite_volume/relativistic_hydro_cylindrical_1d.jl
+
+# 2-D circular blast wave (directional fluxes + Mignone–Bodo wave speeds)
+julia --project=. examples/finite_volume/relativistic_hydro_mu0_2d.jl        # conformal, μ=0  (Mx,My,E)
+julia --project=. examples/finite_volume/relativistic_hydro_Tmu_2d.jl        # with charge     (N,Mx,My,E)
+```
+
+The 2-D runs evolve a centred over-pressure disk into a circular blast with two
+`accumulate_flux_divergence!` sweeps (x then y); energy (and, for the
+charge version, the charge) is conserved to machine precision and the result is
+x/y symmetric.
+
 ## Ideal hydrodynamics (`hydro/`)
 
 2-D non-relativistic ideal hydro in conservative variables, periodic halos,
