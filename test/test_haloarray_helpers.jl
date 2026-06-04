@@ -277,6 +277,69 @@ end
               ColoredFaceKernelRegion(CartesianIndex(3), (0,), CartesianIndex(2), CartesianIndex(1), true, true)
     end
 
+    @testset "accumulate_flux_divergence!" begin
+        nx = 5
+        u = LocalHaloArray(Float64, (nx,), 1; boundary_condition=:repeating)
+        interior_view(u) .= [1.0, 2.0, 4.0, 7.0, 11.0]
+        synchronize_halo!(u)
+        ranges = FaceRanges(u)
+        flux(uL, uR) = 0.5 * (uL + uR)
+
+        # Reference: explicit left / internal / right conservative scatter.
+        pu = parent(u)
+        ref = zeros(nx + 2)
+        ref[2] += flux(pu[1], pu[2])                       # left ghost|owned
+        for i in 2:5                                       # internal owned faces
+            F = flux(pu[i], pu[i + 1])
+            ref[i] -= F
+            ref[i + 1] += F
+        end
+        ref[6] -= flux(pu[6], pu[7])                       # right owned|ghost
+
+        # Scalar default read/scatter.
+        du = LocalHaloArray(Float64, (nx,), 1; boundary_condition=:repeating)
+        fill!(parent(du), 0.0)
+        @test accumulate_flux_divergence!(parent(du), parent(u), ranges, 1, 1.0, flux) ===
+              parent(du)
+        @test parent(du) ≈ ref
+
+        # Dim{D} accepted as well, scale applied.
+        du2 = LocalHaloArray(Float64, (nx,), 1; boundary_condition=:repeating)
+        fill!(parent(du2), 0.0)
+        accumulate_flux_divergence!(parent(du2), parent(u), ranges, Dim(1), 2.0, flux)
+        @test parent(du2) ≈ 2.0 .* ref
+
+        # Custom read/scatter (two-field state via a tuple of arrays).
+        v = LocalHaloArray(Float64, (nx,), 1; boundary_condition=:repeating)
+        interior_view(v) .= [10.0, 20.0, 30.0, 40.0, 50.0]
+        synchronize_halo!(v)
+        dua = LocalHaloArray(Float64, (nx,), 1; boundary_condition=:repeating)
+        dub = LocalHaloArray(Float64, (nx,), 1; boundary_condition=:repeating)
+        fill!(parent(dua), 0.0); fill!(parent(dub), 0.0)
+
+        read2(d, I) = (d[1][I], d[2][I])
+        flux2(L, R) = (0.5 * (L[1] + R[1]), 0.5 * (L[2] + R[2]))
+        function scatter2!(d, I, s, F)
+            d[1][I] += s * F[1]
+            d[2][I] += s * F[2]
+            return d
+        end
+        accumulate_flux_divergence!((parent(dua), parent(dub)), (parent(u), parent(v)),
+            ranges, 1, 1.0, flux2, read2, scatter2!)
+
+        ref_v = zeros(nx + 2)
+        pv = parent(v)
+        ref_v[2] += flux(pv[1], pv[2])
+        for i in 2:5
+            F = flux(pv[i], pv[i + 1])
+            ref_v[i] -= F
+            ref_v[i + 1] += F
+        end
+        ref_v[6] -= flux(pv[6], pv[7])
+        @test parent(dua) ≈ ref      # first component matches the scalar field u
+        @test parent(dub) ≈ ref_v    # second component matches the scalar field v
+    end
+
     @testset "owned cell ranges" begin
         ha = LocalHaloArray(Int, (4, 5), 1; boundary_condition=:repeating)
         ranges = CellRanges(ha)

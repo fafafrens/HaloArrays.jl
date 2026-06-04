@@ -142,6 +142,70 @@ get_unit_vector(ranges::FaceRanges) = ranges.unit_vector
 get_unit_vector(ranges::FaceRanges, dim::Int) = ranges.unit_vector[dim]
 get_unit_vector(ranges::FaceRanges, ::Dim{D}) where {D} = get_unit_vector(ranges, D)
 
+# Default cell accessors for scalar fields.
+@inline _scalar_face_read(data, I) = @inbounds data[I]
+@inline function _scalar_face_scatter!(data, I, scale, F)
+    @inbounds data[I] += scale * F
+    return data
+end
+
+"""
+    accumulate_flux_divergence!(du, u, ranges::FaceRanges, dim, scale, flux,
+                                read=…, scatter! =…)
+
+Accumulate the conservative finite-volume flux divergence along `dim` into `du`,
+using the precomputed `ranges`. This is the left / internal / right face loop in
+a single call.
+
+Each face's numerical `flux` is evaluated once from the two adjacent cell states
+and scattered with opposite signs onto the owned cells — `du[IL] -= scale*F` and
+`du[IR] += scale*F` — skipping whichever side is a ghost at a physical boundary.
+
+- `flux(UL, UR) -> F`: numerical flux between the lower (`UL`) and upper (`UR`)
+  cell states.
+- `read(data, I) -> U`: cell state at storage index `I`. Defaults to `data[I]`
+  for scalar fields; pass e.g. a `conserved_cell`-style gather to build a
+  multi-field `SVector`.
+- `scatter!(data, I, s, F)`: add `s*F` into cell `I`. Defaults to
+  `data[I] += s*F`; pass a multi-field writer for collections.
+
+`du` and `u` are the raw storage the accessors understand — `parent(field)` for
+a single field, or the `parent(state)` NamedTuple for a multi-field collection —
+not the halo arrays themselves. `dim` may be an `Int` or a `Dim{D}`.
+
+```julia
+ranges = FaceRanges(u)
+accumulate_flux_divergence!(parent(du), parent(u), ranges, 1, inv(dx), numerical_flux)
+```
+"""
+function accumulate_flux_divergence!(du, u, ranges::FaceRanges, dim, scale,
+        flux, read, scatter!)
+    e = get_unit_vector(ranges, dim)
+
+    @inbounds for IL in get_left_face(ranges, dim)
+        IR = IL + e
+        scatter!(du, IR, scale, flux(read(u, IL), read(u, IR)))
+    end
+
+    @inbounds for IL in get_internal_face(ranges)
+        IR = IL + e
+        F = flux(read(u, IL), read(u, IR))
+        scatter!(du, IL, -scale, F)
+        scatter!(du, IR,  scale, F)
+    end
+
+    @inbounds for IL in get_right_face(ranges, dim)
+        IR = IL + e
+        scatter!(du, IL, -scale, flux(read(u, IL), read(u, IR)))
+    end
+
+    return du
+end
+
+@inline accumulate_flux_divergence!(du, u, ranges::FaceRanges, dim, scale, flux) =
+    accumulate_flux_divergence!(du, u, ranges, dim, scale, flux,
+        _scalar_face_read, _scalar_face_scatter!)
+
 # Shared by face- and cell-range/region loops (defined here as face_ranges.jl is
 # included first). _loop_ndims / _loop_interior_range dispatch the spatial
 # dimensionality and interior range over single arrays, collections, and raw

@@ -93,34 +93,12 @@ end
     return d
 end
 
-# ─── FaceRanges flux accumulation (1-D) ───────────────────────────────────────
-
-function accumulate_fluxes!(du_data, u_data, ranges::FaceRanges, scale)
-    e = get_unit_vector(ranges, 1)
-
-    @inbounds for IL in get_left_face(ranges, 1)
-        IR = IL + e
-        add_conserved!(du_data, IR, scale,
-            rusanov_flux(conserved_cell(u_data, IL), conserved_cell(u_data, IR)))
-    end
-
-    @inbounds for IL in get_internal_face(ranges)
-        IR = IL + e
-        F = rusanov_flux(conserved_cell(u_data, IL), conserved_cell(u_data, IR))
-        add_conserved!(du_data, IL, -scale, F)
-        add_conserved!(du_data, IR,  scale, F)
-    end
-
-    @inbounds for IL in get_right_face(ranges, 1)
-        IR = IL + e
-        add_conserved!(du_data, IL, -scale,
-            rusanov_flux(conserved_cell(u_data, IL), conserved_cell(u_data, IR)))
-    end
-
-    return du_data
-end
-
 # ─── RHS and SSP-RK2 time stepping ────────────────────────────────────────────
+#
+# The whole left/internal/right conservative face update is one library call:
+# `accumulate_flux_divergence!` evaluates `rusanov_flux` per face and scatters
+# it onto the owned cells, reading/writing the (D,S,τ) state via `conserved_cell`
+# and `add_conserved!`.
 #
 # `apply_bc!` is the caller's boundary strategy.  For a per-field BC
 # (e.g. :repeating) `synchronize_halo!` already fills the ghosts, so pass a
@@ -131,7 +109,8 @@ function rel_rhs!(du, u, apply_bc!, dx)
     fill!(du, 0.0)
     synchronize_halo!(u)
     apply_bc!(u)
-    accumulate_fluxes!(parent(du), parent(u), FaceRanges(u), inv(dx))
+    accumulate_flux_divergence!(parent(du), parent(u), FaceRanges(u), 1, inv(dx),
+        rusanov_flux, conserved_cell, add_conserved!)
     return du
 end
 
