@@ -278,10 +278,13 @@ function HaloArrays.apply_coupled_bc!(bc::MyBC, state, s::Side{S}, d::Dim{D}) wh
 end
 ```
 
-The **two-argument** driver visits every face that is both a physical boundary
-([`is_physical_boundary`](@ref)) and configured [`NoBoundaryCondition`](@ref),
-and dispatches your method there — i.e. it fills exactly the edges that
-`synchronize_halo!` left untouched. Call it after `synchronize_halo!(state)`.
+The **two-argument** driver dispatches your method on every *physical* boundary
+([`is_physical_boundary`](@ref)) — so under MPI it skips interior rank faces. The
+spatial dimension is taken from the collection's type (`AbstractHaloCollection{T,N,S}`),
+so the loop unrolls and the call is allocation-free. Mark the coupled edges
+[`NoBoundaryCondition`](@ref) so `synchronize_halo!` leaves them for this call;
+for a *mix* of coupled and ordinary boundaries, call the four-argument form on
+the specific `(side, dim)` instead.
 
 Currently supports [`LocalHaloArray`](@ref) and MPI [`HaloArray`](@ref) fields.
 """
@@ -292,22 +295,22 @@ function apply_coupled_bc!(bc::AbstractCoupledBoundaryCondition,
         "`HaloArrays.apply_coupled_bc!(bc::$(nameof(typeof(bc))), state, ::Side, ::Dim)`"))
 end
 
-function apply_coupled_bc!_checked(bc, state,side::Side{s},dime::Dim{d}) where {s,d}
-           
-    if is_physical_boundary(state, side,dime)
-        apply_coupled_bc!(bc, state,side,dime)
-    end 
+# Apply the coupled BC on one face, but only if it is a physical domain edge
+# (under MPI, interior rank faces are filled by the halo exchange instead).
+@inline function _apply_coupled_face!(bc, state, side::Side, dim::Dim)
+    is_physical_boundary(state, side, dim) && apply_coupled_bc!(bc, state, side, dim)
     return nothing
-end 
+end
 
-function apply_coupled_bc!(bc::AbstractCoupledBoundaryCondition, state::AbstractHaloCollection{T,N,S}) where {T,N,S}
-    
+# `S` is the spatial dimension carried in the collection's type, so the Val
+# loops unroll and Side(s)/Dim(d) are compile-time → no allocation.
+function apply_coupled_bc!(bc::AbstractCoupledBoundaryCondition,
+        state::AbstractHaloCollection{T,N,S}) where {T,N,S}
     ntuple(Val(S)) do d
         ntuple(Val(2)) do s
-            apply_coupled_bc!_checked(bc, state,Side(s),Dim(d))
+            _apply_coupled_face!(bc, state, Side(s), Dim(d))
         end
     end
-    #_apply_coupled_bc_dim!(bc, state, Val(_spatial_ndims(state)))
     return nothing
 end
 
