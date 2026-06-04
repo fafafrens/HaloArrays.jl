@@ -3,83 +3,61 @@
 #
 #   julia --project=. examples/finite_volume/relativistic_hydro_1d.jl
 #
-# Solves the Valencia form of the 1-D special relativistic Euler equations:
+# Valencia form of the 1-D special relativistic Euler equations (c = 1):
 #
-#   ∂_t [D, S, τ]ᵀ + ∂_x [Dv, Sv+p, S−Dv]ᵀ = 0
+#   ∂_t U + ∂_x F(U) = 0,   U = (D, S, τ),  F = (Dv, Sv+p, S−Dv)
 #
-# with c = 1 and the ideal-gas EOS  p = (γ−1)ρε.  The conserved variables are
+# with ideal-gas EOS  p = (γ−1)ρε  and conserved variables
 #
-#   D = ρW              rest-mass density
-#   S = ρhW²v           momentum
-#   τ = ρhW²−p−D        energy (rest mass excluded)
+#   D = ρW              W = (1−v²)^{−½}
+#   S = ρhW²v           h = 1 + ε + p/ρ
+#   τ = ρhW²−p−D
 #
-# where  W = (1−v²)^{−½}  and  h = 1+ε+p/ρ.
+# Numerics:
+#   * Rusanov (local Lax–Friedrichs) flux — needs only the max wave speed
+#   * FaceRanges left/internal/right face loops for the FV update
+#   * SSP-RK2 time integration with CFL-adaptive dt
 #
-# Initial condition: relativistic Sod shock tube
-#   left  ρ=1.0, v=0, p=1.0    right  ρ=0.125, v=0, p=0.1
-#
-# Boundary condition: coupled outflow ghost
-#   At each domain edge the primitive variables are recovered from the last
-#   interior cell, the velocity is clamped to prevent inflow, and all ghost
-#   cells are filled by converting back to (D,S,τ).  Because the primitive
-#   recovery couples all three conserved fields, this is implemented as an
-#   AbstractCoupledBoundaryCondition so the three fields are always treated
-#   together.
-#
-# Time integration: SSP-RK2 with CFL-adaptive dt.
+# State is a LocalMultiHaloArray with named fields (D, S, tau); the
+# x-boundaries are :noboundary and filled by a coupled outflow BC that
+# recovers primitives at the edge and clamps the velocity against inflow.
 # ============================================================
 
 using HaloArrays
 using Printf
+using StaticArrays
 
 const GAMMA = 5.0 / 3.0
 
-# ─── EOS helpers ──────────────────────────────────────────────────────────────
+# ─── EOS + primitive/conserved conversion (all SVector-based) ─────────────────
 
-@inline _eps_from_prim(ρ, p)  = p / ((GAMMA - 1.0) * ρ)
-@inline _h_from_prim(ρ, p)    = 1.0 + _eps_from_prim(ρ, p) + p / ρ
-
-# ─── Conserved ← primitive ────────────────────────────────────────────────────
+@inline _enthalpy(ρ, p) = 1.0 + GAMMA / (GAMMA - 1.0) * p / ρ   # h = 1 + ε + p/ρ
 
 @inline function cons_from_prim(ρ, v, p)
-    W  = 1.0 / sqrt(1.0 - v^2)
-    h  = _h_from_prim(ρ, p)
-    D  = ρ * W
-    S  = ρ * h * W^2 * v
-    τ  = ρ * h * W^2 - p - D
-    D, S, τ
+    W = 1.0 / sqrt(1.0 - v^2)
+    h = _enthalpy(ρ, p)
+    D = ρ * W
+    S = ρ * h * W^2 * v
+    τ = ρ * h * W^2 - p - D
+    return SVector(D, S, τ)
 end
 
-# ─── Primitive recovery: Newton–Raphson on pressure ───────────────────────────
-#
-# Given conserved (D, S, τ), with E = τ+D, we solve
-#
-#   f(p) = (E+p) − D·W(p) − (γ/(γ−1))·p·W(p)² = 0
-#
-# where  W(p) = (E+p)/√((E+p)²−S²).  The analytical derivative is
-#
-#   f′(p) = 1 + D·S²/Z³ − (γ/(γ−1))·W²·(1 − 2pS²/(X·Z²))
-#
-# with X = E+p, Z = √(X²−S²).  Converges in 3–6 iterations.
-
-function prim_from_cons(D, S, τ; maxit=50, tol=1.0e-12)
+# Primitive recovery: Newton–Raphson on pressure.  With E = τ+D,
+#   f(p) = (E+p) − D·W − (γ/(γ−1))·p·W²,   W = (E+p)/√((E+p)²−S²)
+function prim_from_cons(U; maxit=50, tol=1.0e-12)
+    D, S, τ = U
     E    = τ + D
     S2   = S^2
     gog1 = GAMMA / (GAMMA - 1.0)
 
     p = max((GAMMA - 1.0) / GAMMA * (E - D), 1.0e-14)
-
     for _ in 1:maxit
         X  = E + p
-        X2 = X^2
-        Z2 = max(X2 - S2, 1.0e-30)
+        Z2 = max(X^2 - S2, 1.0e-30)
         Z  = sqrt(Z2)
-        W  = X / Z
-        W2 = W^2
-
-        f  = X - D * W - gog1 * p * W2
+        W2 = (X / Z)^2
+        f  = X - D * (X / Z) - gog1 * p * W2
         df = 1.0 + D * S2 / Z^3 - gog1 * W2 * (1.0 - 2.0 * p * S2 / (X * Z2))
-
         dp = -f / df
         p  = max(p + dp, 1.0e-14)
         abs(dp) < tol * (p + 1.0e-14) && break
@@ -92,227 +70,176 @@ function prim_from_cons(D, S, τ; maxit=50, tol=1.0e-12)
     return ρ, v, p
 end
 
-# ─── Wave speeds (Balsara 1994) ───────────────────────────────────────────────
-
-@inline function wave_speeds(ρ, v, p)
-    h   = _h_from_prim(ρ, p)
-    cs2 = GAMMA * p / (ρ * h)         # c_s² in the fluid rest frame
-    cs  = sqrt(cs2)
-    v_m = (v - cs) / (1.0 - v * cs)   # left-going eigenvalue (λ₋)
-    v_p = (v + cs) / (1.0 + v * cs)   # right-going eigenvalue (λ₊)
-    v_m, v_p
+@inline function physical_flux(U)
+    _, v, p = prim_from_cons(U)
+    return SVector(U[1] * v, U[2] * v + p, U[2] - U[1] * v)
 end
 
-# ─── Physical fluxes ──────────────────────────────────────────────────────────
-
-@inline function physical_flux(D, S, _, v, p)
-    F_D   = D * v
-    F_S   = S * v + p
-    F_τ   = S - D * v          # = (τ+p)v − Dv²  in primitive form
-    F_D, F_S, F_τ
+# Largest |eigenvalue| (Balsara 1994): λ± = (v ± c_s)/(1 ± v·c_s)
+@inline function max_wave_speed(U)
+    ρ, v, p = prim_from_cons(U)
+    cs = sqrt(GAMMA * p / (ρ * _enthalpy(ρ, p)))
+    return max(abs((v - cs) / (1.0 - v * cs)), abs((v + cs) / (1.0 + v * cs)))
 end
 
-# ─── HLL numerical flux ───────────────────────────────────────────────────────
+@inline function rusanov_flux(UL, UR)
+    smax = max(max_wave_speed(UL), max_wave_speed(UR))
+    return 0.5 * (physical_flux(UL) + physical_flux(UR)) - 0.5 * smax * (UR - UL)
+end
 
-function hll_flux(D_L, S_L, τ_L, D_R, S_R, τ_R)
-    ρ_L, v_L, p_L = prim_from_cons(D_L, S_L, τ_L)
-    ρ_R, v_R, p_R = prim_from_cons(D_R, S_R, τ_R)
+# ─── Field access on the NamedTuple returned by parent(state) ─────────────────
 
-    s_L = min(wave_speeds(ρ_L, v_L, p_L)[1], wave_speeds(ρ_R, v_R, p_R)[1])
-    s_R = max(wave_speeds(ρ_L, v_L, p_L)[2], wave_speeds(ρ_R, v_R, p_R)[2])
+@inline conserved_cell(d, I) = SVector(d.D[I], d.S[I], d.tau[I])
 
-    if s_L >= 0.0
-        return physical_flux(D_L, S_L, τ_L, v_L, p_L)
-    elseif s_R <= 0.0
-        return physical_flux(D_R, S_R, τ_R, v_R, p_R)
+@inline function add_conserved!(d, I, scale, U)
+    d.D[I]   += scale * U[1]
+    d.S[I]   += scale * U[2]
+    d.tau[I] += scale * U[3]
+    return d
+end
+
+# ─── FaceRanges flux accumulation (1-D) ───────────────────────────────────────
+
+function accumulate_fluxes!(du_data, u_data, ranges::FaceRanges, scale)
+    e = get_unit_vector(ranges, 1)
+
+    @inbounds for IL in get_left_face(ranges, 1)
+        IR = IL + e
+        add_conserved!(du_data, IR, scale,
+            rusanov_flux(conserved_cell(u_data, IL), conserved_cell(u_data, IR)))
     end
 
-    fD_L, fS_L, fτ_L = physical_flux(D_L, S_L, τ_L, v_L, p_L)
-    fD_R, fS_R, fτ_R = physical_flux(D_R, S_R, τ_R, v_R, p_R)
+    @inbounds for IL in get_internal_face(ranges)
+        IR = IL + e
+        F = rusanov_flux(conserved_cell(u_data, IL), conserved_cell(u_data, IR))
+        add_conserved!(du_data, IL, -scale, F)
+        add_conserved!(du_data, IR,  scale, F)
+    end
 
-    c = 1.0 / (s_R - s_L)
-    fD = (s_R * fD_L - s_L * fD_R + s_L * s_R * (D_R - D_L)) * c
-    fS = (s_R * fS_L - s_L * fS_R + s_L * s_R * (S_R - S_L)) * c
-    fτ = (s_R * fτ_L - s_L * fτ_R + s_L * s_R * (τ_R - τ_L)) * c
-    fD, fS, fτ
+    @inbounds for IL in get_right_face(ranges, 1)
+        IR = IL + e
+        add_conserved!(du_data, IL, -scale,
+            rusanov_flux(conserved_cell(u_data, IL), conserved_cell(u_data, IR)))
+    end
+
+    return du_data
 end
 
 # ─── Coupled outflow boundary condition ───────────────────────────────────────
 #
-# Ghost cells are filled by recovering primitive variables from the last
-# interior cell, clamping the velocity (so there is no supersonic inflow),
-# and converting back to conserved form.  All three fields are written
-# simultaneously because prim_from_cons couples them.
+# Recover primitives at the boundary cell, clamp the velocity so there is no
+# inflow, convert back to conserved form, and fill all three ghost fields
+# together (the primitive recovery couples them).
 
 struct RelativisticOutflow <: AbstractCoupledBoundaryCondition end
 
-function HaloArrays.apply_coupled_bc!(::RelativisticOutflow,
-        state, ::Side{S}, ::Dim{1}) where {S}
-    D_f, S_f, τ_f = eachfield(state)
-
-    D_e = get_send_view(Side(S), Dim(1), D_f)[1]
-    S_e = get_send_view(Side(S), Dim(1), S_f)[1]
-    τ_e = get_send_view(Side(S), Dim(1), τ_f)[1]
-
-    ρ_e, v_e, p_e = prim_from_cons(D_e, S_e, τ_e)
-
-    # prevent supersonic inflow: clamp velocity to zero at the respective wall
-    v_e = S == 1 ? max(v_e, 0.0) : min(v_e, 0.0)
-
-    D_g, S_g, τ_g = cons_from_prim(ρ_e, v_e, p_e)
-
-    fill!(get_recv_view(Side(S), Dim(1), D_f), D_g)
-    fill!(get_recv_view(Side(S), Dim(1), S_f), S_g)
-    fill!(get_recv_view(Side(S), Dim(1), τ_f), τ_g)
+function HaloArrays.apply_coupled_bc!(::RelativisticOutflow, state, ::Side{Sd}, ::Dim{1}) where {Sd}
+    Df, Sf, Tf = eachfield(state)
+    U = SVector(get_send_view(Side(Sd), Dim(1), Df)[1],
+                get_send_view(Side(Sd), Dim(1), Sf)[1],
+                get_send_view(Side(Sd), Dim(1), Tf)[1])
+    ρ, v, p = prim_from_cons(U)
+    v = Sd == 1 ? max(v, 0.0) : min(v, 0.0)   # no supersonic inflow
+    G = cons_from_prim(ρ, v, p)
+    fill!(get_recv_view(Side(Sd), Dim(1), Df), G[1])
+    fill!(get_recv_view(Side(Sd), Dim(1), Sf), G[2])
+    fill!(get_recv_view(Side(Sd), Dim(1), Tf), G[3])
     return nothing
 end
 
-# ─── RHS: finite-volume update in (D, S, τ) ───────────────────────────────────
+# ─── RHS and SSP-RK2 time stepping ────────────────────────────────────────────
 
-function rhs!(state, bc, dx)
-    apply_coupled_bc!(bc, state)
-
-    D_f, S_f, τ_f = eachfield(state)
-    pD  = parent(D_f);  pS = parent(S_f);  pτ = parent(τ_f)
-    rng = interior_range(D_f)[1]
-    invdx = 1.0 / dx
-
-    du = zeros(3, length(rng))   # [field, cell]
-
-    for (k, i) in enumerate(rng)
-        fD_r, fS_r, fτ_r = hll_flux(pD[i],   pS[i],   pτ[i],   pD[i+1], pS[i+1], pτ[i+1])
-        fD_l, fS_l, fτ_l = hll_flux(pD[i-1], pS[i-1], pτ[i-1], pD[i],   pS[i],   pτ[i])
-        du[1, k] = -(fD_r - fD_l) * invdx
-        du[2, k] = -(fS_r - fS_l) * invdx
-        du[3, k] = -(fτ_r - fτ_l) * invdx
-    end
-
-    du
+function rhs!(du, u, bc, dx)
+    fill!(du, 0.0)
+    synchronize_halo!(u)        # MPI/threaded exchange; x-ghosts left to the BC
+    apply_coupled_bc!(bc, u)    # fill the :noboundary x-ghosts coupled-ly
+    accumulate_fluxes!(parent(du), parent(u), FaceRanges(u), inv(dx))
+    return du
 end
 
-# ─── CFL time step ────────────────────────────────────────────────────────────
-
-function cfl_dt(state, dx, cfl)
-    D_f, S_f, τ_f = eachfield(state)
-    pD = parent(D_f); pS = parent(S_f); pτ = parent(τ_f)
-    amax = 0.0
-    for i in interior_range(D_f)[1]
-        ρ, v, p = prim_from_cons(pD[i], pS[i], pτ[i])
-        vm, vp = wave_speeds(ρ, v, p)
-        amax   = max(amax, abs(vp), abs(vm))
-    end
-    cfl * dx / max(amax, 1.0e-14)
-end
-
-# ─── SSP-RK2 (Shu–Osher) ─────────────────────────────────────────────────────
-
-function ssprk2_step!(state, state1, bc, dt, dx)
-    D_f, S_f, τ_f   = eachfield(state)
-    D1_f, S1_f, τ1_f = eachfield(state1)
-
-    # Save u^n in state1
-    copyto!(parent(D1_f), parent(D_f))
-    copyto!(parent(S1_f), parent(S_f))
-    copyto!(parent(τ1_f), parent(τ_f))
-    synchronize_halo!(state1)
-
-    # Stage 1:  u¹ = u^n + dt·L(u^n)
-    du = rhs!(state, bc, dx)
-    rng = interior_range(D_f)[1]
-    for (k, i) in enumerate(rng)
-        parent(D_f)[i] = parent(D1_f)[i] + dt * du[1, k]
-        parent(S_f)[i] = parent(S1_f)[i] + dt * du[2, k]
-        parent(τ_f)[i] = parent(τ1_f)[i] + dt * du[3, k]
-    end
-    synchronize_halo!(state)
-
-    # Stage 2:  u^{n+1} = ½u^n + ½(u¹ + dt·L(u¹))
-    du = rhs!(state, bc, dx)
-    for (k, i) in enumerate(rng)
-        parent(D_f)[i] = 0.5 * parent(D1_f)[i] + 0.5 * (parent(D_f)[i] + dt * du[1, k])
-        parent(S_f)[i] = 0.5 * parent(S1_f)[i] + 0.5 * (parent(S_f)[i] + dt * du[2, k])
-        parent(τ_f)[i] = 0.5 * parent(τ1_f)[i] + 0.5 * (parent(τ_f)[i] + dt * du[3, k])
-    end
-    synchronize_halo!(state)
-
-    return state
+function ssprk2_step!(u, u1, du, bc, dt, dx)
+    rhs!(du, u, bc, dx)
+    @. u1 = u + dt * du
+    rhs!(du, u1, bc, dx)
+    @. u = 0.5 * u + 0.5 * (u1 + dt * du)
+    return u
 end
 
 # ─── Diagnostics ──────────────────────────────────────────────────────────────
 
-function diagnostics(state, dx)
-    D_f, S_f, τ_f = eachfield(state)
-    pD = parent(D_f); pS = parent(S_f); pτ = parent(τ_f)
-    rng = interior_range(D_f)[1]
+function cfl_dt(u, dx, cfl)
+    d = parent(u)
+    amax = 0.0
+    for I in CartesianIndices(interior_range(u.D))
+        amax = max(amax, max_wave_speed(conserved_cell(d, I)))
+    end
+    return cfl * dx / max(amax, 1.0e-14)
+end
 
-    mass   = 0.0
-    energy = 0.0
-    vmax   = 0.0
-    for i in rng
-        _, v, _ = prim_from_cons(pD[i], pS[i], pτ[i])
-        mass   += pD[i] * dx
-        energy += (pτ[i] + pD[i]) * dx
+function diagnostics(u, dx)
+    d = parent(u)
+    mass = 0.0; energy = 0.0; vmax = 0.0
+    for I in CartesianIndices(interior_range(u.D))
+        U = conserved_cell(d, I)
+        _, v, _ = prim_from_cons(U)
+        mass   += U[1] * dx
+        energy += (U[3] + U[1]) * dx
         vmax    = max(vmax, abs(v))
     end
-    mass, energy, vmax
+    return mass, energy, vmax
 end
 
 # ─── Driver ───────────────────────────────────────────────────────────────────
 
-function run_relativistic_sod(; nx=400, cfl=0.5, t_end=0.4)
+function run_relativistic_sod(; nx=400, cfl=0.4, t_end=0.4)
     dx = 1.0 / nx
     bc = RelativisticOutflow()
 
-    # state = (D, S, τ) as an ArrayOfHaloArray; x-boundaries use coupled outflow
-    state  = ArrayOfHaloArray(LocalHaloArray, Float64, (3,), (nx,), 1;
-        boundary_condition=((:noboundary, :noboundary),))
-    state1 = ArrayOfHaloArray(LocalHaloArray, Float64, (3,), (nx,), 1;
-        boundary_condition=((:noboundary, :noboundary),))
+    # named fields (D, S, tau); x-boundaries opt out for the coupled outflow BC
+    u  = LocalMultiHaloArray(Float64, (nx,), 1;
+        boundary_conditions=(D=:noboundary, S=:noboundary, tau=:noboundary))
+    u1 = similar(u)
+    du = similar(u)
 
-    D_f, S_f, τ_f = eachfield(state)
-
-    # Relativistic Sod initial condition (discontinuity at x = 0.5)
+    # Relativistic Sod: left (ρ=1, p=1) / right (ρ=0.125, p=0.1), v=0
     for i in 1:nx
         x = (i - 0.5) * dx
-        ρ = x < 0.5 ? 1.0   : 0.125
-        p = x < 0.5 ? 1.0   : 0.1
-        D_f[i], S_f[i], τ_f[i] = cons_from_prim(ρ, 0.0, p)
+        ρ = x < 0.5 ? 1.0 : 0.125
+        p = x < 0.5 ? 1.0 : 0.1
+        U = cons_from_prim(ρ, 0.0, p)
+        interior_view(u.D)[i]   = U[1]
+        interior_view(u.S)[i]   = U[2]
+        interior_view(u.tau)[i] = U[3]
     end
-    synchronize_halo!(state)
+    synchronize_halo!(u)
 
-    mass0, energy0, _ = diagnostics(state, dx)
+    mass0, energy0, _ = diagnostics(u, dx)
     @printf("Relativistic Sod shock tube  nx=%d  t_end=%.2f\n", nx, t_end)
     @printf("  initial  mass=%.6f  energy=%.6f\n", mass0, energy0)
 
-    t   = 0.0
-    step = 0
+    t = 0.0; step = 0
     while t < t_end
-        dt  = min(cfl_dt(state, dx, cfl), t_end - t)
-        ssprk2_step!(state, state1, bc, dt, dx)
-        t    += dt
-        step += 1
+        dt = min(cfl_dt(u, dx, cfl), t_end - t)
+        ssprk2_step!(u, u1, du, bc, dt, dx)
+        t += dt; step += 1
     end
 
-    mass1, energy1, vmax = diagnostics(state, dx)
+    mass1, energy1, vmax = diagnostics(u, dx)
     @printf("  final    mass=%.6f  energy=%.6f  vmax=%.4f  steps=%d  t=%.4f\n",
         mass1, energy1, vmax, step, t)
 
-    # Qualitative checks:
-    #   1. Bulk velocity appeared (rarefaction + shock created motion)
-    #   2. Density at x≈0.75 (in the originally right half) rose above 0.125
-    #      because the right-going shock compressed that region
-    pD_p = parent(D_f); pS_p = parent(S_f); pτ_p = parent(τ_f)
-    h = halo_width(D_f)
-    i_probe = h + round(Int, 0.75 * nx)    # storage index for x ≈ 0.75
-    ρ_probe, _, _ = prim_from_cons(pD_p[i_probe], pS_p[i_probe], pτ_p[i_probe])
-
+    # The right-going shock compresses the originally low-density right state.
+    d = parent(u)
+    h = halo_width(u.D)
+    i_probe = h + round(Int, 0.75 * nx)
+    ρ_probe, _, _ = prim_from_cons(conserved_cell(d, CartesianIndex(i_probe)))
     @printf("  ρ at x≈0.75 = %.4f  (initial right = 0.125, shock raises it)\n", ρ_probe)
     @printf("  vmax        = %.4f  (> 0 confirms bulk motion)\n", vmax)
     println(ρ_probe > 0.125 && vmax > 0.0 ?
         "  ✓ shock formed: right side compressed and flow is moving" :
         "  ✗ unexpected result")
 
-    return state
+    return u
 end
 
 run_relativistic_sod()
