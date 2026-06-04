@@ -50,17 +50,11 @@ function LocalHaloArray(owned_dims::NTuple{N,Int}, halo::Int; boundary_condition
     return LocalHaloArray(Float64, owned_dims, halo; boundary_condition)
 end
 
-# size, axes, length inherited from AbstractSingleHaloArray
-@inline Base.eltype(::LocalHaloArray{T}) where {T} = T
-@inline Base.eltype(::Type{<:LocalHaloArray{T}}) where {T} = T
-@inline Base.ndims(::LocalHaloArray{T,N}) where {T,N} = N
-@inline Base.ndims(::Type{<:LocalHaloArray{T,N}}) where {T,N} = N
-@inline Base.parent(halo::LocalHaloArray) = halo.data
-# owned_axes, eachindex, iterate inherited from AbstractSingleHaloArray
+# size, axes, length, eltype, ndims, parent, owned_axes, eachindex, iterate
+# inherited from AbstractSingleHaloArray / AbstractArray.
 
-isactive(::LocalHaloArray) = true
 is_root(::LocalHaloArray; root::Integer=0) = (root == 0)
-get_comm(::LocalHaloArray) = nothing
+# isactive, get_comm inherited from AbstractSerialHaloArray
 
 @inline halo_width(::Type{<:LocalHaloArray{T,N,A,Halo}}) where {T,N,A,Halo} = Halo
 @inline halo_width(::LocalHaloArray{T,N,A,Halo}) where {T,N,A,Halo} = Halo

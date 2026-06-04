@@ -97,13 +97,7 @@ type, so it is a compile-time constant. Also callable on the type.
 @inline halo_width(::HaloArray{T,N,A,Halo}) where {T,N,A,Halo} = Halo
 @inline halo_width(::Type{<:HaloArray{T,N,A,Halo}}) where {T,N,A,Halo} = Halo
 
-@inline Base.ndims(::HaloArray{T,N}) where {T,N} = N
-@inline Base.ndims(::Type{<:HaloArray{T,N}}) where {T,N} = N
-
-@inline Base.eltype(::HaloArray{T}) where {T} = T
-@inline Base.eltype(::Type{<:HaloArray{T}}) where {T} = T
-
-@inline Base.parent(halo::HaloArray) = halo.data
+# eltype/ndims come from AbstractArray{T,N}; parent from AbstractSingleHaloArray.
 
 """
     storage_size(u[, i]) -> dims

@@ -40,6 +40,14 @@ function halo_backend end
 
 @inline halo_backend(halo::AbstractSingleHaloArray) = halo_backend(typeof(halo))
 
+# Single halo arrays all store their backing array in a `data` field.
+# (eltype/ndims come from AbstractArray{T,N}.)
+@inline Base.parent(halo::AbstractSingleHaloArray) = halo.data
+
+# Serial backends (local + threaded) are always active and have no communicator.
+@inline isactive(::AbstractSerialHaloArray) = true
+@inline get_comm(::AbstractSerialHaloArray) = nothing
+
 """
     owned_size(halo)
 

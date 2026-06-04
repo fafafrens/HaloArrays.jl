@@ -137,11 +137,7 @@ end
 ThreadedHaloArray(tile_size::NTuple{N,<:Integer}, halo::Integer; kwargs...) where {N} =
     ThreadedHaloArray(Float64, tile_size, halo; kwargs...)
 
-@inline Base.eltype(::ThreadedHaloArray{T}) where {T} = T
-@inline Base.eltype(::Type{<:ThreadedHaloArray{T}}) where {T} = T
-@inline Base.ndims(::ThreadedHaloArray{T,N}) where {T,N} = N
-@inline Base.ndims(::Type{<:ThreadedHaloArray{T,N}}) where {T,N} = N
-@inline Base.parent(halo::ThreadedHaloArray) = halo.data
+# eltype/ndims come from AbstractArray{T,N}; parent from AbstractSingleHaloArray.
 @inline owned_size(halo::ThreadedHaloArray) = ntuple(d -> halo.tile_size[d] * halo.topology.dims[d], Val(ndims(halo)))
 # size, axes, length inherited from AbstractSingleHaloArray
 # owned_axes uses owned_size (tiles have no single interior_view without tile_id)
@@ -177,9 +173,8 @@ and write inside a tile loop, indexed over the shared [`interior_range`](@ref)`(
 The Cartesian position of tile `tile_id` within the tile layout (`dims`)."""
 @inline tile_coordinates(halo::ThreadedHaloArray, tile_id::Integer) = tile_coordinates(halo.topology, tile_id)
 @inline global_size(halo::ThreadedHaloArray) = owned_size(halo)
-@inline isactive(::ThreadedHaloArray) = true
 @inline is_root(halo::ThreadedHaloArray; root::Integer=0) = is_root(halo.topology; root=root)
-@inline get_comm(::ThreadedHaloArray) = nothing
+# isactive, get_comm inherited from AbstractSerialHaloArray
 
 @inline function _threaded_global_to_tile_index(halo::ThreadedHaloArray{T,N}, I) where {T,N}
     idx = _check_global_scalar_indices(halo, I)
