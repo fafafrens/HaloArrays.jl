@@ -138,11 +138,14 @@ end
 
 # ─── Geometric source (coupled + positional, cell loop) ───────────────────────
 #
-# du[I] += S(U_I, r_I)  with  S = −(α/r)(Nv, Mv, M).  Iterates owned cells via
-# get_owned_cells(CellRanges(u)) — the cell analogue of the face loop — reading
-# the state with conserved_cell and writing with add_conserved!.
+# du[I] = S(U_I, r_I)  with  S = −(α/r)(Nv, Mv, M).  This SETS du — it is the
+# first contribution to the RHS, so it replaces the fill!(du,0) + accumulate
+# pair; the flux divergence is then added on top.  Iterates owned cells via
+# get_owned_cells(CellRanges(u)) — the cell analogue of the face loop.  Because
+# it reads ONLY owned cells (never ghosts), it can run while the halo exchange
+# is still in flight (see rel_rhs!).
 
-function accumulate_geometric_source!(du, u, eos, r_min, dr)
+function add_geometric_source!(du, u, eos, r_min, dr)
     du_data = parent(du)
     u_data  = parent(u)
     h = halo_width(u.N)
@@ -151,7 +154,9 @@ function accumulate_geometric_source!(du, u, eos, r_min, dr)
         _, _, v = prim_from_cons(eos, U)
         r = r_min + (I[1] - h - 0.5) * dr
         S = SVector(U[1] * v, U[2] * v, U[2]) * (-GEOMETRY / r)
-        add_conserved!(du_data, I, 1.0, S)
+        du_data.N[I] = S[1]
+        du_data.M[I] = S[2]
+        du_data.E[I] = S[3]
     end
     return du
 end
@@ -159,9 +164,15 @@ end
 # ─── RHS and SSP-RK2 ──────────────────────────────────────────────────────────
 
 function rel_rhs!(du, u, eos, r_min, dr)
-    fill!(du, 0.0)
-    accumulate_geometric_source!(du, u, eos, r_min, dr)   # du += S(U, r)
-    synchronize_halo!(u)                                  # :repeating outflow
+    # Overlap communication with computation: post the halo exchange, then run
+    # the purely local geometric source (it reads only owned cells) while the
+    # exchange is in flight, then finish the exchange and apply the physical
+    # boundary condition before the flux, which needs the ghosts. start_/finish_
+    # are no-ops for the serial LocalHaloArray but make this MPI-ready.
+    start_halo_exchange!(u)                          # post exchange
+    add_geometric_source!(du, u, eos, r_min, dr)     # du = S(U, r)  — overlaps comm
+    finish_halo_exchange!(u)                         # wait for exchange
+    boundary_condition!(u)                           # axis / outflow physical edges
     accumulate_flux_divergence!(parent(du), parent(u), FaceRanges(u), 1, inv(dr),
         (UL, UR) -> rusanov_flux(eos, UL, UR), conserved_cell, add_conserved!)  # du += -∂_r F
     return du
