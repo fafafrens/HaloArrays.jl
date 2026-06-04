@@ -22,4 +22,4 @@ make_state(nx) = LocalMultiHaloArray(Float64, (nx,), 1;
     fields=(:D, :S, :tau), boundary_condition=:repeating)
 
 run_relativistic_sod(make_state, u -> nothing;
-    label="repeating (zeroth-order) outflow")
+    eos=IdealGas(5.0 / 3.0), label="repeating (zeroth-order) outflow")

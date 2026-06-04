@@ -22,38 +22,76 @@ using HaloArrays
 using Printf
 using StaticArrays
 
-const GAMMA = 5.0 / 3.0
+# ─── Equation of state ────────────────────────────────────────────────────────
+#
+# The relativistic inversion below is pure geometry: given a trial pressure it
+# recovers W, v, ρ.  The *thermodynamics* — how pressure relates to the specific
+# enthalpy and the sound speed — lives entirely in the EOS.  To add an EOS,
+# subtype AbstractEOS and implement these three methods; nothing else changes.
 
-# ─── EOS + primitive/conserved conversion (all SVector-based) ─────────────────
+abstract type AbstractEOS end
 
-@inline _enthalpy(ρ, p) = 1.0 + GAMMA / (GAMMA - 1.0) * p / ρ   # h = 1 + ε + p/ρ
+"""    specific_enthalpy(eos, ρ, p) -> h = 1 + ε + p/ρ"""
+function specific_enthalpy end
 
-@inline function cons_from_prim(ρ, v, p)
+"""    sound_speed(eos, ρ, p) -> c_s"""
+function sound_speed end
+
+"""    pressure_guess(eos, U) -> initial pressure for the Newton solve"""
+function pressure_guess end
+
+# Ideal gas:  p = (γ−1)ρε  ⇒  h = 1 + γ/(γ−1)·p/ρ,  c_s² = γp/(ρh).
+struct IdealGas <: AbstractEOS
+    gamma::Float64
+end
+
+@inline specific_enthalpy(eos::IdealGas, ρ, p) = 1.0 + eos.gamma / (eos.gamma - 1.0) * p / ρ
+
+@inline function sound_speed(eos::IdealGas, ρ, p)
+    h = specific_enthalpy(eos, ρ, p)
+    return sqrt(eos.gamma * p / (ρ * h))
+end
+
+# (γ−1)/γ · τ  — exact in the cold/static limit (W≈1), a fine Newton seed.
+@inline pressure_guess(eos::IdealGas, U) =
+    max((eos.gamma - 1.0) / eos.gamma * U[3], 1.0e-10)
+
+# ─── Primitive ↔ conserved conversion (all SVector-based) ─────────────────────
+
+@inline function cons_from_prim(eos, ρ, v, p)
     W = 1.0 / sqrt(1.0 - v^2)
-    h = _enthalpy(ρ, p)
+    h = specific_enthalpy(eos, ρ, p)
     D = ρ * W
     S = ρ * h * W^2 * v
     τ = ρ * h * W^2 - p - D
     return SVector(D, S, τ)
 end
 
-# Primitive recovery: Newton–Raphson on pressure.  With E = τ+D,
-#   f(p) = (E+p) − D·W − (γ/(γ−1))·p·W²,   W = (E+p)/√((E+p)²−S²)
-function prim_from_cons(U; maxit=50, tol=1.0e-12)
+# Primitive recovery: Newton on pressure.  With E = τ+D, X = E+p, Z = √(X²−S²),
+# the trial p fixes the geometry (W = X/Z, v = S/X, ρ = D/W); the EOS-agnostic
+# consistency condition ρhW² = E+p becomes
+#
+#   f(p) = X − D·W·h(ρ, p) = 0
+#
+# which needs only `specific_enthalpy` from the EOS.  A forward-difference
+# derivative keeps the solver independent of the EOS (a production code would
+# supply the analytic Jacobian).
+function prim_from_cons(eos, U; maxit=100, tol=1.0e-12)
     D, S, τ = U
-    E    = τ + D
-    S2   = S^2
-    gog1 = GAMMA / (GAMMA - 1.0)
+    E  = τ + D
+    S2 = S^2
 
-    p = max((GAMMA - 1.0) / GAMMA * (E - D), 1.0e-14)
+    residual(p) = let X = E + p, Z = sqrt(max((E + p)^2 - S2, 1.0e-30))
+        W = X / Z
+        X - D * W * specific_enthalpy(eos, D / W, p)
+    end
+
+    p = pressure_guess(eos, U)
     for _ in 1:maxit
-        X  = E + p
-        Z2 = max(X^2 - S2, 1.0e-30)
-        Z  = sqrt(Z2)
-        W2 = (X / Z)^2
-        f  = X - D * (X / Z) - gog1 * p * W2
-        df = 1.0 + D * S2 / Z^3 - gog1 * W2 * (1.0 - 2.0 * p * S2 / (X * Z2))
-        dp = -f / df
+        f0 = residual(p)
+        δ  = max(1.0e-7 * abs(p), 1.0e-10)
+        df = (residual(p + δ) - f0) / δ
+        dp = -f0 / df
         p  = max(p + dp, 1.0e-14)
         abs(dp) < tol * (p + 1.0e-14) && break
     end
@@ -65,21 +103,21 @@ function prim_from_cons(U; maxit=50, tol=1.0e-12)
     return ρ, v, p
 end
 
-@inline function physical_flux(U)
-    _, v, p = prim_from_cons(U)
+@inline function physical_flux(eos, U)
+    _, v, p = prim_from_cons(eos, U)
     return SVector(U[1] * v, U[2] * v + p, U[2] - U[1] * v)
 end
 
 # Largest |eigenvalue| (Balsara 1994): λ± = (v ± c_s)/(1 ± v·c_s)
-@inline function max_wave_speed(U)
-    ρ, v, p = prim_from_cons(U)
-    cs = sqrt(GAMMA * p / (ρ * _enthalpy(ρ, p)))
+@inline function max_wave_speed(eos, U)
+    ρ, v, p = prim_from_cons(eos, U)
+    cs = sound_speed(eos, ρ, p)
     return max(abs((v - cs) / (1.0 - v * cs)), abs((v + cs) / (1.0 + v * cs)))
 end
 
-@inline function rusanov_flux(UL, UR)
-    smax = max(max_wave_speed(UL), max_wave_speed(UR))
-    return 0.5 * (physical_flux(UL) + physical_flux(UR)) - 0.5 * smax * (UR - UL)
+@inline function rusanov_flux(eos, UL, UR)
+    smax = max(max_wave_speed(eos, UL), max_wave_speed(eos, UR))
+    return 0.5 * (physical_flux(eos, UL) + physical_flux(eos, UR)) - 0.5 * smax * (UR - UL)
 end
 
 # ─── Field access on the NamedTuple returned by parent(state) ─────────────────
@@ -105,40 +143,40 @@ end
 # no-op.  For a coupled BC mark the edges :noboundary and pass a closure that
 # fills them (see relativistic_hydro_1d.jl).
 
-function rel_rhs!(du, u, apply_bc!, dx)
+function rel_rhs!(du, u, eos, apply_bc!, dx)
     fill!(du, 0.0)
     synchronize_halo!(u)
     apply_bc!(u)
     accumulate_flux_divergence!(parent(du), parent(u), FaceRanges(u), 1, inv(dx),
-        rusanov_flux, conserved_cell, add_conserved!)
+        (UL, UR) -> rusanov_flux(eos, UL, UR), conserved_cell, add_conserved!)
     return du
 end
 
-function ssprk2_step!(u, u1, du, apply_bc!, dt, dx)
-    rel_rhs!(du, u, apply_bc!, dx)
+function ssprk2_step!(u, u1, du, eos, apply_bc!, dt, dx)
+    rel_rhs!(du, u, eos, apply_bc!, dx)
     @. u1 = u + dt * du
-    rel_rhs!(du, u1, apply_bc!, dx)
+    rel_rhs!(du, u1, eos, apply_bc!, dx)
     @. u = 0.5 * u + 0.5 * (u1 + dt * du)
     return u
 end
 
 # ─── Diagnostics ──────────────────────────────────────────────────────────────
 
-function cfl_dt(u, dx, cfl)
+function cfl_dt(u, eos, dx, cfl)
     d = parent(u)
     amax = 0.0
     for I in CartesianIndices(interior_range(u.D))
-        amax = max(amax, max_wave_speed(conserved_cell(d, I)))
+        amax = max(amax, max_wave_speed(eos, conserved_cell(d, I)))
     end
     return cfl * dx / max(amax, 1.0e-14)
 end
 
-function diagnostics(u, dx)
+function diagnostics(u, eos, dx)
     d = parent(u)
     mass = 0.0; energy = 0.0; vmax = 0.0
     for I in CartesianIndices(interior_range(u.D))
         U = conserved_cell(d, I)
-        _, v, _ = prim_from_cons(U)
+        _, v, _ = prim_from_cons(eos, U)
         mass   += U[1] * dx
         energy += (U[3] + U[1]) * dx
         vmax    = max(vmax, abs(v))
@@ -149,9 +187,11 @@ end
 # ─── Shared driver: relativistic Sod shock tube ───────────────────────────────
 #
 # `make_state(nx)` builds the LocalMultiHaloArray with the chosen boundary
-# condition; `apply_bc!(u)` is the per-step boundary strategy (see above).
+# condition; `apply_bc!(u)` is the per-step boundary strategy (see above);
+# `eos` is any AbstractEOS (defaults to a γ=5/3 ideal gas).
 
-function run_relativistic_sod(make_state, apply_bc!; label, nx=400, cfl=0.4, t_end=0.4)
+function run_relativistic_sod(make_state, apply_bc!;
+        label, eos::AbstractEOS=IdealGas(5.0 / 3.0), nx=400, cfl=0.4, t_end=0.4)
     dx = 1.0 / nx
     u  = make_state(nx)
     u1 = similar(u)
@@ -162,26 +202,26 @@ function run_relativistic_sod(make_state, apply_bc!; label, nx=400, cfl=0.4, t_e
         x = (i - 0.5) * dx
         ρ = x < 0.5 ? 1.0 : 0.125
         p = x < 0.5 ? 1.0 : 0.1
-        U = cons_from_prim(ρ, 0.0, p)
+        U = cons_from_prim(eos, ρ, 0.0, p)
         interior_view(u.D)[i]   = U[1]
         interior_view(u.S)[i]   = U[2]
         interior_view(u.tau)[i] = U[3]
     end
     synchronize_halo!(u)
 
-    mass0, energy0, _ = diagnostics(u, dx)
+    mass0, energy0, _ = diagnostics(u, eos, dx)
     @printf("Relativistic Sod shock tube — %s\n", label)
     @printf("  nx=%d  t_end=%.2f  initial mass=%.6f energy=%.6f\n",
         nx, t_end, mass0, energy0)
 
     t = 0.0; step = 0
     while t < t_end
-        dt = min(cfl_dt(u, dx, cfl), t_end - t)
-        ssprk2_step!(u, u1, du, apply_bc!, dt, dx)
+        dt = min(cfl_dt(u, eos, dx, cfl), t_end - t)
+        ssprk2_step!(u, u1, du, eos, apply_bc!, dt, dx)
         t += dt; step += 1
     end
 
-    mass1, energy1, vmax = diagnostics(u, dx)
+    mass1, energy1, vmax = diagnostics(u, eos, dx)
     @printf("  final    mass=%.6f  energy=%.6f  vmax=%.4f  steps=%d  t=%.4f\n",
         mass1, energy1, vmax, step, t)
 
@@ -189,7 +229,7 @@ function run_relativistic_sod(make_state, apply_bc!; label, nx=400, cfl=0.4, t_e
     d = parent(u)
     h = halo_width(u.D)
     i_probe = h + round(Int, 0.75 * nx)
-    ρ_probe, _, _ = prim_from_cons(conserved_cell(d, CartesianIndex(i_probe)))
+    ρ_probe, _, _ = prim_from_cons(eos, conserved_cell(d, CartesianIndex(i_probe)))
     @printf("  ρ at x≈0.75 = %.4f  (initial right = 0.125, shock raises it)\n", ρ_probe)
     println(ρ_probe > 0.125 && vmax > 0.0 ?
         "  ✓ shock formed: right side compressed and flow is moving" :

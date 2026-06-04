@@ -18,16 +18,19 @@ include("relativistic_common.jl")
 
 # Coupled outflow: recover primitives at the boundary cell, clamp the velocity
 # so there is no inflow, convert back to conserved form, fill all three ghosts.
-struct RelativisticOutflow <: AbstractCoupledBoundaryCondition end
+# The BC carries the EOS, since the recovery/conversion are thermodynamic.
+struct RelativisticOutflow{E<:AbstractEOS} <: AbstractCoupledBoundaryCondition
+    eos::E
+end
 
-function HaloArrays.apply_coupled_bc!(::RelativisticOutflow, state, ::Side{Sd}, ::Dim{1}) where {Sd}
+function HaloArrays.apply_coupled_bc!(bc::RelativisticOutflow, state, ::Side{Sd}, ::Dim{1}) where {Sd}
     Df, Sf, Tf = eachfield(state)
     U = SVector(get_send_view(Side(Sd), Dim(1), Df)[1],
                 get_send_view(Side(Sd), Dim(1), Sf)[1],
                 get_send_view(Side(Sd), Dim(1), Tf)[1])
-    ρ, v, p = prim_from_cons(U)
+    ρ, v, p = prim_from_cons(bc.eos, U)
     v = Sd == 1 ? max(v, 0.0) : min(v, 0.0)   # no supersonic inflow
-    G = cons_from_prim(ρ, v, p)
+    G = cons_from_prim(bc.eos, ρ, v, p)
     fill!(get_recv_view(Side(Sd), Dim(1), Df), G[1])
     fill!(get_recv_view(Side(Sd), Dim(1), Sf), G[2])
     fill!(get_recv_view(Side(Sd), Dim(1), Tf), G[3])
@@ -38,5 +41,6 @@ end
 make_state(nx) = LocalMultiHaloArray(Float64, (nx,), 1;
     boundary_conditions=(D=:noboundary, S=:noboundary, tau=:noboundary))
 
-run_relativistic_sod(make_state, u -> apply_coupled_bc!(RelativisticOutflow(), u);
-    label="coupled characteristic outflow")
+eos = IdealGas(5.0 / 3.0)
+run_relativistic_sod(make_state, u -> apply_coupled_bc!(RelativisticOutflow(eos), u);
+    eos=eos, label="coupled characteristic outflow")
