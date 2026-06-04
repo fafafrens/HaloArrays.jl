@@ -54,27 +54,32 @@ function _check_array_fields(arrays::AbstractArray)
     return nothing
 end
 
+# Shared by MultiHaloArray and ArrayOfHaloArray: every field must match the
+# first in spatial dimensionality, interior size, halo width, and backend.
+# `labeled_fields` is an iterable of (label, field) pairs (the label only colours
+# the error message — a field name for MultiHaloArray, an index for this one).
+function _check_fields_compatible(what::AbstractString, ref, labeled_fields)
+    ref_ndims   = _spatial_ndims(ref)
+    ref_size    = _spatial_interior_size(ref)
+    ref_halo    = halo_width(ref)
+    ref_backend = halo_backend(ref)
+    for (label, a) in labeled_fields
+        _spatial_ndims(a) == ref_ndims ||
+            throw(ArgumentError("$what field `$label` has dimensionality $(_spatial_ndims(a)) != $ref_ndims"))
+        _spatial_interior_size(a) == ref_size ||
+            throw(DimensionMismatch("$what field `$label` has interior size $(_spatial_interior_size(a)) != $ref_size"))
+        halo_width(a) == ref_halo ||
+            throw(DimensionMismatch("$what field `$label` has halo width $(halo_width(a)) != $ref_halo"))
+        halo_backend(a) isa typeof(ref_backend) ||
+            throw(ArgumentError("$what field `$label` has backend $(typeof(halo_backend(a))) != $(typeof(ref_backend))"))
+    end
+    return nothing
+end
+
 function _check_arrayofhaloarray_compatible(arrays::AbstractArray)
     _check_array_fields(arrays)
-
-    ref = first(arrays)
-    ref_ndims = ndims(ref)
-    ref_interior_size = interior_size(ref)
-    ref_halo_width = halo_width(ref)
-    ref_backend = halo_backend(ref)
-
-    for I in CartesianIndices(arrays)
-        a = arrays[I]
-        ndims(a) == ref_ndims ||
-            throw(ArgumentError("Field `$I` has dimensionality $(ndims(a)) != $ref_ndims"))
-        interior_size(a) == ref_interior_size ||
-            throw(DimensionMismatch("Field `$I` has interior size $(interior_size(a)) != $ref_interior_size"))
-        halo_width(a) == ref_halo_width ||
-            throw(DimensionMismatch("Field `$I` has halo width $(halo_width(a)) != $ref_halo_width"))
-        halo_backend(a) isa typeof(ref_backend) ||
-            throw(ArgumentError("Field `$I` has backend $(typeof(halo_backend(a))) != $(typeof(ref_backend))"))
-    end
-
+    _check_fields_compatible("ArrayOfHaloArray", first(arrays),
+        ((I, arrays[I]) for I in CartesianIndices(arrays)))
     return nothing
 end
 

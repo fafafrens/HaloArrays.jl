@@ -33,29 +33,8 @@ end
 
 function _check_multihaloarray_compatible(field_names, field_values)
     isempty(field_values) && throw(ArgumentError("MultiHaloArray requires at least one field"))
-
-    ref = first(field_values)
-    ref_ndims = _spatial_ndims(ref)
-    ref_size = _spatial_interior_size(ref)
-    ref_halo_width = halo_width(ref)
-    ref_backend = halo_backend(ref)
-
-    if !all(_spatial_ndims(a) == ref_ndims for a in field_values)
-        throw(ArgumentError("All MultiHaloArray fields must have the same spatial dimensionality"))
-    end
-
-    for (name, a) in zip(field_names, field_values)
-        if _spatial_interior_size(a) != ref_size
-            throw(DimensionMismatch("Field `$(name)` has interior size $(_spatial_interior_size(a)) != $ref_size"))
-        end
-        if halo_width(a) != ref_halo_width
-            throw(DimensionMismatch("Field `$(name)` has halo width $(halo_width(a)) != $ref_halo_width"))
-        end
-        if !(halo_backend(a) isa typeof(ref_backend))
-            throw(ArgumentError("Field `$(name)` has backend $(typeof(halo_backend(a))) != $(typeof(ref_backend))"))
-        end
-    end
-
+    _check_fields_compatible("MultiHaloArray", first(field_values),
+        zip(field_names, field_values))
     return nothing
 end
 

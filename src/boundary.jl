@@ -72,87 +72,40 @@ end
 # dispatch, so the body is identical for both types.
 # ============================================================
 
-# ---- Reflecting -----------------------------------------------
-
-function boundary_condition!(halo::AbstractSingleHaloArray,
-        s::Side{1}, d::Dim{dim}, ::Reflecting) where {dim}
+# ---- Reflecting / Antireflecting ------------------------------
+# Mirror the interior into the ghost layer. Reflecting keeps the sign
+# (`scale = 1`), Antireflecting flips it (`scale = -1`); the source index is the
+# mirror of the ghost index about the wall, which is all that differs by side.
+# `S` and `scale` are compile-time, so this inlines to the same code as the
+# hand-written per-side methods.
+@inline function _reflect_bc!(halo::AbstractSingleHaloArray, ::Side{S}, ::Dim{dim}, scale) where {S,dim}
+    N = ndims(halo)
     h = halo_width(halo)
-    N = ndims(halo)
     interior_region = interior_view(halo)
-    halo_region     = get_recv_view(s, d, halo)
+    halo_region     = get_recv_view(Side(S), Dim(dim), halo)
+    n = size(interior_region, dim)
     for i in 1:size(halo_region, dim)
-        src_i = h - i + 1
+        src_i = S == 1 ? h - i + 1 : n - (i - 1)
         @views halo_region[_slice_index(Val(N), dim, i)...] .=
-               interior_region[_slice_index(Val(N), dim, src_i)...]
+               scale .* interior_region[_slice_index(Val(N), dim, src_i)...]
     end
     return nothing
 end
 
-function boundary_condition!(halo::AbstractSingleHaloArray,
-        s::Side{2}, d::Dim{dim}, ::Reflecting) where {dim}
-    N = ndims(halo)
-    n = size(interior_view(halo), dim)
-    interior_region = interior_view(halo)
-    halo_region     = get_recv_view(s, d, halo)
-    for i in 1:size(halo_region, dim)
-        src_i = n - (i - 1)
-        @views halo_region[_slice_index(Val(N), dim, i)...] .=
-               interior_region[_slice_index(Val(N), dim, src_i)...]
-    end
-    return nothing
-end
-
-# ---- Antireflecting -------------------------------------------
-
-function boundary_condition!(halo::AbstractSingleHaloArray,
-        s::Side{1}, d::Dim{dim}, ::Antireflecting) where {dim}
-    h = halo_width(halo)
-    N = ndims(halo)
-    interior_region = interior_view(halo)
-    halo_region     = get_recv_view(s, d, halo)
-    for i in 1:size(halo_region, dim)
-        src_i = h - i + 1
-        @views halo_region[_slice_index(Val(N), dim, i)...] .=
-               .- interior_region[_slice_index(Val(N), dim, src_i)...]
-    end
-    return nothing
-end
-
-function boundary_condition!(halo::AbstractSingleHaloArray,
-        s::Side{2}, d::Dim{dim}, ::Antireflecting) where {dim}
-    N = ndims(halo)
-    n = size(interior_view(halo), dim)
-    interior_region = interior_view(halo)
-    halo_region     = get_recv_view(s, d, halo)
-    for i in 1:size(halo_region, dim)
-        src_i = n - (i - 1)
-        @views halo_region[_slice_index(Val(N), dim, i)...] .=
-               .- interior_region[_slice_index(Val(N), dim, src_i)...]
-    end
-    return nothing
-end
+@inline boundary_condition!(halo::AbstractSingleHaloArray, s::Side, d::Dim, ::Reflecting) =
+    _reflect_bc!(halo, s, d, 1)
+@inline boundary_condition!(halo::AbstractSingleHaloArray, s::Side, d::Dim, ::Antireflecting) =
+    _reflect_bc!(halo, s, d, -1)
 
 # ---- Repeating ------------------------------------------------
-
-function boundary_condition!(halo::AbstractSingleHaloArray,
-        s::Side{1}, d::Dim{dim}, ::Repeating) where {dim}
+# Zero-gradient: copy the nearest owned edge cell into every ghost cell.
+@inline function boundary_condition!(halo::AbstractSingleHaloArray,
+        ::Side{S}, ::Dim{dim}, ::Repeating) where {S,dim}
     N = ndims(halo)
     interior_region = interior_view(halo)
-    halo_region     = get_recv_view(s, d, halo)
-    edge = @view interior_region[_slice_index(Val(N), dim, 1)...]
-    for i in 1:size(halo_region, dim)
-        @views halo_region[_slice_index(Val(N), dim, i)...] .= edge
-    end
-    return nothing
-end
-
-function boundary_condition!(halo::AbstractSingleHaloArray,
-        s::Side{2}, d::Dim{dim}, ::Repeating) where {dim}
-    N = ndims(halo)
-    n = size(interior_view(halo), dim)
-    interior_region = interior_view(halo)
-    halo_region     = get_recv_view(s, d, halo)
-    edge = @view interior_region[_slice_index(Val(N), dim, n)...]
+    halo_region     = get_recv_view(Side(S), Dim(dim), halo)
+    edge_i = S == 1 ? 1 : size(interior_region, dim)
+    edge = @view interior_region[_slice_index(Val(N), dim, edge_i)...]
     for i in 1:size(halo_region, dim)
         @views halo_region[_slice_index(Val(N), dim, i)...] .= edge
     end
