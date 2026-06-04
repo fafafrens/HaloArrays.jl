@@ -236,9 +236,6 @@ end
     return get_send_view(Side(2), Dim(D), tile_parent(halo, tile_id), halo_width(halo))
 end
 
-@inline get_send_view(s::Side, dim::Int, halo::ThreadedHaloArray, tile_id::Integer) =
-    get_send_view(s, Dim(dim), halo, tile_id)
-
 @inline function get_recv_view(::Side{1}, ::Dim{D}, halo::ThreadedHaloArray, tile_id::Int) where {D}
     return get_recv_view(Side(1), Dim(D), tile_parent(halo, tile_id), halo_width(halo))
 end
@@ -246,9 +243,6 @@ end
 @inline function get_recv_view(::Side{2}, ::Dim{D}, halo::ThreadedHaloArray, tile_id::Int) where {D}
     return get_recv_view(Side(2), Dim(D), tile_parent(halo, tile_id), halo_width(halo))
 end
-
-@inline get_recv_view(s::Side, dim::Int, halo::ThreadedHaloArray, tile_id::Integer) =
-    get_recv_view(s, Dim(dim), halo, tile_id)
 
 @inline function neighbor_tile_id(halo::ThreadedHaloArray, tile_id::Integer, dim::Integer, side::Integer)
     return neighbor_tile_id(halo.topology, tile_id, dim, side)

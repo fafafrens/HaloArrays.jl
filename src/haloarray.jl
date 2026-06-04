@@ -224,15 +224,11 @@ end
     view(arr, ntuple(I -> I == D ? window : (halo+1):(size(arr,I)-halo), Val(N))...)
 end
 
-# HaloArray dispatch — both compile-time `Dim{D}` and runtime `D::Int` are used
-# (the MPI exchange path passes a runtime dimension).
+# HaloArray dispatch — the dimension is always a compile-time `Dim{D}` so the
+# window view specialises statically (the exchange and BC paths supply it typed).
 @inline get_send_view(s::Side, ::Dim{D}, a::HaloArray{T,N,A,Halo}) where {D,T,N,A,Halo} =
     _halo_window_view(_send_window(s, storage_size(a, D), Halo), parent(a), D, Halo)
-@inline get_send_view(s::Side, D::Int, a::HaloArray{T,N,A,Halo}) where {T,N,A,Halo} =
-    _halo_window_view(_send_window(s, storage_size(a, D), Halo), parent(a), D, Halo)
 @inline get_recv_view(s::Side, ::Dim{D}, a::HaloArray{T,N,A,Halo}) where {D,T,N,A,Halo} =
-    _halo_window_view(_recv_window(s, storage_size(a, D), Halo), parent(a), D, Halo)
-@inline get_recv_view(s::Side, D::Int, a::HaloArray{T,N,A,Halo}) where {T,N,A,Halo} =
     _halo_window_view(_recv_window(s, storage_size(a, D), Halo), parent(a), D, Halo)
 
 # Plain-array dispatch (used during buffer construction, before the HaloArray exists).
