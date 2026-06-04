@@ -48,6 +48,37 @@ function halo_backend end
 @inline isactive(::AbstractSerialHaloArray) = true
 @inline get_comm(::AbstractSerialHaloArray) = nothing
 
+# Storage geometry for contiguous single arrays (one padded `data` array).
+# ThreadedHaloArray is tiled and overrides all three with per-tile versions.
+"""
+    storage_size(u[, i]) -> dims
+
+Size of the backing storage **including** ghost padding (`owned + 2*halo` per
+dimension); for [`ThreadedHaloArray`](@ref) this is the per-tile storage.
+Contrast with [`owned_size`](@ref) (ghost-free) and [`global_size`](@ref).
+"""
+@inline storage_size(halo::AbstractSingleHaloArray)         = size(parent(halo))
+@inline storage_size(halo::AbstractSingleHaloArray, i::Int) = size(parent(halo), i)
+
+@inline function interior_size(halo::AbstractSingleHaloArray)
+    hw = halo_width(halo)
+    return ntuple(i -> size(parent(halo), i) - 2hw, Val(ndims(halo)))
+end
+
+"""
+    interior_range(u) -> NTuple of UnitRanges
+
+The index ranges of the owned cells **within the padded storage** (`(halo+1) :
+(size-halo)` per dimension). Use it to index `parent(u)` in a stencil with
+ghost-safe offsets, e.g. `for I in CartesianIndices(interior_range(u))`. For
+[`ThreadedHaloArray`](@ref) the range is the same for every tile.
+See also [`interior_view`](@ref).
+"""
+@inline function interior_range(halo::AbstractSingleHaloArray)
+    hw = halo_width(halo)
+    return ntuple(i -> (hw + 1):(size(parent(halo), i) - hw), Val(ndims(halo)))
+end
+
 """
     owned_size(halo)
 

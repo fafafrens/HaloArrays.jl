@@ -99,32 +99,7 @@ type, so it is a compile-time constant. Also callable on the type.
 
 # eltype/ndims come from AbstractArray{T,N}; parent from AbstractSingleHaloArray.
 
-"""
-    storage_size(u[, i]) -> dims
-
-Size of the backing storage **including** ghost padding (i.e. `owned + 2*halo`
-per dimension); for [`ThreadedHaloArray`](@ref) this is the per-tile storage.
-Contrast with [`owned_size`](@ref) (ghost-free) and [`global_size`](@ref).
-"""
-@inline storage_size(halo::HaloArray)         = size(halo.data)
-@inline storage_size(halo::HaloArray, i::Int) = size(halo.data, i)
-
-@inline function interior_size(halo::HaloArray{T,N,A,Halo}) where {T,N,A,Halo}
-    ntuple(i -> size(halo.data, i) - 2*Halo, Val(N))
-end
-
-"""
-    interior_range(u) -> NTuple of UnitRanges
-
-The index ranges of the owned cells **within the padded storage** (`(halo+1) :
-(size-halo)` per dimension). Use it to index `parent(u)` in a stencil with
-ghost-safe offsets, e.g. `for I in CartesianIndices(interior_range(u))`. For
-[`ThreadedHaloArray`](@ref) the range is the same for every tile.
-See also [`interior_view`](@ref).
-"""
-@inline function interior_range(halo::HaloArray{T,N,A,Halo}) where {T,N,A,Halo}
-    ntuple(i -> (Halo+1):(storage_size(halo,i)-Halo), Val(N))
-end
+# storage_size / interior_size / interior_range come from AbstractSingleHaloArray.
 
 """
     interior_view(u) -> view

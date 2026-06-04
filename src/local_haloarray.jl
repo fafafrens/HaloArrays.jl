@@ -59,19 +59,7 @@ is_root(::LocalHaloArray; root::Integer=0) = (root == 0)
 @inline halo_width(::Type{<:LocalHaloArray{T,N,A,Halo}}) where {T,N,A,Halo} = Halo
 @inline halo_width(::LocalHaloArray{T,N,A,Halo}) where {T,N,A,Halo} = Halo
 
-@inline function interior_size(halo::LocalHaloArray{T,N}) where {T,N}
-    h = halo_width(halo)
-    return ntuple(i -> size(halo.data, i) - 2 * h, Val(N))
-end
-
-@inline storage_size(halo::LocalHaloArray) = size(halo.data)
-@inline storage_size(halo::LocalHaloArray, i::Int) = size(halo.data, i)
-
-@inline function interior_range(halo::LocalHaloArray)
-    h = halo_width(halo)
-    N = ndims(halo)
-    return ntuple(i -> (h + 1):(storage_size(halo, i) - h), Val(N))
-end
+# storage_size / interior_size / interior_range come from AbstractSingleHaloArray.
 
 @inline function full_range(halo::LocalHaloArray)
     N = ndims(halo)
