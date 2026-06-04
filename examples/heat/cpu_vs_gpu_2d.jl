@@ -61,7 +61,7 @@ function accumulate_heat_fluxes_cpu!(du, u, ranges::FaceRanges, dim, scale)
         du_data[IR] -= flux
     end
 
-    @inbounds for IL in get_internal_face(ranges)
+    @inbounds for IL in get_internal_face(ranges, dim)
         IR = IL + offset
         flux = scale * (data[IR] - data[IL])
         du_data[IL] += flux

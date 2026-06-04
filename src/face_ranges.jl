@@ -39,28 +39,14 @@ end
 left_face_range(halo, ::Dim{D}) where {D} = left_face_range(halo, D)
 
 """
-    internal_face_range(halo)
-
-Return the dimension-independent owned-cell core used by face loops.
-
-Each returned cell has an owned positive neighbor in every spatial dimension.
-For a chosen dimension, pair each index `IL` with
-`IR = IL + face_offset(halo, dim)`.
-"""
-function internal_face_range(halo)
-    ranges = _loop_interior_range(halo)
-    return ntuple(d -> first(ranges[d]):(last(ranges[d]) - 1), Val(_loop_ndims(halo)))
-end
-
-"""
     internal_face_range(halo, dim)
 
-Return the internal faces for a sweep along `dim`: only `dim` is trimmed by one
-(the owned cells that have an owned `+dim` neighbour), while every *transverse*
+Return the internal faces for a sweep along `dim`: the owned cells that have an
+owned `+dim` neighbour (only `dim` is trimmed by one), while every *transverse*
 dimension keeps its full owned extent. This is what a per-direction conservative
-flux update needs — unlike the dimension-independent [`internal_face_range`](@ref)`(halo)`,
-it does not drop the last transverse row/column, so the boundary-face fluxes
-cancel correctly there.
+flux update needs — it does not drop the last transverse row/column, so the
+boundary-face fluxes cancel correctly there. Pair each index `IL` with
+`IR = IL + face_offset(halo, dim)`.
 """
 function internal_face_range(halo, dim::Int)
     ranges = _loop_interior_range(halo)
@@ -98,7 +84,7 @@ For `MultiHaloArray` and `ArrayOfHaloArray`, the ranges are spatial only. Apply
 them after selecting an individual field.
 
 - `get_left_face(ranges, dim)`: lower-side ghost cells.
-- `get_internal_face(ranges)`: dimension-independent owned-cell core.
+- `get_internal_face(ranges, dim)`: internal owned faces along `dim` (transverse-full).
 - `get_right_face(ranges, dim)`: upper-side owned cells.
 
 Minimal owned-cell update:
@@ -129,9 +115,8 @@ for IL in get_right_face(ranges, dim)
 end
 ```
 """
-struct FaceRanges{A,B,Bd,C,D,Halo}
+struct FaceRanges{A,Bd,C,D,Halo}
     left_face::A
-    internal_face::B          # dimension-independent core (1-D loops, cell-style use)
     internal_face_dirs::Bd    # per-direction internal faces (transverse-full) for flux sweeps
     right_face::C
     unit_vector::D
@@ -142,7 +127,6 @@ function FaceRanges(halo)
     spatial_ndims = _loop_ndims(halo)
     return FaceRanges(
         ntuple(d -> CartesianIndices(left_face_range(halo, d)), spatial_ndims),
-        CartesianIndices(internal_face_range(halo)),
         ntuple(d -> CartesianIndices(internal_face_range(halo, d)), spatial_ndims),
         ntuple(d -> CartesianIndices(right_face_range(halo, d)), spatial_ndims),
         ntuple(d -> face_offset(halo, d), Val(spatial_ndims)),
@@ -153,13 +137,12 @@ end
 get_left_face(ranges::FaceRanges) = ranges.left_face
 get_left_face(ranges::FaceRanges, dim::Int) = ranges.left_face[dim]
 get_left_face(ranges::FaceRanges, ::Dim{D}) where {D} = get_left_face(ranges, D)
-get_internal_face(ranges::FaceRanges) = ranges.internal_face
 """
     get_internal_face(ranges, dim)
 
 Internal faces for a conservative sweep along `dim` (transverse dimensions kept
-full). Use this — not the no-argument [`get_internal_face`](@ref) — when scattering
-a per-direction flux, so the last transverse row/column is not skipped.
+full): the owned cells with an owned `+dim` neighbour. Pair each `IL` with
+`IL + get_unit_vector(ranges, dim)`.
 """
 get_internal_face(ranges::FaceRanges, dim::Int) = ranges.internal_face_dirs[dim]
 get_internal_face(ranges::FaceRanges, ::Dim{D}) where {D} = get_internal_face(ranges, D)

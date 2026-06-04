@@ -92,7 +92,7 @@ println("checkerboard : ", collect.(get_colored_owned_cell_ranges(cr, 0)),
 fr = FaceRanges(u)
 println("faces (left / internal / right):")
 println("  ", collect(get_left_face(fr, 1)), "  ",
-              collect(get_internal_face(fr)), "  ",
+              collect(get_internal_face(fr, 1)), "  ",
               collect(get_right_face(fr, 1)))
 
 # ============================================================

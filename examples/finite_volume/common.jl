@@ -40,7 +40,7 @@ function _fv_accumulate_flux_1d!(du_data, u_data, ranges::FaceRanges, numerical_
         du_data[IR] += numerical_flux(u_data[IL], u_data[IR], args...) * invdx
     end
 
-    @inbounds for IL in get_internal_face(ranges)
+    @inbounds for IL in get_internal_face(ranges, 1)
         IR = IL + offset
         flux = numerical_flux(u_data[IL], u_data[IR], args...) * invdx
         du_data[IL] -= flux

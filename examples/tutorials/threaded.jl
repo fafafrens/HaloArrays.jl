@@ -174,7 +174,7 @@ function burgers_rhs_tile!(du_data, u_data, ranges::FaceRanges, invdx)
         IR = IL + e
         du_data[IR] += rusanov_flux(u_data[IL], u_data[IR]) * invdx
     end
-    for IL in get_internal_face(ranges)
+    for IL in get_internal_face(ranges, 1)
         IR = IL + e
         f = rusanov_flux(u_data[IL], u_data[IR]) * invdx
         du_data[IL] -= f

@@ -107,13 +107,11 @@ end
         ha = LocalHaloArray(Int, (4, 5), 1; boundary_condition=:repeating)
 
         @test left_face_range(ha, 1) == (1:1, 2:6)
-        @test internal_face_range(ha) == (2:4, 2:5)
         @test right_face_range(ha, 1) == (5:5, 2:6)
         @test face_offset(ha, 1) == CartesianIndex(1, 0)
 
         dim2_ranges = FaceRanges(ha)
         @test collect(get_left_face(dim2_ranges, Dim(2))) == collect(CartesianIndices((2:5, 1:1)))
-        @test collect(get_internal_face(dim2_ranges)) == collect(CartesianIndices((2:4, 2:5)))
         @test collect(get_right_face(dim2_ranges, Dim(2))) == collect(CartesianIndices((2:5, 6:6)))
         @test face_offset(ha, Dim(2)) == CartesianIndex(0, 1)
         @test get_unit_vector(dim2_ranges, Dim(2)) == CartesianIndex(0, 1)
@@ -127,12 +125,11 @@ end
         one_cell = LocalHaloArray(Int, (1,), 1; boundary_condition=:repeating)
         one_cell_ranges = FaceRanges(one_cell)
         @test collect(get_left_face(one_cell_ranges, 1)) == [CartesianIndex(1)]
-        @test isempty(get_internal_face(one_cell_ranges))
+        @test isempty(get_internal_face(one_cell_ranges, 1))
         @test collect(get_right_face(one_cell_ranges, 1)) == [CartesianIndex(2)]
 
         range_struct = HaloArrays.FaceRanges(ha)
         @test collect(HaloArrays.get_left_face(range_struct, 1)) == collect(CartesianIndices((1:1, 2:6)))
-        @test collect(HaloArrays.get_internal_face(range_struct)) == collect(CartesianIndices((2:4, 2:5)))
         @test collect(HaloArrays.get_right_face(range_struct, 1)) == collect(CartesianIndices((5:5, 2:6)))
 
         # accumulate_flux_divergence! is conservative on a 2-D uniform field:
@@ -205,7 +202,7 @@ end
         mpi_ha = HaloArray(Int, (4, 5), 1, topology; boundary_condition=:repeating)
         mpi_ranges = FaceRanges(mpi_ha)
         @test collect(get_left_face(mpi_ranges, 1)) == collect(get_left_face(range_struct, 1))
-        @test collect(get_internal_face(mpi_ranges)) == collect(get_internal_face(range_struct))
+        @test collect(get_internal_face(mpi_ranges, 1)) == collect(get_internal_face(range_struct, 1))
         @test collect(get_right_face(mpi_ranges, 1)) == collect(get_right_face(range_struct, 1))
         @test get_unit_vector(mpi_ranges, 1) == CartesianIndex(1, 0)
         @test get_left_face_region(mpi_ranges, 1) == get_left_face_region(range_struct, 1)
@@ -222,7 +219,7 @@ end
         threaded_ha = ThreadedHaloArray(Int, (4, 5), 1; dims=(1, 1), boundary_condition=:repeating)
         threaded_ranges = FaceRanges(threaded_ha)
         @test collect(get_left_face(threaded_ranges, 1)) == collect(get_left_face(range_struct, 1))
-        @test collect(get_internal_face(threaded_ranges)) == collect(get_internal_face(range_struct))
+        @test collect(get_internal_face(threaded_ranges, 1)) == collect(get_internal_face(range_struct, 1))
         @test collect(get_right_face(threaded_ranges, 1)) == collect(get_right_face(range_struct, 1))
         @test get_unit_vector(threaded_ranges, 1) == CartesianIndex(1, 0)
         @test get_internal_face_region(threaded_ranges, 1) == get_internal_face_region(range_struct, 1)
@@ -242,7 +239,7 @@ end
         ))
         field_ranges = FaceRanges(fields)
         @test collect(get_left_face(field_ranges, 1)) == collect(get_left_face(range_struct, 1))
-        @test collect(get_internal_face(field_ranges)) == collect(get_internal_face(range_struct))
+        @test collect(get_internal_face(field_ranges, 1)) == collect(get_internal_face(range_struct, 1))
         @test collect(get_right_face(field_ranges, 1)) == collect(get_right_face(range_struct, 1))
         @test get_unit_vector(field_ranges, 1) == CartesianIndex(1, 0)
         @test_throws BoundsError get_left_face(field_ranges, 3)
@@ -265,7 +262,7 @@ end
         ])
         array_field_ranges = FaceRanges(array_fields)
         @test collect(get_left_face(array_field_ranges, 1)) == collect(get_left_face(range_struct, 1))
-        @test collect(get_internal_face(array_field_ranges)) == collect(get_internal_face(range_struct))
+        @test collect(get_internal_face(array_field_ranges, 1)) == collect(get_internal_face(range_struct, 1))
         @test collect(get_right_face(array_field_ranges, 1)) == collect(get_right_face(range_struct, 1))
         @test get_unit_vector(array_field_ranges, 1) == CartesianIndex(1, 0)
         @test_throws BoundsError get_right_face(array_field_ranges, 3)
@@ -497,7 +494,7 @@ end
             parent(du)[IR] += parent(u)[IR] - parent(u)[IL]
         end
 
-        for IL in get_internal_face(ranges)
+        for IL in get_internal_face(ranges, 1)
             IR = IL + offset
             flux = parent(u)[IR] - parent(u)[IL]
             parent(du)[IL] -= flux
