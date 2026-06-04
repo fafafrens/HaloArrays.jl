@@ -42,7 +42,7 @@ end
                                          full_size::NTuple{N,Int},
                                          color::Integer,
                                          compressed_dim::Integer) where {N}
-    checked_color = _check_cell_color(color)
+    checked_color = _check_loop_color(color)
     compressed = _check_cell_compressed_dim(Val(N), compressed_dim)
     return ColoredCellKernelRegion{N,compressed}(
         first,
@@ -115,7 +115,7 @@ end
 @inline function ColoredCellKernelRegion(indices::CartesianIndices{N},
                                          color::Integer,
                                          compressed_dim::Integer=1) where {N}
-    checked_color = _check_cell_color(color)
+    checked_color = _check_loop_color(color)
     compressed = _check_cell_compressed_dim(Val(N), compressed_dim)
     full_size = size(indices)
     launch_size = ntuple(d -> d == compressed ? cld(full_size[d], 2) : full_size[d], Val(N))

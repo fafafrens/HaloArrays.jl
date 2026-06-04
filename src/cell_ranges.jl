@@ -1,19 +1,5 @@
-@inline _cell_spatial_interior_range(halo::AbstractSingleHaloArray) = interior_range(halo)
-@inline _cell_spatial_interior_range(halo::MultiHaloArray) =
-    interior_range(first(values(halo.arrays)))
-@inline _cell_spatial_interior_range(halo::ArrayOfHaloArray) =
-    interior_range(first(parent(halo)))
-@inline _cell_spatial_interior_range(arr::AbstractArray{<:AbstractSingleHaloArray}) =
-    interior_range(first(arr))
-
-@inline function _check_cell_color(color::Integer)
-    (color == 0 || color == 1) ||
-        throw(ArgumentError("cell color must be 0 or 1, got $color"))
-    return Int(color)
-end
-
-@inline _cell_range_from_first_size_stride(first_index::Int, len::Int, stride::Int) =
-    first_index:stride:(first_index + stride * (len - 1))
+# _loop_interior_range / _loop_strided_range / _check_loop_color are shared with
+# face_ranges.jl (defined there, included first).
 
 """
     CellRanges(halo)
@@ -34,7 +20,7 @@ end
 
 function CellRanges(halo)
     return CellRanges(
-        CartesianIndices(_cell_spatial_interior_range(halo)),
+        CartesianIndices(_loop_interior_range(halo)),
         halo_width(halo),
     )
 end
@@ -61,13 +47,13 @@ end
         delta = mod(mask[d] - mod(first_tuple[d], 2), 2)
         len = region_size[d] <= delta ? 0 : cld(region_size[d] - delta, 2)
         start = first_tuple[d] + delta
-        _cell_range_from_first_size_stride(start, len, 2)
+        _loop_strided_range(start, len, 2)
     end)
 end
 
 @inline function _colored_cell_ranges(indices::CartesianIndices{N},
                                       color::Integer) where {N}
-    checked_color = _check_cell_color(color)
+    checked_color = _check_loop_color(color)
     return ntuple(Val(2^(N - 1))) do subrange_id
         mask = _cell_color_mask(Val(N), checked_color, subrange_id)
         _colored_cell_subrange(indices, mask)

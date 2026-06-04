@@ -2,21 +2,21 @@
     return ntuple(d -> d == dim ? range : ranges[d], Val(N))
 end
 
-@inline _face_spatial_ndims(halo::AbstractSingleHaloArray) = ndims(halo)
-@inline _face_spatial_ndims(::MultiHaloArray{T,N}) where {T,N} = N
-@inline _face_spatial_ndims(::ArrayOfHaloArray{T,N}) where {T,N} = N
-@inline _face_spatial_ndims(arr::AbstractArray{<:AbstractSingleHaloArray}) = ndims(first(arr))
+@inline _loop_ndims(halo::AbstractSingleHaloArray) = ndims(halo)
+@inline _loop_ndims(::MultiHaloArray{T,N}) where {T,N} = N
+@inline _loop_ndims(::ArrayOfHaloArray{T,N}) where {T,N} = N
+@inline _loop_ndims(arr::AbstractArray{<:AbstractSingleHaloArray}) = ndims(first(arr))
 
-@inline _face_spatial_interior_range(halo::AbstractSingleHaloArray) = interior_range(halo)
-@inline _face_spatial_interior_range(halo::MultiHaloArray) =
+@inline _loop_interior_range(halo::AbstractSingleHaloArray) = interior_range(halo)
+@inline _loop_interior_range(halo::MultiHaloArray) =
     interior_range(first(values(halo.arrays)))
-@inline _face_spatial_interior_range(halo::ArrayOfHaloArray) =
+@inline _loop_interior_range(halo::ArrayOfHaloArray) =
     interior_range(first(parent(halo)))
-@inline _face_spatial_interior_range(arr::AbstractArray{<:AbstractSingleHaloArray}) =
+@inline _loop_interior_range(arr::AbstractArray{<:AbstractSingleHaloArray}) =
     interior_range(first(arr))
 
 @inline function _check_face_dim(halo, dim::Int)
-    spatial_ndims = _face_spatial_ndims(halo)
+    spatial_ndims = _loop_ndims(halo)
     1 <= dim <= spatial_ndims ||
         throw(ArgumentError("dim must be a spatial dimension in 1:$spatial_ndims, got $dim"))
     return nothing
@@ -32,7 +32,7 @@ These are ghost cells. In a face loop, pair each index `IL` with
 """
 function left_face_range(halo, dim::Int)
     _check_face_dim(halo, dim)
-    ranges = _face_spatial_interior_range(halo)
+    ranges = _loop_interior_range(halo)
     return _dim_slab_range(ranges, dim, (first(ranges[dim]) - 1):(first(ranges[dim]) - 1))
 end
 
@@ -48,8 +48,8 @@ For a chosen dimension, pair each index `IL` with
 `IR = IL + face_offset(halo, dim)`.
 """
 function internal_face_range(halo)
-    ranges = _face_spatial_interior_range(halo)
-    return ntuple(d -> first(ranges[d]):(last(ranges[d]) - 1), Val(_face_spatial_ndims(halo)))
+    ranges = _loop_interior_range(halo)
+    return ntuple(d -> first(ranges[d]):(last(ranges[d]) - 1), Val(_loop_ndims(halo)))
 end
 
 """
@@ -63,7 +63,7 @@ each index `IL` with `IR = IL + face_offset(halo, dim)` to visit the
 """
 function right_face_range(halo, dim::Int)
     _check_face_dim(halo, dim)
-    ranges = _face_spatial_interior_range(halo)
+    ranges = _loop_interior_range(halo)
     return _dim_slab_range(ranges, dim, last(ranges[dim]):last(ranges[dim]))
 end
 
@@ -121,7 +121,7 @@ struct FaceRanges{A,B,C,D,Halo}
 end
 
 function FaceRanges(halo)
-    spatial_ndims = _face_spatial_ndims(halo)
+    spatial_ndims = _loop_ndims(halo)
     return FaceRanges(
         ntuple(d -> CartesianIndices(left_face_range(halo, d)), spatial_ndims),
         CartesianIndices(internal_face_range(halo)),
@@ -142,17 +142,21 @@ get_unit_vector(ranges::FaceRanges) = ranges.unit_vector
 get_unit_vector(ranges::FaceRanges, dim::Int) = ranges.unit_vector[dim]
 get_unit_vector(ranges::FaceRanges, ::Dim{D}) where {D} = get_unit_vector(ranges, D)
 
-@inline function _check_face_color(color::Integer)
+# Shared by face- and cell-range/region loops (defined here as face_ranges.jl is
+# included first). _loop_ndims / _loop_interior_range dispatch the spatial
+# dimensionality and interior range over single arrays, collections, and raw
+# field arrays.
+@inline function _check_loop_color(color::Integer)
     (color == 0 || color == 1) ||
-        throw(ArgumentError("face color must be 0 or 1, got $color"))
+        throw(ArgumentError("color must be 0 or 1, got $color"))
     return Int(color)
 end
 
-@inline _range_from_first_size_stride(first_index::Int, len::Int, stride::Int) =
+@inline _loop_strided_range(first_index::Int, len::Int, stride::Int) =
     first_index:stride:(first_index + stride * (len - 1))
 
 @inline function _colored_face(indices::CartesianIndices{N}, dim::Int, color::Integer) where {N}
-    checked_color = _check_face_color(color)
+    checked_color = _check_loop_color(color)
     first_tuple = Tuple(first(indices))
     region_size = size(indices)
     delta = mod(checked_color - mod(first_tuple[dim], 2), 2)
@@ -162,7 +166,7 @@ end
         len = d == dim ? colored_size_dim : region_size[d]
         stride = d == dim ? 2 : 1
         start = first_tuple[d] + (d == dim ? delta : 0)
-        _range_from_first_size_stride(start, len, stride)
+        _loop_strided_range(start, len, stride)
     end)
 end
 
@@ -206,7 +210,7 @@ cell across a face in dimension `dim`.
 """
 @inline function face_offset(halo, dim::Int)
     _check_face_dim(halo, dim)
-    return CartesianIndex(versors(Val(_face_spatial_ndims(halo)))[dim])
+    return CartesianIndex(versors(Val(_loop_ndims(halo)))[dim])
 end
 
 @inline face_offset(halo, ::Dim{D}) where {D} = face_offset(halo, D)
