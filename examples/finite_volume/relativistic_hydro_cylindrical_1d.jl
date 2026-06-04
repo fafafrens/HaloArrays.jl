@@ -23,6 +23,12 @@
 # Note S vanishes while the fluid is at rest (M = 0, v = 0) and switches on as
 # flow develops — a radial blast then dilutes faster than its planar twin.
 #
+# Axis boundary (inner, r = 0). By symmetry the scalars N, E are EVEN across the
+# axis (reflecting), while the radial momentum M is ODD and must vanish there
+# (antireflecting): M ~ r near the axis, which keeps the 1/r source regular
+# (S_N ~ N, S_M ~ r, S_E ~ const all stay bounded). The outer boundary is
+# zeroth-order outflow (:repeating).
+#
 # The CONSERVED integral is area-weighted: ∂_t ∫ U r^α dr = −[r^α F] (boundary
 # flux). This operator-split discretization (planar flux + pointwise source)
 # conserves ∫ N r dr and ∫ E r dr only to truncation order — the residual drift
@@ -188,13 +194,18 @@ end
 
 # ─── Driver: radial relativistic blast ────────────────────────────────────────
 
-function run_cylindrical_blast(; A=1.0, nx=400, cfl=0.4, r_min=0.2, r_max=1.2,
-        r_mid=0.7, t_end=0.30)
+function run_cylindrical_blast(; A=1.0, nx=400, cfl=0.4, r_min=0.0, r_max=1.0,
+        r_mid=0.3, t_end=0.40)
     eos = UltraRelGas(A)
     dr  = (r_max - r_min) / nx
 
-    u  = LocalMultiHaloArray(Float64, (nx,), 1;
-        fields=(:N, :M, :E), boundary_condition=:repeating)
+    # Axis (inner/side-1): N, E even → reflecting; M odd → antireflecting (M→0).
+    # Outer (side-2): zeroth-order outflow.
+    u  = LocalMultiHaloArray(Float64, (nx,), 1; boundary_conditions=(
+        N=((:reflecting, :repeating),),
+        M=((:antireflecting, :repeating),),
+        E=((:reflecting, :repeating),),
+    ))
     u1 = similar(u)
     du = similar(u)
 
