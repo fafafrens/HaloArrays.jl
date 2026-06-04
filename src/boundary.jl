@@ -252,6 +252,9 @@ condition only where one belongs.
 @inline is_physical_boundary(::LocalHaloArray, ::Side, ::Dim) = true
 @inline is_physical_boundary(halo::HaloArray, ::Side{S}, ::Dim{D}) where {S,D} =
     halo.topology.neighbors[D][S] < 0
+# Threaded: a domain edge exists if any boundary tile has no neighbour (id 0).
+@inline is_physical_boundary(h::ThreadedHaloArray, ::Side{S}, ::Dim{D}) where {S,D} =
+    any(t -> neighbor_tile_id(h, t, D, S) == 0, 1:tile_count(h))
 @inline is_physical_boundary(state::AbstractHaloCollection, s::Side, d::Dim) =
     is_physical_boundary(first(eachfield(state)), s, d)
 
@@ -278,15 +281,30 @@ function HaloArrays.apply_coupled_bc!(bc::MyBC, state, s::Side{S}, d::Dim{D}) wh
 end
 ```
 
-The **two-argument** driver dispatches your method on every *physical* boundary
-([`is_physical_boundary`](@ref)) — so under MPI it skips interior rank faces. The
-spatial dimension is taken from the collection's type (`AbstractHaloCollection{T,N,S}`),
-so the loop unrolls and the call is allocation-free. Mark the coupled edges
-[`NoBoundaryCondition`](@ref) so `synchronize_halo!` leaves them for this call;
-for a *mix* of coupled and ordinary boundaries, call the four-argument form on
-the specific `(side, dim)` instead.
+For **`ThreadedHaloArray`** fields, implement the **five-argument** method
+instead — it is called once per boundary *tile*, with the tile-aware views:
 
-Currently supports [`LocalHaloArray`](@ref) and MPI [`HaloArray`](@ref) fields.
+```julia
+function HaloArrays.apply_coupled_bc!(bc::MyBC, state, s::Side{S}, d::Dim{D}, tile_id::Integer) where {S,D}
+    for field in eachfield(state)
+        edge  = get_send_view(s, d, field, tile_id)
+        ghost = get_recv_view(s, d, field, tile_id)
+        # ...
+    end
+end
+```
+
+The **two-argument** driver dispatches your method on every *physical* boundary
+([`is_physical_boundary`](@ref)) — under MPI it skips interior rank faces, and
+for threaded fields it visits only the boundary tiles (`neighbor_tile_id == 0`).
+The spatial dimension is taken from the collection's type
+(`AbstractHaloCollection{T,N,S}`), so the loop unrolls and the call is
+allocation-free. Mark the coupled edges [`NoBoundaryCondition`](@ref) so
+`synchronize_halo!` leaves them for this call; for a *mix* of coupled and
+ordinary boundaries, call the per-face form on the specific `(side, dim)`.
+
+Works on [`LocalHaloArray`](@ref), MPI [`HaloArray`](@ref), and
+[`ThreadedHaloArray`](@ref) fields.
 """
 function apply_coupled_bc!(bc::AbstractCoupledBoundaryCondition,
         state, ::Side{S}, ::Dim{D}) where {S,D}
@@ -295,10 +313,29 @@ function apply_coupled_bc!(bc::AbstractCoupledBoundaryCondition,
         "`HaloArrays.apply_coupled_bc!(bc::$(nameof(typeof(bc))), state, ::Side, ::Dim)`"))
 end
 
-# Apply the coupled BC on one face, but only if it is a physical domain edge
-# (under MPI, interior rank faces are filled by the halo exchange instead).
-@inline function _apply_coupled_face!(bc, state, side::Side, dim::Dim)
+function apply_coupled_bc!(bc::AbstractCoupledBoundaryCondition,
+        state, ::Side{S}, ::Dim{D}, tile_id::Integer) where {S,D}
+    throw(ArgumentError(
+        "no per-tile apply_coupled_bc! for $(typeof(bc)) at side $S dim $D; define " *
+        "`HaloArrays.apply_coupled_bc!(bc::$(nameof(typeof(bc))), state, ::Side, ::Dim, tile_id)`"))
+end
+
+# Apply the coupled BC on one physical face. The per-field path (Local/MPI) makes
+# a single whole-array call; the threaded path visits only the boundary tiles.
+@inline _apply_coupled_face!(bc, state, side::Side, dim::Dim) =
+    _apply_coupled_face!(halo_backend(state), bc, state, side, dim)
+
+@inline function _apply_coupled_face!(::AbstractHaloBackend, bc, state, side::Side, dim::Dim)
     is_physical_boundary(state, side, dim) && apply_coupled_bc!(bc, state, side, dim)
+    return nothing
+end
+
+@inline function _apply_coupled_face!(::ThreadedHaloBackend, bc, state,
+        side::Side{S}, dim::Dim{D}) where {S,D}
+    for tile_id in 1:tile_count(state)
+        neighbor_tile_id(state, tile_id, D, S) == 0 &&
+            apply_coupled_bc!(bc, state, side, dim, tile_id)
+    end
     return nothing
 end
 
