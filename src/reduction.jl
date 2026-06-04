@@ -50,26 +50,22 @@ function Base.all(f::F, u::ThreadedHaloArray) where {F<:Function}
         1:tile_count(u); scheduler=:static)
 end
 
+# mapreduce/mapfoldl/mapfoldr over a multi-field container reduce each field
+# across the inputs, then reduce the per-field results. One definition covers any
+# AbstractHaloCollection (MultiHaloArray + ArrayOfHaloArray) via `eachfield`.
 for func in (:mapreduce, :mapfoldl, :mapfoldr)
     @eval function Base.$func(
-            f::F, op::OP, halo::MultiHaloArray, etc::Vararg{MultiHaloArray}; kws...,
+            f::F, op::OP, halo::AbstractHaloCollection, etc::Vararg{AbstractHaloCollection}; kws...,
         ) where {F<:Function, OP}
-        
-        all_arrays = (to_tuple(halo), to_tuple.(etc)...)
-        N=n_field(halo)
-
-        per_field_results = map(1:N) do idx
-            field_arrays = map(all_arrays) do arrs
-                arrs[idx]
-            end
-            $func(f, op, field_arrays...; kws...)
+        all_fields = map(eachfield, (halo, etc...))
+        per_field_results = map(eachindex(eachfield(halo))) do idx
+            $func(f, op, map(fields -> fields[idx], all_fields)...; kws...)
         end
-
         return reduce(op, per_field_results; kws...)
     end
 
     @eval function Base.$func(
-            f::F, op::OP, z::Iterators.Zip{<:Tuple{Vararg{MultiHaloArray}}}; kws...,
+            f::F, op::OP, z::Iterators.Zip{<:Tuple{Vararg{AbstractHaloCollection}}}; kws...,
         ) where {F<:Function, OP}
         g(args...) = f(args)
         $func(g, op, z.is...; kws...)
@@ -91,25 +87,7 @@ function Base.any(f::F, mha::MultiHaloArray) where {F<:Function}
     return any(field_results)
 end
 
-for func in (:mapreduce, :mapfoldl, :mapfoldr)
-    @eval function Base.$func(
-            f::F, op::OP, halo::ArrayOfHaloArray, etc::Vararg{ArrayOfHaloArray}; kws...,
-        ) where {F<:Function, OP}
-        all_arrays = (parent(halo), parent.(etc)...)
-        per_field_results = map(eachindex(parent(halo))) do idx
-            field_arrays = map(arrs -> arrs[idx], all_arrays)
-            $func(f, op, field_arrays...; kws...)
-        end
-        return reduce(op, per_field_results; kws...)
-    end
-
-    @eval function Base.$func(
-            f::F, op::OP, z::Iterators.Zip{<:Tuple{Vararg{ArrayOfHaloArray}}}; kws...,
-        ) where {F<:Function, OP}
-        g(args...) = f(args)
-        $func(g, op, z.is...; kws...)
-    end
-end
+# ArrayOfHaloArray reductions are covered by the AbstractHaloCollection methods above.
 
 for func in (:mapreduce, :mapfoldl, :mapfoldr)
     @eval function Base.$func(
