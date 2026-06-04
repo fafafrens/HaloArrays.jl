@@ -10,18 +10,19 @@
 #
 #   p(T) = a T⁴,   e = 3p,   w = e + p = 4p,   c_s² = 1/3.
 #
-# Conserved variables reduce to momentum and energy only:
+# Conserved variables are the raw stress-energy components (momentum, energy);
+# with no charge there is nothing to subtract, so E is simply T^00:
 #
-#   S = w W² v,    τ = w W² − p          W = (1−v²)^{−½}
+#   M = T^0i = w W² v,    E = T^00 = w W² − p          W = (1−v²)^{−½}
 #
 # and the primitives are (T, v).
 #
-# Conserved → primitive is CLOSED FORM here. With E = τ, X = E + p = wW²:
-# eliminating v and W from S = X v, W² = X²/(X²−S²) gives a quadratic in X,
+# Conserved → primitive is CLOSED FORM here. With X = E + p = wW²:
+# eliminating v and W from M = X v, W² = X²/(X²−M²) gives a quadratic in X,
 #
-#   3X² − 4E X + S² = 0   ⇒   X = (2E + √(4E²−3S²)) / 3,
+#   3X² − 4E X + M² = 0   ⇒   X = (2E + √(4E²−3M²)) / 3,
 #
-# then p = X − E,  v = S/X,  T = (p/a)^{1/4}.  No Newton iteration is needed —
+# then p = X − E,  v = M/X,  T = (p/a)^{1/4}.  No Newton iteration is needed —
 # contrast relativistic_hydro_Tmu_1d.jl, where a finite chemical potential adds
 # a conserved charge and the recovery becomes a 2-D root-find in (T, μ).
 #
@@ -48,25 +49,24 @@ end
     W = 1.0 / sqrt(1.0 - v^2)
     p = pressure(eos, T)
     w = 4.0 * p                       # w = e + p = 4p
-    S = w * W^2 * v
-    τ = w * W^2 - p
-    return SVector(S, τ)
+    M = w * W^2 * v
+    E = w * W^2 - p
+    return SVector(M, E)
 end
 
 # ─── Conserved → primitive (closed form) ──────────────────────────────────────
 
 @inline function prim_from_cons(eos, U)
-    S, τ = U
-    E = τ
-    X = (2.0 * E + sqrt(max(4.0 * E^2 - 3.0 * S^2, 0.0))) / 3.0   # = E + p
+    M, E = U
+    X = (2.0 * E + sqrt(max(4.0 * E^2 - 3.0 * M^2, 0.0))) / 3.0   # = E + p
     p = max(X - E, 0.0)
-    v = S / max(X, 1.0e-30)
+    v = M / max(X, 1.0e-30)
     T = temperature(eos, p)
     return T, v
 end
 
 # ─── Fluxes ───────────────────────────────────────────────────────────────────
-# For U = (S, τ):  F_S = S v + p,  F_τ = S  (the energy flux is the momentum).
+# For U = (M, E):  F_M = T^xx = M v + p,  F_E = T^0x = M.
 
 @inline function physical_flux(eos, U)
     T, v = prim_from_cons(eos, U)
@@ -85,13 +85,13 @@ end
     return 0.5 * (physical_flux(eos, UL) + physical_flux(eos, UR)) - 0.5 * smax * (UR - UL)
 end
 
-# ─── Field access (conserved fields S, tau) ───────────────────────────────────
+# ─── Field access (conserved fields M, E) ─────────────────────────────────────
 
-@inline conserved_cell(d, I) = SVector(d.S[I], d.tau[I])
+@inline conserved_cell(d, I) = SVector(d.M[I], d.E[I])
 
 @inline function add_conserved!(d, I, scale, U)
-    d.S[I]   += scale * U[1]
-    d.tau[I] += scale * U[2]
+    d.M[I] += scale * U[1]
+    d.E[I] += scale * U[2]
     return d
 end
 
@@ -118,7 +118,7 @@ end
 function cfl_dt(u, eos, dx, cfl)
     d = parent(u)
     amax = 0.0
-    for I in CartesianIndices(interior_range(u.S))
+    for I in CartesianIndices(interior_range(u.E))
         amax = max(amax, max_wave_speed(eos, conserved_cell(d, I)))
     end
     return cfl * dx / max(amax, 1.0e-14)
@@ -127,10 +127,10 @@ end
 function diagnostics(u, eos, dx)
     d = parent(u)
     energy = 0.0; vmax = 0.0; tmax = 0.0
-    for I in CartesianIndices(interior_range(u.S))
+    for I in CartesianIndices(interior_range(u.E))
         U = conserved_cell(d, I)
         T, v = prim_from_cons(eos, U)
-        energy += U[2] * dx            # ∫ τ dx = ∫ T^00 dx
+        energy += U[2] * dx            # ∫ E dx = ∫ T^00 dx
         vmax    = max(vmax, abs(v))
         tmax    = max(tmax, T)
     end
@@ -144,7 +144,7 @@ function run_mu0_sod(; a=1.0, nx=400, cfl=0.4, t_end=0.4)
     dx  = 1.0 / nx
 
     u  = LocalMultiHaloArray(Float64, (nx,), 1;
-        fields=(:S, :tau), boundary_condition=:repeating)
+        fields=(:M, :E), boundary_condition=:repeating)
     u1 = similar(u)
     du = similar(u)
 
@@ -152,8 +152,8 @@ function run_mu0_sod(; a=1.0, nx=400, cfl=0.4, t_end=0.4)
     function set_state!(i, p)
         T = temperature(eos, p)
         U = cons_from_prim(eos, T, 0.0)
-        interior_view(u.S)[i]   = U[1]
-        interior_view(u.tau)[i] = U[2]
+        interior_view(u.M)[i] = U[1]
+        interior_view(u.E)[i] = U[2]
     end
     for i in 1:nx
         x = (i - 0.5) * dx
@@ -177,7 +177,7 @@ function run_mu0_sod(; a=1.0, nx=400, cfl=0.4, t_end=0.4)
 
     # The shock reheats the originally cool right state (x ≈ 0.75).
     d = parent(u)
-    h = halo_width(u.S)
+    h = halo_width(u.E)
     i_probe = h + round(Int, 0.75 * nx)
     T_probe, _ = prim_from_cons(eos, conserved_cell(d, CartesianIndex(i_probe)))
     T_right0 = temperature(eos, 0.1)

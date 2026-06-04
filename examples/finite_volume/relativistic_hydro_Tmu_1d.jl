@@ -14,11 +14,16 @@
 #   e = T s + μ n − p (energy density,  Euler / Gibbs–Duhem)
 #   w = e + p = T s + μ n   (enthalpy density)
 #
-# Conserved variables (charge-based, lab frame):
+# Conserved variables — the raw stress-energy components plus the charge:
 #
-#   N = n W                       W = (1−v²)^{−½}
-#   S = w W² v
-#   τ = w W² − p − N
+#   N = n W            (charge density)        W = (1−v²)^{−½}
+#   M = T^0i = w W² v  (momentum density)
+#   E = T^00 = w W² − p (energy density)
+#
+# We evolve E = T^00 directly rather than the Valencia-style τ = T^00 − N. The
+# subtraction exists in mass-based schemes to avoid cancelling against the rest
+# mass ρc²; here the gas is ultrarelativistic (no rest mass dominates), so the
+# raw components are cleaner.
 #
 # EOS — ultrarelativistic classical (Maxwell–Boltzmann) ideal gas, massless:
 #
@@ -58,46 +63,45 @@ end
     n = charge_density(eos, T, μ)
     w = enthalpy_density(eos, T, μ)
     N = n * W
-    S = w * W^2 * v
-    τ = w * W^2 - p - N
-    return SVector(N, S, τ)
+    M = w * W^2 * v
+    E = w * W^2 - p
+    return SVector(N, M, E)
 end
 
 # ─── Conserved → primitive: 2-D Newton on (T, μ) ──────────────────────────────
 #
-# Given U = (N, S, τ), E = τ + N. For a trial (T, μ): p, n, w from the EOS,
-# X = E + p, Z = √(X²−S²), W = X/Z, v = S/X. Two residuals enforce the charge
+# Given U = (N, M, E). For a trial (T, μ): p, n, w from the EOS,
+# X = E + p, Z = √(X²−M²), W = X/Z, v = M/X. Two residuals enforce the charge
 # and enthalpy identities:
 #
 #   R₁ = n·W − N        R₂ = w·W² − X      (X = wW² when consistent)
 #
 # A forward-difference 2×2 Jacobian keeps the solver EOS-agnostic.
 
-@inline function _residuals(eos, E, S2, N, T, μ)
+@inline function _residuals(eos, E, M2, N, T, μ)
     p = pressure(eos, T, μ)
     n = charge_density(eos, T, μ)
     w = enthalpy_density(eos, T, μ)
     X = E + p
-    Z = sqrt(max(X^2 - S2, 1.0e-30))
+    Z = sqrt(max(X^2 - M2, 1.0e-30))
     W = X / Z
     return n * W - N, w * W^2 - X
 end
 
 function prim_from_cons(eos, U; maxit=200, tol=1.0e-11)
-    N, S, τ = U
-    E  = τ + N
-    S2 = S^2
+    N, M, E = U
+    M2 = M^2
 
     # W ≈ 1 seed: E ≈ 3p = 3nT and N ≈ n  ⇒  T ≈ E/(3N), then invert n for μ.
     T = max(E / (3.0 * max(N, 1.0e-12)), 1.0e-8)
     μ = T * log(max(max(N, 1.0e-12) / (eos.A * T^3), 1.0e-300))
 
     for _ in 1:maxit
-        R1, R2 = _residuals(eos, E, S2, N, T, μ)
+        R1, R2 = _residuals(eos, E, M2, N, T, μ)
         δT = max(1.0e-7 * abs(T), 1.0e-9)
         δμ = max(1.0e-7 * abs(μ), 1.0e-9)
-        R1T, R2T = _residuals(eos, E, S2, N, T + δT, μ)
-        R1m, R2m = _residuals(eos, E, S2, N, T, μ + δμ)
+        R1T, R2T = _residuals(eos, E, M2, N, T + δT, μ)
+        R1m, R2m = _residuals(eos, E, M2, N, T, μ + δμ)
 
         J11 = (R1T - R1) / δT;  J21 = (R2T - R2) / δT
         J12 = (R1m - R1) / δμ;  J22 = (R2m - R2) / δμ
@@ -112,16 +116,17 @@ function prim_from_cons(eos, U; maxit=200, tol=1.0e-11)
     end
 
     p = pressure(eos, T, μ)
-    v = S / (E + p)
+    v = M / (E + p)
     return T, μ, v
 end
 
 # ─── Fluxes ───────────────────────────────────────────────────────────────────
+# For U = (N, M, E):  F_N = N v,  F_M = T^xx = M v + p,  F_E = T^0x = M.
 
 @inline function physical_flux(eos, U)
     T, μ, v = prim_from_cons(eos, U)
     p = pressure(eos, T, μ)
-    return SVector(U[1] * v, U[2] * v + p, U[2] - U[1] * v)
+    return SVector(U[1] * v, U[2] * v + p, U[2])
 end
 
 @inline function max_wave_speed(eos, U)
@@ -135,14 +140,14 @@ end
     return 0.5 * (physical_flux(eos, UL) + physical_flux(eos, UR)) - 0.5 * smax * (UR - UL)
 end
 
-# ─── Field access (conserved fields N, S, tau) ────────────────────────────────
+# ─── Field access (conserved fields N, M, E) ──────────────────────────────────
 
-@inline conserved_cell(d, I) = SVector(d.N[I], d.S[I], d.tau[I])
+@inline conserved_cell(d, I) = SVector(d.N[I], d.M[I], d.E[I])
 
 @inline function add_conserved!(d, I, scale, U)
-    d.N[I]   += scale * U[1]
-    d.S[I]   += scale * U[2]
-    d.tau[I] += scale * U[3]
+    d.N[I] += scale * U[1]
+    d.M[I] += scale * U[2]
+    d.E[I] += scale * U[3]
     return d
 end
 
@@ -182,7 +187,7 @@ function diagnostics(u, eos, dx)
         U = conserved_cell(d, I)
         _, _, v = prim_from_cons(eos, U)
         charge += U[1] * dx              # ∫ N dx   (conserved charge)
-        energy += (U[3] + U[1]) * dx     # ∫ (τ+N) dx = ∫ T^00 dx
+        energy += U[3] * dx              # ∫ E dx = ∫ T^00 dx
         vmax    = max(vmax, abs(v))
     end
     return charge, energy, vmax
@@ -195,7 +200,7 @@ function run_Tmu_sod(; A=1.0, nx=400, cfl=0.4, t_end=0.4)
     dx  = 1.0 / nx
 
     u  = LocalMultiHaloArray(Float64, (nx,), 1;
-        fields=(:N, :S, :tau), boundary_condition=:repeating)
+        fields=(:N, :M, :E), boundary_condition=:repeating)
     u1 = similar(u)
     du = similar(u)
 
@@ -204,9 +209,9 @@ function run_Tmu_sod(; A=1.0, nx=400, cfl=0.4, t_end=0.4)
         T = p / n
         μ = T * log(n / (A * T^3))
         U = cons_from_prim(eos, T, μ, 0.0)
-        interior_view(u.N)[i]   = U[1]
-        interior_view(u.S)[i]   = U[2]
-        interior_view(u.tau)[i] = U[3]
+        interior_view(u.N)[i] = U[1]
+        interior_view(u.M)[i] = U[2]
+        interior_view(u.E)[i] = U[3]
     end
     for i in 1:nx
         x = (i - 0.5) * dx
