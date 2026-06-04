@@ -217,6 +217,20 @@ end
     return nothing
 end
 
+# Pack + post using flat request index (waitall safe variant, no GC.@preserve needed).
+@inline function _pack_post_flat_safe!(halo, recv_reqs, send_reqs, recv_bufs, send_bufs, comm,
+        ::Val{D}, ::Val{S}) where {D, S}
+    nbrank = halo.topology.neighbors[D][S]
+    nbrank == MPI.PROC_NULL && return nothing
+    idx = tag_send(Val(D), Val(S))
+    _copy_to_send_buf!(send_bufs, halo, Val(D), Val(S))
+    recv_reqs[idx] = MPI.Irecv!(recv_bufs[D][S], comm, recv_reqs[idx];
+        source=nbrank, tag=tag_recv(Val(D), Val(S)))
+    send_reqs[idx] = MPI.Isend(send_bufs[D][S], comm, send_reqs[idx];
+        dest=nbrank, tag=tag_send(Val(D), Val(S)))
+    return nothing
+end
+
 # Pack + post using flat request index (waitall_unsafe variant).
 # recv_state = (UnsafeMultiRequest, recv_bufs),  send_state = (UnsafeMultiRequest, send_bufs)
 @inline function _pack_post_flat_unsafe!(halo, recv_state, send_state, comm,
@@ -269,22 +283,13 @@ end
 
 function halo_exchange_waitall!(halo::HaloArray{T,N}) where {T,N}
     comm      = halo.topology.cart_comm
-    topo      = halo.topology
     recv_reqs = halo.comm_state.recv_reqs_flat
     send_reqs = halo.comm_state.send_reqs_flat
     recv_bufs = halo.receive_bufs
     send_bufs = halo.send_bufs
     ntuple(Val(N)) do D
         ntuple(Val(2)) do S
-            nbrank = topo.neighbors[D][S]
-            nbrank == MPI.PROC_NULL && return nothing
-            idx = tag_send(Val(D), Val(S))
-            _copy_to_send_buf!(send_bufs, halo, Val(D), Val(S))
-            recv_reqs[idx] = MPI.Irecv!(recv_bufs[D][S], comm, recv_reqs[idx];
-                source=nbrank, tag=tag_recv(Val(D), Val(S)))
-            send_reqs[idx] = MPI.Isend(send_bufs[D][S], comm, send_reqs[idx];
-                dest=nbrank, tag=tag_send(Val(D), Val(S)))
-            return nothing
+            _pack_post_flat_safe!(halo, recv_reqs, send_reqs, recv_bufs, send_bufs, comm, Val(D), Val(S))
         end
     end
     MPI.Waitall(recv_reqs)
