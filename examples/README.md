@@ -114,12 +114,16 @@ julia --project=. examples/finite_volume/relativistic_hydro_cylindrical_1d.jl
 # 2-D circular blast wave (directional fluxes + Mignone–Bodo wave speeds)
 julia --project=. examples/finite_volume/relativistic_hydro_mu0_2d.jl        # conformal, μ=0  (Mx,My,E)
 julia --project=. examples/finite_volume/relativistic_hydro_Tmu_2d.jl        # with charge     (N,Mx,My,E)
+
+# 3-D spherical blast wave
+julia --project=. examples/finite_volume/relativistic_hydro_mu0_3d.jl        # conformal, μ=0  (Mx,My,Mz,E)
+julia --project=. examples/finite_volume/relativistic_hydro_Tmu_3d.jl        # with charge     (N,Mx,My,Mz,E)
 ```
 
-The 2-D runs evolve a centred over-pressure disk into a circular blast with two
-`accumulate_flux_divergence!` sweeps (x then y); energy (and, for the
-charge version, the charge) is conserved to machine precision and the result is
-x/y symmetric.
+The multi-D runs evolve a centred over-pressure disk/sphere into a circular/
+spherical blast with one `accumulate_flux_divergence!` sweep per axis; energy
+(and, for the charge version, the charge) is conserved to ~machine precision and
+the result is symmetric across axes.
 
 ## Ideal hydrodynamics (`hydro/`)
 
