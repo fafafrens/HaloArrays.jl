@@ -152,7 +152,7 @@ end
         internal_region = @inferred get_internal_face_region(range_struct, Dim(1))
         right_region_dim2 = @inferred get_right_face_region(range_struct, Dim(2))
         @test left_region == FaceKernelRegion(CartesianIndex(1, 2), (1, 5), CartesianIndex(1, 0), false, true)
-        @test internal_region == FaceKernelRegion(CartesianIndex(2, 2), (3, 4), CartesianIndex(1, 0), true, true)
+        @test internal_region == FaceKernelRegion(CartesianIndex(2, 2), (3, 5), CartesianIndex(1, 0), true, true)
         @test right_region_dim2 == FaceKernelRegion(CartesianIndex(2, 6), (4, 1), CartesianIndex(0, 1), true, false)
 
         left_face_color0 = @inferred get_colored_left_face(range_struct, Dim(1), 0)
@@ -164,12 +164,12 @@ end
 
         @test _colored_face_indices(left_face_color0) == CartesianIndex{2}[]
         @test _colored_face_indices(left_face_color1) == vec(collect(CartesianIndices((1:2:1, 2:6))))
-        @test _colored_face_indices(internal_face_color0) == vec(collect(CartesianIndices((2:2:4, 2:5))))
-        @test _colored_face_indices(internal_face_color1) == vec(collect(CartesianIndices((3:2:3, 2:5))))
+        @test _colored_face_indices(internal_face_color0) == vec(collect(CartesianIndices((2:2:4, 2:6))))
+        @test _colored_face_indices(internal_face_color1) == vec(collect(CartesianIndices((3:2:3, 2:6))))
         @test _colored_face_indices(right_face_dim2_color0) == vec(collect(CartesianIndices((2:5, 6:2:6))))
         @test _colored_face_indices(right_face_dim2_color1) == CartesianIndex{2}[]
         @test Set(vcat(_colored_face_indices(internal_face_color0), _colored_face_indices(internal_face_color1))) ==
-              Set(collect(get_internal_face(range_struct)))
+              Set(collect(get_internal_face(range_struct, 1)))
         @test Set(vcat(_colored_face_indices(right_face_dim2_color0), _colored_face_indices(right_face_dim2_color1))) ==
               Set(collect(get_right_face(range_struct, Dim(2))))
         @test_throws ArgumentError get_colored_internal_face(range_struct, 1, -1)
@@ -187,9 +187,9 @@ end
         @test left_color1 ==
               ColoredFaceKernelRegion(CartesianIndex(1, 2), (1, 5), CartesianIndex(2, 1), CartesianIndex(1, 0), false, true)
         @test internal_color0 ==
-              ColoredFaceKernelRegion(CartesianIndex(2, 2), (2, 4), CartesianIndex(2, 1), CartesianIndex(1, 0), true, true)
+              ColoredFaceKernelRegion(CartesianIndex(2, 2), (2, 5), CartesianIndex(2, 1), CartesianIndex(1, 0), true, true)
         @test internal_color1 ==
-              ColoredFaceKernelRegion(CartesianIndex(3, 2), (1, 4), CartesianIndex(2, 1), CartesianIndex(1, 0), true, true)
+              ColoredFaceKernelRegion(CartesianIndex(3, 2), (1, 5), CartesianIndex(2, 1), CartesianIndex(1, 0), true, true)
         @test right_dim2_color0 ==
               ColoredFaceKernelRegion(CartesianIndex(2, 6), (4, 1), CartesianIndex(1, 2), CartesianIndex(0, 1), true, false)
         @test right_dim2_color1 ==

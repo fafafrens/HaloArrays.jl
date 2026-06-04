@@ -115,7 +115,7 @@ for IL in get_left_face(ranges, dim)
     dudata[IR] += flux
 end
 
-for IL in get_internal_face(ranges)
+for IL in get_internal_face(ranges,dim)
     IR = IL + e
     flux = numerical_flux(udata[IL], udata[IR])
     dudata[IL] -= flux
@@ -278,8 +278,7 @@ get_colored_left_face(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
 Return the internal face cells of one race-free face color.
 """
 function get_colored_internal_face(ranges::FaceRanges, dim::Int, color::Integer)
-    get_unit_vector(ranges, dim)
-    return _colored_face(get_internal_face(ranges), dim, color)
+    return _colored_face(get_internal_face(ranges, dim), dim, color)
 end
 get_colored_internal_face(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
     get_colored_internal_face(ranges, D, color)

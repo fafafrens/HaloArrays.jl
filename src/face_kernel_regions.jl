@@ -68,7 +68,7 @@ Return compact launch metadata for the lower-side `ghost | owned` face.
 Return compact launch metadata for owned-cell internal faces.
 """
 @inline get_internal_face_region(ranges::FaceRanges, dim::Int) =
-    FaceKernelRegion(get_internal_face(ranges), get_unit_vector(ranges, dim), true, true)
+    FaceKernelRegion(get_internal_face(ranges, dim), get_unit_vector(ranges, dim), true, true)
 @inline get_internal_face_region(ranges::FaceRanges, ::Dim{D}) where {D} =
     get_internal_face_region(ranges, D)
 
