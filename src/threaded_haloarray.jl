@@ -172,6 +172,23 @@ and write inside a tile loop, indexed over the shared [`interior_range`](@ref)`(
 
 The Cartesian position of tile `tile_id` within the tile layout (`dims`)."""
 @inline tile_coordinates(halo::ThreadedHaloArray, tile_id::Integer) = tile_coordinates(halo.topology, tile_id)
+
+"""
+    owned_to_global_index(u::ThreadedHaloArray, tile_id, owned_idx) -> NTuple
+
+Map a tile-local owned (interior) index `owned_idx` — 1-based, excluding the
+halo — in tile `tile_id` to its global index in the full domain. Mirrors
+`owned_to_global_index` on [`HaloArray`](@ref) and [`LocalHaloArray`](@ref),
+with the extra `tile_id` since the owned region is per tile.
+"""
+@inline function owned_to_global_index(halo::ThreadedHaloArray{T,N},
+        tile_id::Integer, owned_idx::NTuple{N,<:Integer}) where {T,N}
+    coord = tile_coordinates(halo, tile_id)
+    ts    = tile_size(halo)
+    all(d -> 1 <= owned_idx[d] <= ts[d], 1:N) ||
+        throw(BoundsError(halo, owned_idx))
+    return ntuple(d -> (coord[d] - 1) * ts[d] + owned_idx[d], Val(N))
+end
 @inline global_size(halo::ThreadedHaloArray) = owned_size(halo)
 @inline is_root(halo::ThreadedHaloArray; root::Integer=0) = is_root(halo.topology; root=root)
 # isactive, get_comm inherited from AbstractSerialHaloArray
