@@ -73,7 +73,7 @@ and applies the boundary condition at the physical domain edges.
   for the accepted forms).
 
 See also [`LocalHaloArray`](@ref), [`ThreadedHaloArray`](@ref),
-[`halo_exchange!`](@ref), [`gather`](@ref).
+[`halo_exchange!`](@ref); `gather_haloarray` to collect a global array on the root.
 """
 mutable struct HaloArray{T,N,A,Halo,B,BCondition,Topo,CS} <: AbstractDistributedHaloArray{T,N}
     data::A
@@ -226,8 +226,24 @@ end
 
 # HaloArray dispatch — the dimension is always a compile-time `Dim{D}` so the
 # window view specialises statically (the exchange and BC paths supply it typed).
+"""
+    get_send_view(side, dim, field) -> view
+
+A view of the `halo`-wide band of *interior* (owned) cells adjacent to the
+`(side, dim)` boundary — the cells a halo exchange reads, and the interior edge a
+boundary condition reads. Paired with [`get_recv_view`](@ref) (same shape) when
+writing a boundary condition. See also the layout discussion in the source.
+"""
 @inline get_send_view(s::Side, ::Dim{D}, a::HaloArray{T,N,A,Halo}) where {D,T,N,A,Halo} =
     _halo_window_view(_send_window(s, storage_size(a, D), Halo), parent(a), D, Halo)
+
+"""
+    get_recv_view(side, dim, field) -> view
+
+A mutable view of the `halo`-wide *ghost* band on the `(side, dim)` boundary —
+the cells a halo exchange (or a boundary condition) writes. Same shape as
+[`get_send_view`](@ref) on that side, so a BC can pair them cell-by-cell.
+"""
 @inline get_recv_view(s::Side, ::Dim{D}, a::HaloArray{T,N,A,Halo}) where {D,T,N,A,Halo} =
     _halo_window_view(_recv_window(s, storage_size(a, D), Halo), parent(a), D, Halo)
 

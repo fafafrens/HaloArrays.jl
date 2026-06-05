@@ -134,6 +134,14 @@ function FaceRanges(halo)
     )
 end
 
+"""
+    get_left_face(ranges, dim)
+
+Lower-side boundary faces in `dim` (the `ghost | owned` faces): the ghost cells
+to fill, spanning the full transverse extent. Pair each `IL` with
+`IL + get_unit_vector(ranges, dim)`. See also [`get_internal_face`](@ref),
+[`get_right_face`](@ref).
+"""
 get_left_face(ranges::FaceRanges) = ranges.left_face
 get_left_face(ranges::FaceRanges, dim::Int) = ranges.left_face[dim]
 get_left_face(ranges::FaceRanges, ::Dim{D}) where {D} = get_left_face(ranges, D)
@@ -146,6 +154,14 @@ full): the owned cells with an owned `+dim` neighbour. Pair each `IL` with
 """
 get_internal_face(ranges::FaceRanges, dim::Int) = ranges.internal_face_dirs[dim]
 get_internal_face(ranges::FaceRanges, ::Dim{D}) where {D} = get_internal_face(ranges, D)
+"""
+    get_right_face(ranges, dim)
+
+Upper-side boundary faces in `dim` (the `owned | ghost` faces): the owned cells
+adjacent to the upper ghost layer, spanning the full transverse extent. Pair each
+`IL` with `IL + get_unit_vector(ranges, dim)`. See also [`get_left_face`](@ref),
+[`get_internal_face`](@ref).
+"""
 get_right_face(ranges::FaceRanges) = ranges.right_face
 get_right_face(ranges::FaceRanges, dim::Int) = ranges.right_face[dim]
 get_right_face(ranges::FaceRanges, ::Dim{D}) where {D} = get_right_face(ranges, D)

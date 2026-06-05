@@ -1,0 +1,6 @@
+[deps]
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+HaloArrays = "817e997d-d664-46c1-9042-93a8067e2dd6"
+
+[compat]
+Documenter = "1"

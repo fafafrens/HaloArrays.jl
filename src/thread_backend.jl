@@ -13,6 +13,15 @@
 # `<:ThreadBackend`; nothing else in the package needs to change.
 # ------------------------------------------------------------------------------
 
+"""
+    ThreadBackend
+
+Supertype for the thread-execution backends of a [`ThreadedHaloArray`](@ref) —
+*how* per-tile work is dispatched across threads (orthogonal to `halo_backend`,
+which is *where* data lives). Built-ins: [`OhMyThreadsBackend`](@ref) (default),
+[`SerialBackend`](@ref), [`PolyesterBackend`](@ref). Add your own by defining
+[`tile_foreach`](@ref) and [`tile_mapreduce`](@ref) for a new subtype.
+"""
 abstract type ThreadBackend end
 
 """

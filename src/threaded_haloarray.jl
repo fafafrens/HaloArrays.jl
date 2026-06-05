@@ -344,6 +344,18 @@ function halo_exchange!(halo::ThreadedHaloArray)
     return halo
 end
 
+"""
+    halo_exchange_threads!(u)
+    boundary_condition_threads!(u)
+    synchronize_halo_threads!(u)
+
+Threaded variants of [`halo_exchange!`](@ref) / [`boundary_condition!`](@ref) /
+[`synchronize_halo!`](@ref) for a [`ThreadedHaloArray`](@ref): the per-tile work
+runs in parallel through the array's [`thread_backend`](@ref). The default
+(non-`_threads!`) versions are a serial tile loop, which is allocation-free and
+usually faster for small halo surfaces — reach for these only when benchmarking
+shows the parallel exchange wins (large surfaces, wide halos, many tiles).
+"""
 function halo_exchange_threads!(halo::ThreadedHaloArray)
     tile_foreach(thread_backend(halo), tile_id -> _threaded_exchange_tile!(halo, tile_id),
         eachindex(parent(halo)); scheduler=:static)
@@ -472,6 +484,9 @@ function synchronize_halo_threads!(halo::ThreadedHaloArray)
         eachindex(parent(halo)); scheduler=:static)
     return halo
 end
+
+@doc (@doc halo_exchange_threads!) boundary_condition_threads!
+@doc (@doc halo_exchange_threads!) synchronize_halo_threads!
 
 start_halo_exchange!(halo::ThreadedHaloArray) = halo_exchange!(halo)
 finish_halo_exchange!(halo::ThreadedHaloArray) = halo

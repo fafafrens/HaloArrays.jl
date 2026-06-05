@@ -36,6 +36,7 @@ for it to complete. Apply [`boundary_condition!`](@ref) afterwards if needed.
 """
 start_halo_exchange!(halo::LocalHaloArray)  = halo
 finish_halo_exchange!(halo::LocalHaloArray) = halo
+@doc (@doc start_halo_exchange!) finish_halo_exchange!
 
 """
     synchronize_halo!(u)

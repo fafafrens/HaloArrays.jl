@@ -40,3 +40,7 @@ deps/builds/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Documenter
+docs/build/
+docs/Manifest.toml
