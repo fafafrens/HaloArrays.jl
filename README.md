@@ -1,5 +1,10 @@
 # HaloArrays.jl
 
+[![CI](https://github.com/fafafrens/HaloArrays.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/fafafrens/HaloArrays.jl/actions/workflows/ci.yml)
+[![Docs](https://github.com/fafafrens/HaloArrays.jl/actions/workflows/docs.yml/badge.svg)](https://github.com/fafafrens/HaloArrays.jl/actions/workflows/docs.yml)
+[![docs](https://img.shields.io/badge/docs-dev-blue.svg)](https://fafafrens.github.io/HaloArrays.jl/dev/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 *One halo-array API for serial, shared-memory, and distributed stencil & PDE codes in Julia.*
 
 HaloArrays.jl gives you arrays with **ghost (halo) cells** and a single, uniform
