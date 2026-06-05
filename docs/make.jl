@@ -15,7 +15,12 @@ makedocs(
         "Home" => "index.md",
         "Guide" => "guide.md",
         "Examples" => "examples.md",
-        "API reference" => "api.md",
+        "API reference" => [
+            "Types" => "api/types.md",
+            "Arrays, layout & reductions" => "api/core.md",
+            "Halo exchange & boundary conditions" => "api/exchange.md",
+            "Loops & kernel regions" => "api/loops.md",
+        ],
     ],
     checkdocs = :none,   # the package has many internal helpers with docstrings
     warnonly = true,     # don't fail the build on missing @ref targets

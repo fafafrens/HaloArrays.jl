@@ -68,4 +68,4 @@ MPI.Finalize()
   conditions, the backends, multi-field containers, and the loop/kernel helpers.
 - **[Examples](examples.md)** — runnable tutorials and worked solvers (heat,
   finite volume, hydro, relativistic hydro, lattice field theory, Poisson).
-- **[API reference](api.md)** — every exported type and function.
+- **[API reference](api/types.md)** — every exported type and function.
