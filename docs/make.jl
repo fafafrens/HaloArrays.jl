@@ -24,4 +24,5 @@ makedocs(
 deploydocs(
     repo = "github.com/fafafrens/HaloArrays.jl.git",
     devbranch = "main",
+    dirname = "docs",
 )
