@@ -1,7 +1,6 @@
 # HaloArrays.jl
 
 [![CI](https://github.com/fafafrens/HaloArrays.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/fafafrens/HaloArrays.jl/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/fafafrens/HaloArrays.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/fafafrens/HaloArrays.jl)
 [![Docs](https://github.com/fafafrens/HaloArrays.jl/actions/workflows/docs.yml/badge.svg)](https://github.com/fafafrens/HaloArrays.jl/actions/workflows/docs.yml)
 [![docs](https://img.shields.io/badge/docs-dev-blue.svg)](https://fafafrens.github.io/HaloArrays.jl/dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
