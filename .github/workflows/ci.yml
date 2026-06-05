@@ -26,6 +26,16 @@ jobs:
         env:
           HALOARRAYS_RUN_UNIT_TESTS: "true"
           HALOARRAYS_RUN_MPI_TESTS: "false"
+      - uses: julia-actions/julia-processcoverage@v1
+        if: matrix.julia-version == '1.12'
+        with:
+          directories: src,ext
+      - uses: codecov/codecov-action@v5
+        if: matrix.julia-version == '1.12'
+        with:
+          files: lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
 
   threadedtests:
     name: Threaded tests (${{ matrix.threads }} threads)
