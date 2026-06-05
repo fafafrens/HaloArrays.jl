@@ -69,7 +69,7 @@ function heat_step!(out, u, α, dt, dx)
 end
 function heat_step!(out::ThreadedHaloArray, u::ThreadedHaloArray, α, dt, dx)
     synchronize_halo!(u)
-    for t in 1:tile_count(u)
+    Threads.@threads for t in 1:tile_count(u)
         _heat_kernel!(tile_parent(out, t), tile_parent(u, t), interior_range(u), α, dt, dx, Val(ndims(u)))
     end
 end
