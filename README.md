@@ -40,6 +40,8 @@ MPI-backed features require an MPI runtime (OpenMPI or MPICH).
 
 ## Quick start
 
+An array with one ghost layer — write the owned cells, then fill the halo:
+
 ```julia
 using HaloArrays
 u = LocalHaloArray(Float64, (64, 64), 1; boundary_condition=:periodic)
@@ -47,18 +49,68 @@ interior_view(u) .= 1.0      # write owned cells
 synchronize_halo!(u)         # fill ghost cells (here: periodic wrap)
 ```
 
-The identical stencil code goes distributed just by swapping the constructor —
-`synchronize_halo!` becomes an MPI halo exchange, nothing else changes:
+### One solver, every backend
+
+Write a stencil once and run it **unchanged** on a single process, on
+shared-memory tiles, and across MPI ranks. The only backend-specific code is how
+the owned-cell loop is traversed — flat arrays iterate their `parent`, tiled
+arrays iterate per tile — so two `heat_step!` methods cover all three, and
+multiple dispatch picks the right one:
 
 ```julia
-using MPI, HaloArrays
+using HaloArrays, MPI
 MPI.Init()
-topo = CartesianTopology(MPI.COMM_WORLD, (0, 0); periodic=(true, true))
-u = HaloArray(Float64, (64, 64), 1, topo; boundary_condition=:periodic)
-interior_view(u) .= MPI.Comm_rank(MPI.COMM_WORLD)
-synchronize_halo!(u)
-MPI.Finalize()
+
+# Flat backends (LocalHaloArray + the MPI HaloArray) share one method;
+# the tiled ThreadedHaloArray gets a second. The kernel is shared.
+function heat_step!(out, u, α, dt, dx)
+    synchronize_halo!(u)
+    _heat_kernel!(parent(out), parent(u), interior_range(u), α, dt, dx, Val(ndims(u)))
+end
+function heat_step!(out::ThreadedHaloArray, u::ThreadedHaloArray, α, dt, dx)
+    synchronize_halo!(u)
+    for t in 1:tile_count(u)
+        _heat_kernel!(tile_parent(out, t), tile_parent(u, t), interior_range(u), α, dt, dx, Val(ndims(u)))
+    end
+end
+function _heat_kernel!(out, u, rng, α, dt, dx, ::Val{N}) where {N}
+    e = CartesianIndex.(versors(Val(N)))
+    @inbounds for I in CartesianIndices(rng)
+        lap = sum(u[I + e[d]] - 2u[I] + u[I - e[d]] for d in 1:N) / dx^2
+        out[I] = u[I] + α * dt * lap
+    end
+end
+
+# The same solver on three different arrays — just loop over them.
+for u in (
+    LocalHaloArray(Float64, (128, 128), 1; boundary_condition=:periodic),
+    ThreadedHaloArray(Float64, (64, 64), 1; dims=(2, 2), boundary_condition=:periodic),
+    HaloArray(Float64, (128, 128), 1,
+        CartesianTopology(MPI.COMM_SELF, (1, 1); periodic=(true, true));
+        boundary_condition=:periodic),
+)
+    v = similar(u)
+    fill_from_global_indices!(u) do I                  # centred Gaussian
+        exp(-((I[1] - 64)^2 + (I[2] - 64)^2) / 200)
+    end
+    for _ in 1:200
+        heat_step!(v, u, 0.1, 0.1, 1.0)
+        u, v = v, u
+    end
+    println(rpad(nameof(typeof(u)), 18), "mean = ", sum(u) / length(u))
+end
 ```
+
+```text
+LocalHaloArray    mean = 0.038349519684809985
+ThreadedHaloArray mean = 0.038349519684810080
+HaloArray         mean = 0.038349519684809985
+```
+
+Same answer on every backend (the last digits differ only by floating-point
+reduction order). Run it with `julia -t 4` to use the threads; swap
+`MPI.COMM_SELF` for `MPI.COMM_WORLD` and launch with `mpiexec -n 4` to
+distribute across ranks — the loop body does not change.
 
 ## Documentation
 
