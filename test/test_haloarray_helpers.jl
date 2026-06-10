@@ -106,8 +106,8 @@ end
     @testset "owned face ranges" begin
         ha = LocalHaloArray(Int, (4, 5), 1; boundary_condition=:repeating)
 
-        @test left_face_range(ha, 1) == (1:1, 2:6)
-        @test right_face_range(ha, 1) == (5:5, 2:6)
+        @test HaloArrays.left_face_range(ha, 1) == (1:1, 2:6)
+        @test HaloArrays.right_face_range(ha, 1) == (5:5, 2:6)
         @test face_offset(ha, 1) == CartesianIndex(1, 0)
 
         dim2_ranges = FaceRanges(ha)
@@ -117,8 +117,8 @@ end
         @test get_unit_vector(dim2_ranges, Dim(2)) == CartesianIndex(0, 1)
 
         # direction-aware internal faces keep the transverse dimension full
-        @test internal_face_range(ha, 1) == (2:4, 2:6)
-        @test internal_face_range(ha, 2) == (2:5, 2:5)
+        @test HaloArrays.internal_face_range(ha, 1) == (2:4, 2:6)
+        @test HaloArrays.internal_face_range(ha, 2) == (2:5, 2:5)
         @test collect(get_internal_face(dim2_ranges, 1)) == collect(CartesianIndices((2:4, 2:6)))
         @test collect(get_internal_face(dim2_ranges, Dim(2))) == collect(CartesianIndices((2:5, 2:5)))
 

@@ -35,11 +35,11 @@ end
         _remove_on_root(filename, comm)
 
         fid = h5open(filename, "w", comm, MPI.Info())
-        dset = create_dataset_from_haloarray(fid, "field", halo)
+        dset = HaloArrays.create_dataset_from_haloarray(fid, "field", halo)
 
         for step in 0:2
             fill_interior!(halo, rank + step / 10)
-            append_haloarray!(dset, halo)
+            HaloArrays.append_haloarray!(dset, halo)
         end
 
         close(fid)
@@ -67,7 +67,7 @@ end
 
         num_timesteps = 3
         fid = h5open(filename, "w", comm, MPI.Info())
-        dset = create_fixedsize_dataset_from_haloarray(fid, "field", halo, num_timesteps)
+        dset = HaloArrays.create_fixedsize_dataset_from_haloarray(fid, "field", halo, num_timesteps)
 
         for step in 0:(num_timesteps - 1)
             fill_interior!(halo, rank + 1 + step / 10)
@@ -103,8 +103,8 @@ end
         fields = ArrayOfHaloArray([u, v])
 
         fid = h5open(filename, "w", comm, MPI.Info())
-        dset = create_dataset_from_haloarray(fid, "state", fields)
-        append_haloarray!(dset, fields)
+        dset = HaloArrays.create_dataset_from_haloarray(fid, "state", fields)
+        HaloArrays.append_haloarray!(dset, fields)
         close(fid)
         MPI.Barrier(comm)
 
@@ -163,8 +163,8 @@ end
         fields = MultiHaloArray((; rho, mom))
 
         fid = h5open(filename, "w", comm, MPI.Info())
-        group = create_dataset_from_haloarray(fid, "state", fields)
-        append_haloarray!(group, fields)
+        group = HaloArrays.create_dataset_from_haloarray(fid, "state", fields)
+        HaloArrays.append_haloarray!(group, fields)
         close(fid)
         MPI.Barrier(comm)
 
@@ -258,7 +258,7 @@ end
 
         fill_interior!(rho, rank + 50)
         fill_interior!(mom, rank + 150)
-        maybe_fields = mapreduce_mhaloarray_dims(identity, +, MultiHaloArray((; rho, mom)), (1,))
+        maybe_fields = HaloArrays.mapreduce_mhaloarray_dims(identity, +, MultiHaloArray((; rho, mom)), (1,))
         gather_and_save_haloarray(filename_base, maybe_fields)
         MPI.Barrier(comm)
 

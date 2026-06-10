@@ -21,6 +21,13 @@ include_test(name) = include(joinpath(@__DIR__, name))
     @test true
 
     if RUN_UNIT_TESTS
+        # Aqua lives in the test extras; available under Pkg.test but not when
+        # running this file directly with --project=. — skip gracefully then.
+        if Base.find_package("Aqua") !== nothing
+            include_test("test_aqua.jl")
+        else
+            @info "Skipping Aqua tests (Aqua not in this environment; run via Pkg.test)"
+        end
         include_test("test_public_api.jl")
         include_test("test_haloarray_helpers.jl")
         include_test("test_boundary.jl")

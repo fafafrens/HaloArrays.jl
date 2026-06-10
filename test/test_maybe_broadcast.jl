@@ -16,29 +16,29 @@ using HaloArrays
     @test length(maybe) == 4
     @test parent(maybe) === ha
     @test eltype(maybe) === Int
-    @test unwrap(maybe) === ha
+    @test HaloArrays.unwrap(maybe) === ha
     @test halo_width(maybe) == 1
 
     shifted = maybe .+ 10
     @test shifted isa MaybeHaloArray
     @test isactive(shifted)
-    @test collect(interior_view(unwrap(shifted))) == [i + 10 for i in 1:4]
+    @test collect(interior_view(HaloArrays.unwrap(shifted))) == [i + 10 for i in 1:4]
 
     dest = similar(maybe)
     dest .= 3 .* maybe
-    @test collect(interior_view(unwrap(dest))) == [3 * i for i in 1:4]
+    @test collect(interior_view(HaloArrays.unwrap(dest))) == [3 * i for i in 1:4]
 
     copied_into = similar(maybe)
     fill!(copied_into, -1)
     @test copyto!(copied_into, maybe) === copied_into
-    @test collect(interior_view(unwrap(copied_into))) == [i for i in 1:4]
+    @test collect(interior_view(HaloArrays.unwrap(copied_into))) == [i for i in 1:4]
 
     zero_maybe = zero(maybe)
     @test zero_maybe isa MaybeHaloArray
     @test isactive(zero_maybe)
-    @test all(==(0), unwrap(zero_maybe))
+    @test all(==(0), HaloArrays.unwrap(zero_maybe))
     @test fill!(zero_maybe, 6) === zero_maybe
-    @test all(==(6), unwrap(zero_maybe))
+    @test all(==(6), HaloArrays.unwrap(zero_maybe))
 
     inactive_topology = HaloArrays.inactive_cartesian_topology((1,))
     inactive_ha = HaloArray(Int, (4,), 1, inactive_topology; boundary_condition=:repeating)
@@ -46,7 +46,7 @@ using HaloArrays
     @test !isactive(inactive_maybe)
     @test length(inactive_maybe) == 0
     @test isempty(eachindex(inactive_maybe))
-    @test_throws ErrorException unwrap(inactive_maybe)
+    @test_throws ErrorException HaloArrays.unwrap(inactive_maybe)
 
     inactive_result = inactive_maybe .+ 1
     @test inactive_result isa MaybeHaloArray
@@ -69,7 +69,7 @@ using HaloArrays
     shifted_multi = maybe_multi .+ 5
     @test shifted_multi isa MaybeHaloArray
     @test isactive(shifted_multi)
-    shifted_fields = unwrap(shifted_multi)
+    shifted_fields = HaloArrays.unwrap(shifted_multi)
     @test collect(interior_view(shifted_fields.arrays.u)) == [i + 5 for i in 1:4]
     @test collect(interior_view(shifted_fields.arrays.v)) == [10 * i + 5 for i in 1:4]
 
@@ -87,8 +87,8 @@ using HaloArrays
     @test maybe_resized isa MaybeHaloArray
     @test isactive(maybe_resized)
     @test eltype(typeof(maybe_resized)) === Float32
-    @test size(unwrap(maybe_resized)) == (6,)
-    @test storage_size(unwrap(maybe_resized)) == (8,)
+    @test size(HaloArrays.unwrap(maybe_resized)) == (6,)
+    @test storage_size(HaloArrays.unwrap(maybe_resized)) == (8,)
 
     threaded_ha = ThreadedHaloArray(Int, (2,), 1; dims=(2,), boundary_condition=:repeating)
     maybe_threaded = MaybeHaloArray(threaded_ha)
@@ -105,7 +105,7 @@ using HaloArrays
     @test_throws ArgumentError multi .+ maybe_multi
 
     u = LocalHaloArray(Float64, (4,), 1; boundary_condition=:repeating)
-    @test isactive(active(u))
-    @test !isactive(inactive(u))
-    @test getdata(MaybeHaloArray(u)) === u
+    @test isactive(HaloArrays.active(u))
+    @test !isactive(HaloArrays.inactive(u))
+    @test HaloArrays.getdata(MaybeHaloArray(u)) === u
 end

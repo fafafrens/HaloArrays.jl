@@ -88,9 +88,6 @@ export interior_view,
     tile_coordinates,
     neighbor_tile_id,
     face_offset,
-    left_face_range,
-    internal_face_range,
-    right_face_range,
     FaceRanges,
     accumulate_flux_divergence!,
     CellRanges,
@@ -126,8 +123,6 @@ export interior_view,
 # Boundary conditions
 export boundary_condition!,
     boundary_condition_threads!,
-    normalize_boundary_condition,
-    to_bc,
     AbstractCoupledBoundaryCondition,
     apply_coupled_bc!,
     is_physical_boundary,
@@ -145,25 +140,20 @@ export halo_exchange!,
 
 # Reductions and gather
 export mapreduce_haloarray_dims,
-    mapreduce_mhaloarray_dims,
     gather_haloarray
 
 # Maybe helpers
-export isactive,
-    getdata,
-    unwrap,
-    active,
-    inactive
+export isactive
 
 # HDF5 I/O helpers
-export create_dataset_from_haloarray,
-    append_haloarray!,
-    append_haloarray_to_file!,
-    create_fixedsize_dataset_from_haloarray,
+export append_haloarray_to_file!,
     write_haloarray_timestep!,
     create_haloarray_output_file,
-    save_array_hdf5,
     gather_and_save_haloarray,
     gather_and_append_haloarray!
+
+# Internal-but-stable helpers remain accessible qualified, e.g.
+# HaloArrays.to_bc, HaloArrays.unwrap, HaloArrays.internal_face_range,
+# HaloArrays.save_array_hdf5, HaloArrays.append_haloarray!.
 
 end
