@@ -125,7 +125,7 @@ end
     @test_throws DimensionMismatch ArrayOfHaloArray(bad_arrays)
 
     bcs = fill(:repeating, 2, 2)
-    from_bcs = ArrayOfHaloArray(Int, (3,), 1, topology; boundary_conditions=bcs)
+    from_bcs = ArrayOfHaloArray(HaloArray, Int, (3,), 1, topology; boundary_conditions=bcs)
     @test from_bcs isa ArrayOfHaloArray
     @test field_shape(from_bcs) == (2, 2)
     @test eltype(from_bcs) === Int

@@ -93,40 +93,25 @@ function ArrayOfHaloArray(arrays::AbstractArray; check=nothing)
     return ArrayOfHaloArray{T,N,Shape,typeof(arrays),D}(arrays)
 end
 
-function ArrayOfHaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int,
-        topology::CartesianTopology{N}; boundary_conditions::AbstractArray) where {T,N}
+# MPI-backed fields — field-type-first, like the LocalHaloArray/ThreadedHaloArray
+# constructors below. The shape of `boundary_conditions` fixes the field shape.
+# (The element-type-first forms were removed: a dual-meaning first argument
+# caused method ambiguities against the specialized field-type constructors.)
+function ArrayOfHaloArray(::Type{<:HaloArray}, ::Type{T}, owned_dims::NTuple{N,Int},
+        halo::Int, topology::CartesianTopology{N};
+        boundary_conditions::AbstractArray) where {T,N}
     arrays = map(boundary_conditions) do bc
         HaloArray(T, owned_dims, halo, topology; boundary_condition=bc)
     end
     return ArrayOfHaloArray(arrays)
 end
 
-function ArrayOfHaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int,
-        topology::CartesianTopology{N}, boundary_conditions::AbstractArray) where {T,N}
-    return ArrayOfHaloArray(T, owned_dims, halo, topology; boundary_conditions=boundary_conditions)
-end
-
-function ArrayOfHaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int;
-        boundary_conditions::AbstractArray) where {T,N}
+function ArrayOfHaloArray(::Type{<:HaloArray}, ::Type{T}, owned_dims::NTuple{N,Int},
+        halo::Int; boundary_conditions::AbstractArray) where {T,N}
     arrays = map(boundary_conditions) do bc
         HaloArray(T, owned_dims, halo; boundary_condition=bc)
     end
     return ArrayOfHaloArray(arrays)
-end
-
-function ArrayOfHaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int,
-        boundary_conditions::AbstractArray) where {T,N}
-    return ArrayOfHaloArray(T, owned_dims, halo; boundary_conditions=boundary_conditions)
-end
-
-function ArrayOfHaloArray(owned_dims::NTuple{N,Int}, halo::Int;
-        boundary_conditions::AbstractArray) where {N}
-    return ArrayOfHaloArray(Float64, owned_dims, halo; boundary_conditions=boundary_conditions)
-end
-
-function ArrayOfHaloArray(owned_dims::NTuple{N,Int}, halo::Int,
-        boundary_conditions::AbstractArray) where {N}
-    return ArrayOfHaloArray(Float64, owned_dims, halo; boundary_conditions=boundary_conditions)
 end
 
 function ArrayOfHaloArray(::Type{LocalHaloArray}, ::Type{T}, owned_dims::NTuple{N,Int},
@@ -315,9 +300,7 @@ function Base.similar(mha::ArrayOfHaloArray{AA,N,Shape,A,D}, ::Type{T},
     return ArrayOfHaloArray(arrs)
 end
 
-Base.similar(mha::ArrayOfHaloArray{AA,N,Shape,A,D}, ::Type{T},
-    dims::NTuple{M,<:Integer}) where {AA,N,Shape,A,D,T,M} =
-    similar(mha, T, ntuple(d -> Int(dims[d]), Val(M)))
+# Non-Int dims are normalized to Dims by Base's generic similar fallbacks.
 
 Base.similar(mha::ArrayOfHaloArray, dims::Dims{M}) where {M} =
     similar(mha, eltype(mha), dims)

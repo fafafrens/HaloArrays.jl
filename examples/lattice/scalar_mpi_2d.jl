@@ -17,13 +17,13 @@ function main()
         print_magnetization_trace("HaloArray MPI", mpi_history)
     end
 
-    mpi_fields = MultiHaloArray(Float64, owned_cells, 1, topology;
+    mpi_fields = MultiHaloArray(HaloArray, Float64, owned_cells, 1, topology;
         boundary_conditions=(phi=:periodic, chi=:periodic))
     run_heatbath!(mpi_fields, heatbath_rng(mpi_fields, 4321), p; sweeps)
     mpi_fields_obs = observables(mpi_fields)
     rank == 0 && print_observables("MPI MultiHaloArray", mpi_fields, mpi_fields_obs)
 
-    mpi_replicas = ArrayOfHaloArray(Float64, owned_cells, 1, topology;
+    mpi_replicas = ArrayOfHaloArray(HaloArray, Float64, owned_cells, 1, topology;
         boundary_conditions=fill(:periodic, 2))
     run_heatbath!(mpi_replicas, heatbath_rng(mpi_replicas, 5678), p; sweeps)
     mpi_replicas_obs = observables(mpi_replicas)

@@ -124,7 +124,7 @@ function main(; G=(1024, 1024))
         topo = CartesianTopology(comm, (0, 0); periodic=(true, true))
         all(G .% topo.dims .== 0) || error("grid $G not divisible by ranks $(topo.dims)")
         owned = G .÷ topo.dims
-        u = MultiHaloArray(Float64, owned, 1, topo; boundary_conditions=bcs)
+        u = MultiHaloArray(HaloArray, Float64, owned, 1, topo; boundary_conditions=bcs)
         fill_ic!(u)
         t_mpi = MPI.Allreduce(time_step(rhs_flat!, u, dx, dy, dt; sync=true), max, comm)
         if rank == 0

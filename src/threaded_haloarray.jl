@@ -526,9 +526,8 @@ function Base.similar(halo::ThreadedHaloArray{T,N,A,Halo,Topo,BCondition}, ::Typ
     )
 end
 
-Base.similar(halo::ThreadedHaloArray{T,N,A,Halo,Topo,BCondition}, ::Type{AA},
-    dims::NTuple{M,<:Integer}) where {T,N,A,Halo,Topo,BCondition,AA,M} =
-    similar(halo, AA, ntuple(d -> Int(dims[d]), Val(M)))
+# Non-Int dims are normalized to Dims by Base's generic similar fallbacks; a
+# direct NTuple{M,<:Integer} method here would be ambiguous against them.
 
 # Base.similar dispatchers and Base.zero inherited from AbstractSingleHaloArray
 

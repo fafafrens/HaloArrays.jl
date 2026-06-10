@@ -119,8 +119,7 @@ function Base.similar(m::MaybeHaloArray, ::Type{T}, dims::Dims{N}) where {T,N}
     return MaybeHaloArray(inner_sim, m.active)
 end
 
-Base.similar(m::MaybeHaloArray, ::Type{T}, dims::NTuple{N,<:Integer}) where {T,N} =
-    similar(m, T, ntuple(d -> Int(dims[d]), Val(N)))
+# Non-Int dims are normalized to Dims by Base's generic similar fallbacks.
 
 Base.similar(m::MaybeHaloArray, dims::Dims{N}) where {N} = similar(m, eltype(m), dims)
 Base.similar(m::MaybeHaloArray, dims::NTuple{N,<:Integer}) where {N} =

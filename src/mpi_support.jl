@@ -185,10 +185,7 @@ function Base.similar(halo::HaloArray{T,N,A,H,B,BC,Topo,CS},
     build_haloarray_from_data(data, halo_width(halo), halo.topology, halo.boundary_condition)
 end
 
-Base.similar(halo::HaloArray{T,N,A,H,B,BC,Topo,CS}, ::Type{AA},
-    dims::NTuple{M,<:Integer}) where {T,N,A,H,B,BC,Topo,CS,AA,M} =
-    similar(halo, AA, ntuple(d -> Int(dims[d]), Val(M)))
-
+# Non-Int dims are normalized to Dims by Base's generic similar fallbacks.
 # Base.similar dispatchers inherited from AbstractSingleHaloArray
 
 # LinearAlgebra.norm inherited from AbstractSingleHaloArray (abstract_haloarray.jl)
@@ -456,7 +453,7 @@ for (func, commutative) in [:mapreduce => true, :mapfoldl => false, :mapfoldr =>
     end
 
     @eval function Base.$func(
-            f::F, op::OP, z::Iterators.Zip{<:Tuple{Vararg{HaloArray}}}; kws...,
+            f::F, op::OP, z::Iterators.Zip{<:Tuple{HaloArray,Vararg{HaloArray}}}; kws...,
         ) where {F<:Function,OP}
         g(args...) = f(args)
         $func(g, op, z.is...; kws...)

@@ -9,7 +9,7 @@ for func in (:mapreduce, :mapfoldl, :mapfoldr)
     end
 
     @eval function Base.$func(
-            f::F, op::OP, z::Iterators.Zip{<:Tuple{Vararg{LocalHaloArray}}}; kws...,
+            f::F, op::OP, z::Iterators.Zip{<:Tuple{LocalHaloArray,Vararg{LocalHaloArray}}}; kws...,
         ) where {F<:Function, OP}
         g(args...) = f(args)
         return $func(g, op, z.is...; kws...)
@@ -25,7 +25,7 @@ for func in (:mapreduce, :mapfoldl, :mapfoldr)
     end
 
     @eval function Base.$func(
-            f::F, op::OP, z::Iterators.Zip{<:Tuple{Vararg{ThreadedHaloArray}}}; kws...,
+            f::F, op::OP, z::Iterators.Zip{<:Tuple{ThreadedHaloArray,Vararg{ThreadedHaloArray}}}; kws...,
         ) where {F<:Function, OP}
         g(args...) = f(args)
         return $func(g, op, z.is...; kws...)
@@ -65,7 +65,7 @@ for func in (:mapreduce, :mapfoldl, :mapfoldr)
     end
 
     @eval function Base.$func(
-            f::F, op::OP, z::Iterators.Zip{<:Tuple{Vararg{AbstractHaloCollection}}}; kws...,
+            f::F, op::OP, z::Iterators.Zip{<:Tuple{AbstractHaloCollection,Vararg{AbstractHaloCollection}}}; kws...,
         ) where {F<:Function, OP}
         g(args...) = f(args)
         $func(g, op, z.is...; kws...)
@@ -99,7 +99,7 @@ for func in (:mapreduce, :mapfoldl, :mapfoldr)
     end
 
     @eval function Base.$func(
-            f::F, op::OP, z::Iterators.Zip{<:Tuple{Vararg{MaybeHaloArray}}}; kws...,
+            f::F, op::OP, z::Iterators.Zip{<:Tuple{MaybeHaloArray,Vararg{MaybeHaloArray}}}; kws...,
         ) where {F<:Function, OP}
         g(args...) = f(args)
         $func(g, op, z.is...; kws...)

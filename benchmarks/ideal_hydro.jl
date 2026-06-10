@@ -33,7 +33,7 @@ function _ideal_hydro_mpi_state(nx, ny, halo, boundary_condition)
         error("--ny=$ny must be divisible by MPI topology dim $(topology.dims[2])")
 
     owned_cells = (nx ÷ topology.dims[1], ny ÷ topology.dims[2])
-    return MultiHaloArray(Float64, owned_cells, halo, topology;
+    return MultiHaloArray(HaloArray, Float64, owned_cells, halo, topology;
         boundary_conditions=ideal_hydro_boundary_conditions(boundary_condition))
 end
 

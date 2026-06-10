@@ -88,9 +88,7 @@ function Base.similar(halo::LocalHaloArray{T,N,A,Halo,BCondition}, ::Type{AA},
     return LocalHaloArray(data, halo_width(halo), halo.boundary_condition)
 end
 
-Base.similar(halo::LocalHaloArray{T,N,A,Halo,BCondition}, ::Type{AA},
-    dims::NTuple{M,<:Integer}) where {T,N,A,Halo,BCondition,AA,M} =
-    similar(halo, AA, ntuple(d -> Int(dims[d]), Val(M)))
+# Non-Int dims are normalized to Dims by Base's generic similar fallbacks.
 
 # Base.copy, Base.zero, Base.fill!, Base.copyto!, fill_interior!,
 # fill_from_local_indices!, Base.foreach, arithmetic, norm,

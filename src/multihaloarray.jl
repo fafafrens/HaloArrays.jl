@@ -1,5 +1,5 @@
 """
-    MultiHaloArray(T, owned_dims, halo[, topology]; boundary_conditions)
+    MultiHaloArray(HaloArray, T, owned_dims, halo[, topology]; boundary_conditions)
     MultiHaloArray(named_tuple_of_fields)
 
 A collection of several **named** halo-array fields sharing the same geometry
@@ -53,53 +53,44 @@ function MultiHaloArray(arrs::NamedTuple; check=nothing)
 end
 
 
+# The MPI collection constructors are field-type-first: the first argument is
+# always the field type (HaloArray), never the element type. The element-type-
+# first forms were removed — they made the first positional argument mean two
+# different things and caused method ambiguities against the specialized
+# Local/Threaded constructors.
+
 function MultiHaloArray(::Type{<:HaloArray}, ::Type{T}, owned_dims::NTuple{N,Int},
         halo::Int, topology::CartesianTopology{N};
-        boundary_conditions::NamedTuple{names,<:Tuple}) where {T,N,names}
-    arrays = NamedTuple{names}(map(boundary_conditions) do bc
+        boundary_conditions::Union{NamedTuple,Nothing} = nothing,
+        fields::Union{NTuple{<:Any,Symbol},Nothing} = nothing,
+        boundary_condition = :repeating) where {T,N}
+    bcs = _resolve_bcs(fields, boundary_condition, boundary_conditions)
+    arrays = NamedTuple{keys(bcs)}(map(bcs) do bc
         HaloArray(T, owned_dims, halo, topology; boundary_condition=bc)
     end)
     return MultiHaloArray(arrays)
 end
 
 function MultiHaloArray(::Type{<:HaloArray}, ::Type{T}, owned_dims::NTuple{N,Int},
-        halo::Int; boundary_conditions::NamedTuple{names,<:Tuple}) where {T,N,names}
-    arrays = NamedTuple{names}(map(boundary_conditions) do bc
+        halo::Int;
+        boundary_conditions::Union{NamedTuple,Nothing} = nothing,
+        fields::Union{NTuple{<:Any,Symbol},Nothing} = nothing,
+        boundary_condition = :repeating) where {T,N}
+    bcs = _resolve_bcs(fields, boundary_condition, boundary_conditions)
+    arrays = NamedTuple{keys(bcs)}(map(bcs) do bc
         HaloArray(T, owned_dims, halo; boundary_condition=bc)
     end)
     return MultiHaloArray(arrays)
 end
 
-function MultiHaloArray(::Type{<:HaloArray}, owned_dims::NTuple{N,Int},
-        halo::Int; boundary_conditions::NamedTuple{names,<:Tuple}) where {N,names}
-    return MultiHaloArray(HaloArray, Float64, owned_dims, halo;
-        boundary_conditions=boundary_conditions)
-end
+# Float64 defaults
+MultiHaloArray(::Type{<:HaloArray}, owned_dims::NTuple{N,Int}, halo::Int,
+        topology::CartesianTopology{N}; kwargs...) where {N} =
+    MultiHaloArray(HaloArray, Float64, owned_dims, halo, topology; kwargs...)
 
-function MultiHaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int,
-        topology::CartesianTopology{N};
-        boundary_conditions::Union{NamedTuple,Nothing} = nothing,
-        fields::Union{NTuple{<:Any,Symbol},Nothing} = nothing,
-        boundary_condition = :repeating) where {T,N}
-    bcs = _resolve_bcs(fields, boundary_condition, boundary_conditions)
-    return MultiHaloArray(HaloArray, T, owned_dims, halo, topology;
-        boundary_conditions = bcs)
-end
-
-function MultiHaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int;
-        boundary_conditions::Union{NamedTuple,Nothing} = nothing,
-        fields::Union{NTuple{<:Any,Symbol},Nothing} = nothing,
-        boundary_condition = :repeating) where {T,N}
-    bcs = _resolve_bcs(fields, boundary_condition, boundary_conditions)
-    return MultiHaloArray(HaloArray, T, owned_dims, halo;
-        boundary_conditions = bcs)
-end
-
-function MultiHaloArray(owned_dims::NTuple{N,Int}, halo::Int,
-        boundary_conditions::NamedTuple{names,<:Tuple}) where {N,names}
-    return MultiHaloArray(Float64, owned_dims, halo;
-        boundary_conditions=boundary_conditions)
-end
+MultiHaloArray(::Type{<:HaloArray}, owned_dims::NTuple{N,Int}, halo::Int;
+        kwargs...) where {N} =
+    MultiHaloArray(HaloArray, Float64, owned_dims, halo; kwargs...)
 
 function MultiHaloArray(::Type{<:LocalHaloArray}, ::Type{T}, owned_dims::NTuple{N,Int},
         halo::Int; boundary_conditions::NamedTuple{names,<:Tuple}) where {T,N,names}
@@ -170,7 +161,7 @@ n_field(halos::MultiHaloArray{T,N,A,D}) where {T,N,A,D} = length(halos.arrays)
 @inline Base.axes(x::MultiHaloArray) = (Base.OneTo(n_field(x)), _spatial_axes(first(values(x.arrays)))...)
 @inline Base.axes(x::MultiHaloArray,i) = axes(x)[i]
 @inline owned_axes(x::MultiHaloArray) = (Base.OneTo(n_field(x)), _spatial_owned_axes(first(values(x.arrays)))...)
-@inline owned_axes(x::MultiHaloArray,i) = owned_axes(x)[i]
+@inline owned_axes(x::MultiHaloArray, i::Int) = owned_axes(x)[i]
 @inline tile_parent(halos::MultiHaloArray, tile_id::Integer) =
     NamedTuple{keys(halos.arrays)}(map(a -> tile_parent(a, tile_id), values(halos.arrays)))
 # halo_backend, halo_width, tile_size, tile_count, tile_coordinates, neighbor_tile_id
@@ -204,9 +195,7 @@ function Base.similar(mha::MultiHaloArray{AA,N,A,D}, ::Type{T}, dims::Dims{M}) w
     return MultiHaloArray(nt)
 end
 
-Base.similar(mha::MultiHaloArray{AA,N,A,D}, ::Type{T},
-    dims::NTuple{M,<:Integer}) where {AA,N,A,D,T,M} =
-    similar(mha, T, ntuple(d -> Int(dims[d]), Val(M)))
+# Non-Int dims are normalized to Dims by Base's generic similar fallbacks.
 
 Base.similar(mha::MultiHaloArray, dims::Dims{M}) where {M} =
     similar(mha, eltype(mha), dims)
@@ -403,14 +392,3 @@ function _resolve_bcs(
         "provide either `fields` (with `boundary_condition`) or `boundary_conditions`"))
 end
 
-# ---- Float64 shorthand for MPI MultiHaloArray with topology ---------------
-# (T-explicit version is merged into the constructor above; this adds the
-#  no-T shorthand. No conflict: topology in positional args disambiguates.)
-
-function MultiHaloArray(owned_dims::NTuple{N,Int}, halo::Int,
-        topology::CartesianTopology{N};
-        fields::NTuple{<:Any,Symbol},
-        boundary_condition = :repeating) where {N}
-    return MultiHaloArray(Float64, owned_dims, halo, topology;
-        fields = fields, boundary_condition = boundary_condition)
-end

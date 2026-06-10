@@ -10,7 +10,7 @@ function mpi_ideal_hydro_state(nx, ny; halo=1, boundary_condition=:periodic)
         throw(ArgumentError("ny=$ny must be divisible by topology.dims[2]=$(topology.dims[2])"))
 
     owned_cells = (nx ÷ topology.dims[1], ny ÷ topology.dims[2])
-    return MultiHaloArray(Float64, owned_cells, halo, topology;
+    return MultiHaloArray(HaloArray, Float64, owned_cells, halo, topology;
         boundary_conditions=ideal_hydro_boundary_conditions(boundary_condition))
 end
 

@@ -64,7 +64,7 @@ end
     @test fill!(zero_fields, 7) === zero_fields
     @test all(==(7), zero_fields)
 
-    from_bcs = MultiHaloArray(Float64, (3, 2), 1, topology;
+    from_bcs = MultiHaloArray(HaloArray, Float64, (3, 2), 1, topology;
         boundary_conditions=(; rho=:repeating, mom=:repeating))
     @test from_bcs isa MultiHaloArray
     @test from_bcs[:rho] isa HaloArray
@@ -221,14 +221,14 @@ end
     @test interior_view(fields.arrays.u)[1, 1] != interior_view(copied.arrays.u)[1, 1]
 
     # fields + boundary_condition shorthand
-    from_fields = MultiHaloArray(Float64, (3, 2), 1, topology;
+    from_fields = MultiHaloArray(HaloArray, Float64, (3, 2), 1, topology;
         fields=(:a, :b, :c), boundary_condition=:repeating)
     @test from_fields isa MultiHaloArray
     @test keys(from_fields.arrays) == (:a, :b, :c)
     @test all(f -> f isa HaloArray, values(from_fields.arrays))
     @test size(from_fields) == (3, 3, 2)
 
-    from_fields_default_type = MultiHaloArray((3, 2), 1, topology;
+    from_fields_default_type = MultiHaloArray(HaloArray, (3, 2), 1, topology;
         fields=(:x, :y), boundary_condition=:repeating)
     @test eltype(from_fields_default_type) === Float64
 
