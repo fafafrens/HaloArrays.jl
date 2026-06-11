@@ -2,16 +2,15 @@
     return ntuple(d -> d == dim ? range : ranges[d], Val(N))
 end
 
+# Spatial dimensionality / interior range for loop helpers. Collections carry
+# their spatial dimension in the type (AbstractHaloCollection{T,N,S}) and expose
+# a reference field via _first_field, so no per-concrete-type methods are needed.
 @inline _loop_ndims(halo::AbstractSingleHaloArray) = ndims(halo)
-@inline _loop_ndims(::MultiHaloArray{T,N}) where {T,N} = N
-@inline _loop_ndims(::ArrayOfHaloArray{T,N}) where {T,N} = N
+@inline _loop_ndims(::AbstractHaloCollection{T,N,S}) where {T,N,S} = S
 @inline _loop_ndims(arr::AbstractArray{<:AbstractSingleHaloArray}) = ndims(first(arr))
 
 @inline _loop_interior_range(halo::AbstractSingleHaloArray) = interior_range(halo)
-@inline _loop_interior_range(halo::MultiHaloArray) =
-    interior_range(first(values(halo.arrays)))
-@inline _loop_interior_range(halo::ArrayOfHaloArray) =
-    interior_range(first(parent(halo)))
+@inline _loop_interior_range(c::AbstractHaloCollection) = interior_range(_first_field(c))
 @inline _loop_interior_range(arr::AbstractArray{<:AbstractSingleHaloArray}) =
     interior_range(first(arr))
 

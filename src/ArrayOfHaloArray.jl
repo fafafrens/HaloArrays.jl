@@ -39,13 +39,15 @@ const HaloArrayField = AbstractSingleHaloArray
 @inline _spatial_axes(x) = axes(x)
 @inline _spatial_owned_axes(x) = owned_axes(x)
 
-@inline _spatial_ndims(::ArrayOfHaloArray{T,N}) where {T,N} = N
-@inline _spatial_owned_size(x::ArrayOfHaloArray) = owned_size(first(parent(x)))
-@inline _spatial_interior_size(x::ArrayOfHaloArray) = interior_size(first(parent(x)))
-@inline _spatial_global_size(x::ArrayOfHaloArray) = global_size(first(parent(x)))
-@inline _spatial_storage_size(x::ArrayOfHaloArray) = storage_size(first(parent(x)))
-@inline _spatial_axes(x::ArrayOfHaloArray) = axes(first(parent(x)))
-@inline _spatial_owned_axes(x::ArrayOfHaloArray) = owned_axes(first(parent(x)))
+# Collections carry the spatial dimension in the type and expose a reference
+# field via _first_field — one method covers MultiHaloArray and ArrayOfHaloArray.
+@inline _spatial_ndims(::AbstractHaloCollection{T,N,S}) where {T,N,S} = S
+@inline _spatial_owned_size(x::AbstractHaloCollection) = owned_size(_first_field(x))
+@inline _spatial_interior_size(x::AbstractHaloCollection) = interior_size(_first_field(x))
+@inline _spatial_global_size(x::AbstractHaloCollection) = global_size(_first_field(x))
+@inline _spatial_storage_size(x::AbstractHaloCollection) = storage_size(_first_field(x))
+@inline _spatial_axes(x::AbstractHaloCollection) = axes(_first_field(x))
+@inline _spatial_owned_axes(x::AbstractHaloCollection) = owned_axes(_first_field(x))
 
 function _check_array_fields(arrays::AbstractArray)
     isempty(arrays) && throw(ArgumentError("ArrayOfHaloArray requires at least one field"))
