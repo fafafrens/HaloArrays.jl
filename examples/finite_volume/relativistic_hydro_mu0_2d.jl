@@ -217,4 +217,11 @@ function run_mu0_blast_2d(; a=1.0, n=160, cfl=0.3, t_end=0.20,
     return u
 end
 
-run_mu0_blast_2d()
+#u=run_mu0_blast_2d()
+
+
+#using Plots
+#Mx,My,E=interior_view.(eachfield(u))
+
+#heatmap(E)
+#surface(E)

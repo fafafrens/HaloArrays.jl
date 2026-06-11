@@ -224,4 +224,13 @@ function run_Tmu_blast_3d(; A=1.0, n=32, cfl=0.3, t_end=0.14,
     return u
 end
 
-run_Tmu_blast_3d()
+#u=run_Tmu_blast_3d(n=64)
+
+#N, Mx,My, Mz,E = interior_view.(eachfield(u))
+
+#heatmap(N[16,:,:])
+#surface(N[16,:,:])
+#heatmap(E[16,:,:])
+#surface(E[16,:,:])
+#heatmap(Mx[16,:,:])
+#surface(Mx[16,:,:])
