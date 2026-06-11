@@ -139,29 +139,18 @@ Base.eltype(::Type{<:MultiHaloArray{T,N,A,D}}) where {T,N,A,D} = T
 Base.ndims(mha::MultiHaloArray{T,N,A,D}) where {T,N,A,D} = D
 Base.ndims(::Type{<:MultiHaloArray{T,N,A,D}}) where {T,N,A,D} = D
 
-@inline Base.size(mha::MultiHaloArray) = global_size(mha)
-
-@inline Base.size(mha::MultiHaloArray, i::Int) = size(mha)[i]
-@inline Base.length(mha::MultiHaloArray) = prod(size(mha))
-@inline Base.eachindex(mha::MultiHaloArray) = CartesianIndices(axes(mha))
-
-n_field(halos::MultiHaloArray{T,N,A,D}) where {T,N,A,D} = length(halos.arrays)
-
-@inline interior_size(halos::MultiHaloArray) = (n_field(halos), _spatial_interior_size(first(values(halos.arrays)))...)
-@inline owned_size(halos::MultiHaloArray) = (n_field(halos), _spatial_owned_size(first(values(halos.arrays)))...)
-@inline global_size(halos::MultiHaloArray) = (n_field(halos), _spatial_global_size(first(values(halos.arrays)))...)
-@inline storage_size(halos::MultiHaloArray) = (n_field(halos), _spatial_storage_size(first(values(halos.arrays)))...)
-@inline storage_size(halos::MultiHaloArray,i) = storage_size(halos)[i]
-@inline halo_width(halo::MultiHaloArray, i) = map(halo_width, halo.arrays)
+# size/axes/eachindex/length, n_field, interior/owned/global/storage size, and
+# owned_axes come from AbstractHaloCollection (field_shape prefix + _spatial_*).
+@inline field_shape(mha::MultiHaloArray) = (length(mha.arrays),)
 @inline Base.parent(halo::MultiHaloArray)  = map(parent, halo.arrays)
 
 # AbstractHaloCollection helpers (concrete methods; stubs in abstract_haloarray.jl)
 @inline _first_field(mha::MultiHaloArray) = first(values(mha.arrays))
 @inline _fields(mha::MultiHaloArray)      = values(mha.arrays)
-@inline Base.axes(x::MultiHaloArray) = (Base.OneTo(n_field(x)), _spatial_axes(first(values(x.arrays)))...)
-@inline Base.axes(x::MultiHaloArray,i) = axes(x)[i]
-@inline owned_axes(x::MultiHaloArray) = (Base.OneTo(n_field(x)), _spatial_owned_axes(first(values(x.arrays)))...)
-@inline owned_axes(x::MultiHaloArray, i::Int) = owned_axes(x)[i]
+@inline _map_fields(g, mha::MultiHaloArray) = MultiHaloArray(map(g, mha.arrays))
+@inline _check_same_fields(dest::MultiHaloArray, src::MultiHaloArray) =
+    keys(dest.arrays) == keys(src.arrays) ||
+        throw(DimensionMismatch("MultiHaloArray copyto! requires matching field names"))
 @inline tile_parent(halos::MultiHaloArray, tile_id::Integer) =
     NamedTuple{keys(halos.arrays)}(map(a -> tile_parent(a, tile_id), values(halos.arrays)))
 # halo_backend, halo_width, tile_size, tile_count, tile_coordinates, neighbor_tile_id
@@ -202,47 +191,8 @@ Base.similar(mha::MultiHaloArray, dims::Dims{M}) where {M} =
 Base.similar(mha::MultiHaloArray, dims::NTuple{M,<:Integer}) where {M} =
     similar(mha, eltype(mha), dims)
 
-function Base.similar(mha::MultiHaloArray{AA,N,A,D}, ::Type{T}) where {AA,N,A,D,T}
-    arrs = map(a -> similar(a, T), values(mha.arrays))
-    names = keys(mha.arrays)
-    nt = NamedTuple{names}(arrs)
-    return MultiHaloArray(nt)
-end
-
-
-function Base.similar(mha::MultiHaloArray{AA,N,A,D}) where {AA,N,A,D}
-    arrs = map(a -> similar(a), values(mha.arrays))
-    names = keys(mha.arrays)
-    nt = NamedTuple{names}(arrs)
-    return MultiHaloArray(nt)
-end
-
-
-function Base.copy(mha::MultiHaloArray)
-    newfields = map(x -> copy(x), values(mha.arrays))
-    new_ntuple = NamedTuple{keys(mha.arrays)}(newfields)
-    return MultiHaloArray(new_ntuple)
-end
-
-function Base.copyto!(dest::MultiHaloArray, src::MultiHaloArray)
-    keys(dest.arrays) == keys(src.arrays) ||
-        throw(DimensionMismatch("MultiHaloArray copyto! requires matching field names"))
-    for name in keys(dest.arrays)
-        copyto!(dest.arrays[name], src.arrays[name])
-    end
-    return dest
-end
-
-function Base.fill!(mha::MultiHaloArray, value)
-    foreach(field -> fill!(field, value), values(mha.arrays))
-    return mha
-end
-
-function Base.zero(mha::MultiHaloArray)
-    z = similar(mha)
-    fill!(z, zero(eltype(mha)))
-    return z
-end
+# similar(mha[, T]) / copy / copyto! / fill! / zero come from
+# AbstractHaloCollection via _map_fields / _fields / _check_same_fields.
 
 function Base.map(f, mha::MultiHaloArray)
     newfields = map(x -> map(f, x), values(mha.arrays))

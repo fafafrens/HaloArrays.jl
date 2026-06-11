@@ -193,43 +193,21 @@ Base.eltype(::Type{<:ArrayOfHaloArray{T}}) where {T} = T
 Base.ndims(::ArrayOfHaloArray{T,N,Shape,A,D}) where {T,N,Shape,A,D} = D
 Base.ndims(::Type{<:ArrayOfHaloArray{T,N,Shape,A,D}}) where {T,N,Shape,A,D} = D
 @inline field_shape(::ArrayOfHaloArray{T,N,Shape}) where {T,N,Shape} = Shape
-@inline n_field(mha::ArrayOfHaloArray) = length(mha.arrays)
 @inline Base.parent(mha::ArrayOfHaloArray) = mha.arrays
 
 # AbstractHaloCollection helpers (concrete methods; stubs in abstract_haloarray.jl)
 @inline _first_field(mha::ArrayOfHaloArray) = first(parent(mha))
 @inline _fields(mha::ArrayOfHaloArray)      = parent(mha)
+@inline _map_fields(g, mha::ArrayOfHaloArray) = ArrayOfHaloArray(map(g, mha.arrays))
+@inline _check_same_fields(dest::ArrayOfHaloArray, src::ArrayOfHaloArray) =
+    field_shape(dest) == field_shape(src) ||
+        throw(DimensionMismatch("ArrayOfHaloArray field shapes must match"))
 
 # halo_backend, halo_width, tile_count, tile_size, tile_coordinates, neighbor_tile_id,
 # is_root, isactive inherited from AbstractHaloCollection (abstract_haloarray.jl)
 
-@inline function Base.size(mha::ArrayOfHaloArray)
-    return global_size(mha)
-end
-
-@inline Base.size(mha::ArrayOfHaloArray, i::Int) = size(mha)[i]
-@inline Base.length(mha::ArrayOfHaloArray) = prod(size(mha))
-@inline Base.axes(mha::ArrayOfHaloArray) = (map(Base.OneTo, field_shape(mha))..., axes(first(mha.arrays))...)
-@inline Base.axes(mha::ArrayOfHaloArray, i::Int) = axes(mha)[i]
-@inline Base.eachindex(mha::ArrayOfHaloArray) = CartesianIndices(axes(mha))
-@inline owned_axes(mha::ArrayOfHaloArray) = (map(Base.OneTo, field_shape(mha))..., owned_axes(first(mha.arrays))...)
-@inline owned_axes(mha::ArrayOfHaloArray, i::Int) = owned_axes(mha)[i]
-
-@inline function interior_size(mha::ArrayOfHaloArray)
-    return (field_shape(mha)..., interior_size(first(mha.arrays))...)
-end
-
-@inline function owned_size(mha::ArrayOfHaloArray)
-    return (field_shape(mha)..., owned_size(first(mha.arrays))...)
-end
-
-@inline function storage_size(mha::ArrayOfHaloArray)
-    return (field_shape(mha)..., storage_size(first(mha.arrays))...)
-end
-
-@inline storage_size(mha::ArrayOfHaloArray, i::Int) = storage_size(mha)[i]
-@inline halo_width(mha::ArrayOfHaloArray, i) = map(halo_width, mha.arrays)
-@inline global_size(mha::ArrayOfHaloArray) = (field_shape(mha)..., global_size(first(mha.arrays))...)
+# size/axes/eachindex/length, n_field, interior/owned/global/storage size, and
+# owned_axes come from AbstractHaloCollection (field_shape prefix + _spatial_*).
 
 function Base.getindex(mha::ArrayOfHaloArray{T,N,Shape}, I...) where {T,N,Shape}
     field_ndims = length(Shape)
@@ -293,40 +271,8 @@ Base.similar(mha::ArrayOfHaloArray, dims::Dims{M}) where {M} =
 Base.similar(mha::ArrayOfHaloArray, dims::NTuple{M,<:Integer}) where {M} =
     similar(mha, eltype(mha), dims)
 
-function Base.similar(mha::ArrayOfHaloArray{AA,N,Shape,A,D}, ::Type{T}) where {AA,N,Shape,A,D,T}
-    arrs = map(a -> similar(a, T), mha.arrays)
-    return ArrayOfHaloArray{T,N,Shape,typeof(arrs),D}(arrs)
-end
-
-function Base.similar(mha::ArrayOfHaloArray{AA,N,Shape,A,D}) where {AA,N,Shape,A,D}
-    arrs = map(similar, mha.arrays)
-    return ArrayOfHaloArray{AA,N,Shape,typeof(arrs),D}(arrs)
-end
-
-function Base.copyto!(dest::ArrayOfHaloArray, src::ArrayOfHaloArray)
-    field_shape(dest) == field_shape(src) ||
-        throw(DimensionMismatch("ArrayOfHaloArray field shapes must match"))
-    for I in eachindex(dest.arrays)
-        copyto!(dest.arrays[I], src.arrays[I])
-    end
-    return dest
-end
-
-function Base.copy(mha::ArrayOfHaloArray)
-    arrs = map(copy, mha.arrays)
-    return ArrayOfHaloArray(arrs)
-end
-
-function Base.zero(mha::ArrayOfHaloArray)
-    z = similar(mha)
-    fill!(z, zero(eltype(mha)))
-    return z
-end
-
-function Base.fill!(mha::ArrayOfHaloArray, value)
-    foreach(a -> fill!(a, value), mha.arrays)
-    return mha
-end
+# similar(mha[, T]) / copy / copyto! / fill! / zero come from
+# AbstractHaloCollection via _map_fields / _fields / _check_same_fields.
 
 function Base.map(f, mha::ArrayOfHaloArray)
     arrs = map(a -> map(f, a), mha.arrays)

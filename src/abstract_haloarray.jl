@@ -270,6 +270,55 @@ function _fields end
 @inline _spatial_axes(x)           = axes(_geometry_field(x))
 @inline _spatial_owned_axes(x)     = owned_axes(_geometry_field(x))
 
+# ---- collection shape / axes -------------------------------------------
+# Every size/axes query on a collection is the field-axes prefix (field_shape:
+# (n_field,) for named collections, the container Shape for indexed ones)
+# followed by the shared spatial geometry of the fields. owned_size falls back
+# to the generic owned_size = interior_size alias above.
+@inline n_field(c::AbstractHaloCollection) = length(_fields(c))
+@inline interior_size(c::AbstractHaloCollection) = (field_shape(c)..., _spatial_interior_size(c)...)
+@inline global_size(c::AbstractHaloCollection)   = (field_shape(c)..., _spatial_global_size(c)...)
+@inline storage_size(c::AbstractHaloCollection)  = (field_shape(c)..., _spatial_storage_size(c)...)
+@inline storage_size(c::AbstractHaloCollection, i::Int) = storage_size(c)[i]
+@inline Base.size(c::AbstractHaloCollection)         = global_size(c)
+@inline Base.size(c::AbstractHaloCollection, i::Int) = size(c)[i]
+@inline Base.length(c::AbstractHaloCollection)       = prod(size(c))
+@inline Base.axes(c::AbstractHaloCollection) = (map(Base.OneTo, field_shape(c))..., _spatial_axes(c)...)
+@inline Base.axes(c::AbstractHaloCollection, i::Int) = axes(c)[i]
+@inline Base.eachindex(c::AbstractHaloCollection) = CartesianIndices(axes(c))
+@inline owned_axes(c::AbstractHaloCollection) = (map(Base.OneTo, field_shape(c))..., _spatial_owned_axes(c)...)
+@inline owned_axes(c::AbstractHaloCollection, i::Int) = owned_axes(c)[i]
+
+# ---- whole-collection data ops via the field container -------------------
+# _map_fields(g, c): apply g to every field and rebuild the same kind of
+# collection (concrete hooks live next to each type's constructor).
+# _check_same_fields(dest, src): layout compatibility for copyto!.
+function _map_fields end
+function _check_same_fields end
+
+Base.copy(c::AbstractHaloCollection)    = _map_fields(copy, c)
+Base.similar(c::AbstractHaloCollection) = _map_fields(similar, c)
+Base.similar(c::AbstractHaloCollection, ::Type{T}) where {T} = _map_fields(a -> similar(a, T), c)
+
+function Base.zero(c::AbstractHaloCollection)
+    z = similar(c)
+    fill!(z, zero(eltype(c)))
+    return z
+end
+
+function Base.fill!(c::AbstractHaloCollection, value)
+    foreach(f -> fill!(f, value), _fields(c))
+    return c
+end
+
+function Base.copyto!(dest::C, src::C) where {C<:AbstractHaloCollection}
+    _check_same_fields(dest, src)
+    for (d, s) in zip(_fields(dest), _fields(src))
+        copyto!(d, s)
+    end
+    return dest
+end
+
 @inline halo_backend(mha::AbstractHaloCollection) = halo_backend(_first_field(mha))
 @inline halo_width(mha::AbstractHaloCollection)   = halo_width(_first_field(mha))
 @inline tile_count(mha::AbstractHaloCollection)   = tile_count(_first_field(mha))

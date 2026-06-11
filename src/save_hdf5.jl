@@ -11,8 +11,7 @@
 
 @inline _hdf5_comm(halo::HaloArray) = get_comm(halo)
 @inline _hdf5_comm(::AbstractSerialHaloArray) = nothing
-@inline _hdf5_comm(halo::ArrayOfHaloArray) = _hdf5_comm(first(parent(halo)))
-@inline _hdf5_comm(halo::MultiHaloArray) = _hdf5_comm(first(values(halo.arrays)))
+@inline _hdf5_comm(halo::AbstractHaloCollection) = _hdf5_comm(_first_field(halo))
 
 @inline _hdf5_field_name(name::Symbol) = String(name)
 @inline _hdf5_field_name(name) = string(name)
