@@ -73,15 +73,16 @@ end
 @inline function cell_index(region::ColoredCellKernelRegion{N,C},
                             J::NTuple{N,<:Integer}) where {N,C}
     first_tuple = Tuple(region.first)
-    base_tuple = ntuple(Val(N)) do d
-        d == C ? first_tuple[d] + 2 * (Int(J[d]) - 1) :
-                 first_tuple[d] + Int(J[d]) - 1
-    end
-    transverse_parity = sum(ntuple(d -> d == C ? 0 : mod(base_tuple[d], 2), Val(N)))
-    wanted_compressed_parity = mod(region.color - transverse_parity, 2)
-    delta = mod(wanted_compressed_parity - mod(base_tuple[C], 2), 2)
 
-    return ntuple(d -> d == C ? base_tuple[d] + delta : base_tuple[d], Val(N))
+    base_tuple = ntuple(d ->
+        first_tuple[d] + (d == C ? 2 * (Int(J[d]) - 1) : Int(J[d]) - 1),
+        Val(N)
+    )
+
+    # shift the compressed coordinate so mod(sum(I), 2) == region.color
+    delta = mod(region.color - sum(base_tuple), 2)
+
+    return ntuple(d -> base_tuple[d] + (d == C ? delta : 0), Val(N))
 end
 
 @inline cell_index(region::ColoredCellKernelRegion{N},

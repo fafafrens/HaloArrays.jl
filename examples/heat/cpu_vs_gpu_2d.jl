@@ -96,14 +96,8 @@ end
 
 @kernel function heat_flux_gpu_kernel!(du, data, region::ColoredFaceKernelRegion{2}, scale)
     J = @index(Global, NTuple)
-    first = Tuple(region.first)
-    stride = Tuple(region.stride)
+    IL = cell_index(region, J)          # lower cell of this face
     offset = Tuple(region.offset)
-
-    IL = (
-        first[1] + (J[1] - 1) * stride[1],
-        first[2] + (J[2] - 1) * stride[2],
-    )
     IR = (IL[1] + offset[1], IL[2] + offset[2])
 
     @inbounds begin

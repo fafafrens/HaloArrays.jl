@@ -8,10 +8,9 @@ end
 
 struct CustomBoundaryForTest <: HaloArrays.AbstractBoundaryCondition end
 
-function _colored_region_index(region::ColoredFaceKernelRegion{N}, J::CartesianIndex{N}) where {N}
-    stride = Tuple(region.stride)
-    return region.first + CartesianIndex(ntuple(d -> (Tuple(J)[d] - 1) * stride[d], Val(N)))
-end
+# exercises the public launch-index mapping for colored face regions
+_colored_region_index(region::ColoredFaceKernelRegion{N}, J::CartesianIndex{N}) where {N} =
+    cell_index(region, J)
 
 function _colored_region_indices(region::ColoredFaceKernelRegion)
     return vec([_colored_region_index(region, J) for J in CartesianIndices(region.size)])

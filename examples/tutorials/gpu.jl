@@ -213,7 +213,7 @@ end
 #   get_right_face_region(fr, dim)    — owned | ghost boundary faces
 #
 # Inside the kernel use cell_index(region, J) to get IL (lower cell).
-# The upper cell is IL + region.offset_to_right.
+# The upper cell is IL + region.offset.
 
 println()
 println("=" ^ 60)
@@ -224,7 +224,7 @@ println("=" ^ 60)
     J  = @index(Global, NTuple)
     IL = cell_index(region, J)
     if is_cell_index_inbounds(region, IL)
-        IR = IL + region.offset_to_right
+        IR = IL + region.offset
         @inbounds begin
             ul = u[IL[1], IL[2]]
             ur = u[IR[1], IR[2]]
