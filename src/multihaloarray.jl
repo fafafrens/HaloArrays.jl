@@ -1,56 +1,5 @@
-"""
-    MultiHaloArray(HaloArray, T, owned_dims, halo[, topology]; boundary_conditions)
-    MultiHaloArray(named_tuple_of_fields)
-
-A collection of several **named** halo-array fields sharing the same geometry
-(dimensionality, interior size, halo width, and backend). Access a field by
-name (`state.rho`), refresh them all with one [`synchronize_halo!`](@ref)`(state)`,
-and broadcast/reduce over all fields at once (`state .*= 2`).
-
-`boundary_conditions` is a `NamedTuple` mapping each field name to its boundary
-condition; the field names are taken from its keys. The backing fields are
-[`HaloArray`](@ref)s (MPI) here; use [`LocalMultiHaloArray`](@ref) or
-[`ThreadedMultiHaloArray`](@ref) for local/threaded fields, or pass a
-`NamedTuple` of pre-built arrays.
-
-Use this when a solver evolves several fields on one grid (e.g. `rho`, `u`, `v`,
-`p`). For an integer/matrix-indexed collection instead of names, see
-[`ArrayOfHaloArray`](@ref).
-
-# Examples
-```julia
-state = LocalMultiHaloArray(Float64, (64, 64), 1; boundary_conditions=(
-    rho = ((Periodic(), Periodic()), (Periodic(), Periodic())),
-    p   = ((Reflecting(), Reflecting()), (Periodic(), Periodic())),
-))
-state.rho .= 1.0
-synchronize_halo!(state)   # refreshes every field
-```
-"""
-mutable struct MultiHaloArray{T,N,A,D} <: AbstractHaloCollection{T,D,N}
-    arrays::A
-end
-
-function _check_multihaloarray_compatible(field_names, field_values)
-    isempty(field_values) && throw(ArgumentError("MultiHaloArray requires at least one field"))
-    _check_fields_compatible("MultiHaloArray", first(field_values),
-        zip(field_names, field_values))
-    return nothing
-end
-
-function MultiHaloArray(arrs::NamedTuple; check=nothing)
-    field_names = keys(arrs)
-    field_values = values(arrs)
-    _check_multihaloarray_compatible(field_names, field_values)
-
-    field_eltypes = map(eltype, field_values)
-   
-    TTypes = promote_type(field_eltypes...)
-    N_ref = _spatial_ndims(first(field_values))
-
-    D = N_ref + 1
-    return MultiHaloArray{TTypes,N_ref,typeof(arrs),D}(arrs)
-end
+# The MultiHaloArray alias, its docstring, and the ground-truth
+# MultiHaloArray(::NamedTuple) constructor live in field_collection.jl.
 
 
 # The MPI collection constructors are field-type-first: the first argument is
@@ -134,10 +83,7 @@ Base.getindex(mha::MultiHaloArray, name::Symbol) = mha.arrays[name]
     name === :arrays ? getfield(mha, :arrays) : getfield(mha, :arrays)[name]
 Base.propertynames(mha::MultiHaloArray) = keys(getfield(mha, :arrays))
 
-Base.eltype(mha::MultiHaloArray{T,N,A,D}) where {T,N,A,D} = T
-Base.eltype(::Type{<:MultiHaloArray{T,N,A,D}}) where {T,N,A,D} = T
-Base.ndims(mha::MultiHaloArray{T,N,A,D}) where {T,N,A,D} = D
-Base.ndims(::Type{<:MultiHaloArray{T,N,A,D}}) where {T,N,A,D} = D
+# eltype/ndims come from AbstractArray{T,D} via FieldCollection{T,D,S,C}.
 
 # size/axes/eachindex/length, n_field, interior/owned/global/storage size, and
 # owned_axes come from AbstractHaloCollection (field_shape prefix + _spatial_*).
@@ -172,11 +118,11 @@ function Base.setindex!(mha::MultiHaloArray, value, field_index::Integer, I::Var
     return mha
 end
 
-function Base.similar(mha::MultiHaloArray{AA,N,A,D}, ::Type{T}, dims::Dims{M}) where {AA,N,A,D,T,M}
-    M == N + 1 || throw(DimensionMismatch("MultiHaloArray similar dims must have $(N + 1) dimensions"))
+function Base.similar(mha::MultiHaloArray{AA,D,S}, ::Type{T}, dims::Dims{M}) where {AA,D,S,T,M}
+    M == S + 1 || throw(DimensionMismatch("MultiHaloArray similar dims must have $(S + 1) dimensions"))
     Int(dims[1]) == n_field(mha) ||
         throw(DimensionMismatch("MultiHaloArray similar cannot change the named field count from $(n_field(mha)) to $(dims[1])"))
-    spatial_dims = ntuple(d -> Int(dims[d + 1]), Val(N))
+    spatial_dims = ntuple(d -> Int(dims[d + 1]), Val(S))
 
     arrs = map(a -> similar(a, T, spatial_dims), values(mha.arrays))
     names = keys(mha.arrays)

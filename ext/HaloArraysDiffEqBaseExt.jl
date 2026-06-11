@@ -7,12 +7,10 @@ function DiffEqBase.recursive_length(halo::AbstractSingleHaloArray)
     return prod(global_size(halo))
 end
 
-function DiffEqBase.recursive_length(halo::ArrayOfHaloArray)
+# One method covers both collection flavors (the per-field sum used previously
+# for MultiHaloArray equals prod(global_size) since all fields share one geometry).
+function DiffEqBase.recursive_length(halo::HaloArrays.FieldCollection)
     return prod(global_size(halo))
-end
-
-function DiffEqBase.recursive_length(halo::MultiHaloArray)
-    return sum(DiffEqBase.recursive_length, values(halo.arrays))
 end
 
 function DiffEqBase.recursive_length(halo::MaybeHaloArray)
@@ -23,11 +21,7 @@ function DiffEqBase.NAN_CHECK(halo::AbstractSingleHaloArray)
     return any(DiffEqBase.NAN_CHECK, halo)
 end
 
-function DiffEqBase.NAN_CHECK(halo::ArrayOfHaloArray)
-    return any(DiffEqBase.NAN_CHECK, halo)
-end
-
-function DiffEqBase.NAN_CHECK(halo::MultiHaloArray)
+function DiffEqBase.NAN_CHECK(halo::HaloArrays.FieldCollection)
     return any(DiffEqBase.NAN_CHECK, halo)
 end
 

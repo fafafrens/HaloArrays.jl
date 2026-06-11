@@ -1,83 +1,6 @@
-"""
-    ArrayOfHaloArray(FieldType, T, field_shape, owned_dims, halo; boundary_condition, …)
-    ArrayOfHaloArray(array_of_fields)
-
-A collection of halo-array fields stored in an `AbstractArray` and addressed by
-**integer / Cartesian index** rather than by name — the counterpart to
-[`MultiHaloArray`](@ref). All fields share the same geometry and backend.
-
-Natural when the number of fields is decided at runtime, or when they form a
-grid/tensor layout: a conserved state vector `q = (ρ, ρu, E)` as a `(3,)` array,
-a velocity as `(2,)`, or a stress tensor as `(2, 2)`. `field_shape` is the shape
-of the field container; `FieldType` is [`LocalHaloArray`](@ref) or
-[`ThreadedHaloArray`](@ref) (MPI fields are built from a topology instead).
-
-Index fields with `arr[i]` / `arr[i, j]`; [`synchronize_halo!`](@ref) and
-broadcast act on every field at once.
-
-# Examples
-```julia
-vel = ArrayOfHaloArray(LocalHaloArray, Float64, (2,), (16, 16), 1;
-                       boundary_condition=:periodic)
-interior_view(vel[1]) .= 1.0
-synchronize_halo!(vel)
-```
-
-Multi-field halo container using an `AbstractArray` to store the fields.
-"""
-mutable struct ArrayOfHaloArray{T,N,Shape,A,D} <: AbstractHaloCollection{T,D,N}
-    arrays::A
-end
-
-const HaloArrayField = AbstractSingleHaloArray
-
-# _spatial_* geometry helpers live in abstract_haloarray.jl.
-
-function _check_array_fields(arrays::AbstractArray)
-    isempty(arrays) && throw(ArgumentError("ArrayOfHaloArray requires at least one field"))
-    all(a -> a isa HaloArrayField, arrays) ||
-        throw(ArgumentError("All fields must be HaloArray, LocalHaloArray, or ThreadedHaloArray"))
-    return nothing
-end
-
-# Shared by MultiHaloArray and ArrayOfHaloArray: every field must match the
-# first in spatial dimensionality, interior size, halo width, and backend.
-# `labeled_fields` is an iterable of (label, field) pairs (the label only colours
-# the error message — a field name for MultiHaloArray, an index for this one).
-function _check_fields_compatible(what::AbstractString, ref, labeled_fields)
-    ref_ndims   = _spatial_ndims(ref)
-    ref_size    = _spatial_interior_size(ref)
-    ref_halo    = halo_width(ref)
-    ref_backend = halo_backend(ref)
-    for (label, a) in labeled_fields
-        _spatial_ndims(a) == ref_ndims ||
-            throw(ArgumentError("$what field `$label` has dimensionality $(_spatial_ndims(a)) != $ref_ndims"))
-        _spatial_interior_size(a) == ref_size ||
-            throw(DimensionMismatch("$what field `$label` has interior size $(_spatial_interior_size(a)) != $ref_size"))
-        halo_width(a) == ref_halo ||
-            throw(DimensionMismatch("$what field `$label` has halo width $(halo_width(a)) != $ref_halo"))
-        halo_backend(a) isa typeof(ref_backend) ||
-            throw(ArgumentError("$what field `$label` has backend $(typeof(halo_backend(a))) != $(typeof(ref_backend))"))
-    end
-    return nothing
-end
-
-function _check_arrayofhaloarray_compatible(arrays::AbstractArray)
-    _check_array_fields(arrays)
-    _check_fields_compatible("ArrayOfHaloArray", first(arrays),
-        ((I, arrays[I]) for I in CartesianIndices(arrays)))
-    return nothing
-end
-
-function ArrayOfHaloArray(arrays::AbstractArray; check=nothing)
-    _check_arrayofhaloarray_compatible(arrays)
-
-    T = promote_type(map(eltype, arrays)...)
-    N = ndims(first(arrays))
-    Shape = size(arrays)
-    D = N + length(Shape)
-    return ArrayOfHaloArray{T,N,Shape,typeof(arrays),D}(arrays)
-end
+# The ArrayOfHaloArray alias, its docstring, the field-compatibility checks,
+# and the ground-truth ArrayOfHaloArray(::AbstractArray) constructor live in
+# field_collection.jl. _spatial_* geometry helpers live in abstract_haloarray.jl.
 
 # MPI-backed fields — field-type-first, like the LocalHaloArray/ThreadedHaloArray
 # constructors below. The shape of `boundary_conditions` fixes the field shape.
@@ -188,11 +111,8 @@ function ArrayOfHaloArray(::Type{ThreadedHaloArray},
     return ArrayOfHaloArray(ThreadedHaloArray, Float64, field_shape, tile_size, halo; kwargs...)
 end
 
-Base.eltype(::ArrayOfHaloArray{T}) where {T} = T
-Base.eltype(::Type{<:ArrayOfHaloArray{T}}) where {T} = T
-Base.ndims(::ArrayOfHaloArray{T,N,Shape,A,D}) where {T,N,Shape,A,D} = D
-Base.ndims(::Type{<:ArrayOfHaloArray{T,N,Shape,A,D}}) where {T,N,Shape,A,D} = D
-@inline field_shape(::ArrayOfHaloArray{T,N,Shape}) where {T,N,Shape} = Shape
+# eltype/ndims come from AbstractArray{T,D} via FieldCollection{T,D,S,C}.
+@inline field_shape(mha::ArrayOfHaloArray) = size(getfield(mha, :arrays))
 @inline Base.parent(mha::ArrayOfHaloArray) = mha.arrays
 
 # AbstractHaloCollection helpers (concrete methods; stubs in abstract_haloarray.jl)
@@ -209,14 +129,14 @@ Base.ndims(::Type{<:ArrayOfHaloArray{T,N,Shape,A,D}}) where {T,N,Shape,A,D} = D
 # size/axes/eachindex/length, n_field, interior/owned/global/storage size, and
 # owned_axes come from AbstractHaloCollection (field_shape prefix + _spatial_*).
 
-function Base.getindex(mha::ArrayOfHaloArray{T,N,Shape}, I...) where {T,N,Shape}
-    field_ndims = length(Shape)
+function Base.getindex(mha::ArrayOfHaloArray{T,D,S}, I...) where {T,D,S}
+    field_ndims = D - S
 
     if length(I) <= field_ndims
         return getindex(mha.arrays, I...)
     elseif length(I) == length(size(mha))
         field_idx = ntuple(d -> I[d], field_ndims)
-        spatial_idx = ntuple(d -> I[field_ndims + d], N)
+        spatial_idx = ntuple(d -> I[field_ndims + d], S)
         return getindex(mha.arrays[field_idx...], spatial_idx...)
     else
         throw(BoundsError(mha, I))
@@ -225,12 +145,12 @@ end
 
 Base.getindex(mha::ArrayOfHaloArray, I::CartesianIndex) = getindex(mha, Tuple(I)...)
 
-function Base.setindex!(mha::ArrayOfHaloArray{T,N,Shape}, value, I...) where {T,N,Shape}
-    field_ndims = length(Shape)
+function Base.setindex!(mha::ArrayOfHaloArray{T,D,S}, value, I...) where {T,D,S}
+    field_ndims = D - S
 
     if length(I) == length(size(mha))
         field_idx = ntuple(d -> I[d], field_ndims)
-        spatial_idx = ntuple(d -> I[field_ndims + d], N)
+        spatial_idx = ntuple(d -> I[field_ndims + d], S)
         setindex!(mha.arrays[field_idx...], value, spatial_idx...)
         return mha
     else
@@ -241,14 +161,14 @@ end
 Base.setindex!(mha::ArrayOfHaloArray, value, I::CartesianIndex) =
     setindex!(mha, value, Tuple(I)...)
 
-function Base.similar(mha::ArrayOfHaloArray{AA,N,Shape,A,D}, ::Type{T},
-        dims::Dims{M}) where {AA,N,Shape,A,D,T,M}
-    field_ndims = length(Shape)
-    M == field_ndims + N ||
-        throw(DimensionMismatch("ArrayOfHaloArray similar dims must have $(field_ndims + N) dimensions"))
+function Base.similar(mha::ArrayOfHaloArray{AA,D,S}, ::Type{T},
+        dims::Dims{M}) where {AA,D,S,T,M}
+    field_ndims = D - S
+    M == D ||
+        throw(DimensionMismatch("ArrayOfHaloArray similar dims must have $D dimensions"))
 
     new_field_shape = ntuple(d -> Int(dims[d]), Val(field_ndims))
-    spatial_dims = ntuple(d -> Int(dims[field_ndims + d]), Val(N))
+    spatial_dims = ntuple(d -> Int(dims[field_ndims + d]), Val(S))
 
     if new_field_shape == field_shape(mha)
         arrs = map(a -> similar(a, T, spatial_dims), mha.arrays)

@@ -153,13 +153,8 @@ boundary_condition!(::ThreadedHaloArray, ::Integer, ::Side, ::Dim, ::NoBoundaryC
 # Collection delegators
 # ============================================================
 
-function boundary_condition!(mha::MultiHaloArray{T,N,A}) where {T,N,A}
-    foreach_field!(boundary_condition!, mha)
-    return nothing
-end
-
-function boundary_condition!(mha::ArrayOfHaloArray)
-    foreach_field!(boundary_condition!, mha)
+function boundary_condition!(c::AbstractHaloCollection)
+    foreach_field!(boundary_condition!, c)
     return nothing
 end
 
