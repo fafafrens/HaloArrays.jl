@@ -1,5 +1,6 @@
-# _loop_interior_range / _loop_strided_range / _check_loop_color are shared with
-# face_ranges.jl (defined there, included first).
+# _spatial_* geometry helpers live in abstract_haloarray.jl;
+# _loop_strided_range / _check_loop_color are shared with face_ranges.jl
+# (defined there, included first).
 
 """
     CellRanges(halo)
@@ -20,7 +21,7 @@ end
 
 function CellRanges(halo)
     return CellRanges(
-        CartesianIndices(_loop_interior_range(halo)),
+        CartesianIndices(_spatial_interior_range(halo)),
         halo_width(halo),
     )
 end

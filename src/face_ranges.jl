@@ -2,20 +2,12 @@
     return ntuple(d -> d == dim ? range : ranges[d], Val(N))
 end
 
-# Spatial dimensionality / interior range for loop helpers. Collections carry
-# their spatial dimension in the type (AbstractHaloCollection{T,N,S}) and expose
-# a reference field via _first_field, so no per-concrete-type methods are needed.
-@inline _loop_ndims(halo::AbstractSingleHaloArray) = ndims(halo)
-@inline _loop_ndims(::AbstractHaloCollection{T,N,S}) where {T,N,S} = S
-@inline _loop_ndims(arr::AbstractArray{<:AbstractSingleHaloArray}) = ndims(first(arr))
-
-@inline _loop_interior_range(halo::AbstractSingleHaloArray) = interior_range(halo)
-@inline _loop_interior_range(c::AbstractHaloCollection) = interior_range(_first_field(c))
-@inline _loop_interior_range(arr::AbstractArray{<:AbstractSingleHaloArray}) =
-    interior_range(first(arr))
+# Spatial dimensionality / interior range come from the shared _spatial_*
+# helpers in abstract_haloarray.jl (single arrays, collections, and raw arrays
+# of fields).
 
 @inline function _check_face_dim(halo, dim::Int)
-    spatial_ndims = _loop_ndims(halo)
+    spatial_ndims = _spatial_ndims(halo)
     1 <= dim <= spatial_ndims ||
         throw(ArgumentError("dim must be a spatial dimension in 1:$spatial_ndims, got $dim"))
     return nothing
@@ -31,7 +23,7 @@ These are ghost cells. In a face loop, pair each index `IL` with
 """
 function left_face_range(halo, dim::Int)
     _check_face_dim(halo, dim)
-    ranges = _loop_interior_range(halo)
+    ranges = _spatial_interior_range(halo)
     return _dim_slab_range(ranges, dim, (first(ranges[dim]) - 1):(first(ranges[dim]) - 1))
 end
 
@@ -48,8 +40,8 @@ boundary-face fluxes cancel correctly there. Pair each index `IL` with
 `IR = IL + face_offset(halo, dim)`.
 """
 function internal_face_range(halo, dim::Int)
-    ranges = _loop_interior_range(halo)
-    return ntuple(_loop_ndims(halo)) do d
+    ranges = _spatial_interior_range(halo)
+    return ntuple(_spatial_ndims(halo)) do d
         d == dim ? (first(ranges[d]):(last(ranges[d]) - 1)) : (first(ranges[d]):last(ranges[d]))
     end
 end
@@ -65,7 +57,7 @@ each index `IL` with `IR = IL + face_offset(halo, dim)` to visit the
 """
 function right_face_range(halo, dim::Int)
     _check_face_dim(halo, dim)
-    ranges = _loop_interior_range(halo)
+    ranges = _spatial_interior_range(halo)
     return _dim_slab_range(ranges, dim, last(ranges[dim]):last(ranges[dim]))
 end
 
@@ -123,7 +115,7 @@ struct FaceRanges{A,Bd,C,D,Halo}
 end
 
 function FaceRanges(halo)
-    spatial_ndims = _loop_ndims(halo)
+    spatial_ndims = _spatial_ndims(halo)
     return FaceRanges(
         ntuple(d -> CartesianIndices(left_face_range(halo, d)), spatial_ndims),
         ntuple(d -> CartesianIndices(internal_face_range(halo, d)), spatial_ndims),
@@ -233,7 +225,7 @@ end
         _scalar_face_read, _scalar_face_scatter!)
 
 # Shared by face- and cell-range/region loops (defined here as face_ranges.jl is
-# included first). _loop_ndims / _loop_interior_range dispatch the spatial
+# included first). _spatial_ndims / _spatial_interior_range dispatch the spatial
 # dimensionality and interior range over single arrays, collections, and raw
 # field arrays.
 @inline function _check_loop_color(color::Integer)
@@ -299,7 +291,7 @@ cell across a face in dimension `dim`.
 """
 @inline function face_offset(halo, dim::Int)
     _check_face_dim(halo, dim)
-    return CartesianIndex(versors(Val(_loop_ndims(halo)))[dim])
+    return CartesianIndex(versors(Val(_spatial_ndims(halo)))[dim])
 end
 
 @inline face_offset(halo, ::Dim{D}) where {D} = face_offset(halo, D)

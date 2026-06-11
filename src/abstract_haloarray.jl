@@ -251,6 +251,25 @@ end
 function _first_field end
 function _fields end
 
+# ---- spatial geometry of the fields -----------------------------------
+# Uniform across single halo arrays, collections, and raw AbstractArrays of
+# fields: `_geometry_field` picks the reference field, and the `_spatial_*`
+# accessors forward to it. Collections read their spatial dimension straight
+# from the type parameter (AbstractHaloCollection{T,N,S}).
+@inline _geometry_field(a::AbstractSingleHaloArray) = a
+@inline _geometry_field(c::AbstractHaloCollection) = _first_field(c)
+@inline _geometry_field(arr::AbstractArray{<:AbstractSingleHaloArray}) = first(arr)
+
+@inline _spatial_ndims(x) = ndims(_geometry_field(x))
+@inline _spatial_ndims(::AbstractHaloCollection{T,N,S}) where {T,N,S} = S
+@inline _spatial_interior_range(x) = interior_range(_geometry_field(x))
+@inline _spatial_interior_size(x)  = interior_size(_geometry_field(x))
+@inline _spatial_owned_size(x)     = owned_size(_geometry_field(x))
+@inline _spatial_global_size(x)    = global_size(_geometry_field(x))
+@inline _spatial_storage_size(x)   = storage_size(_geometry_field(x))
+@inline _spatial_axes(x)           = axes(_geometry_field(x))
+@inline _spatial_owned_axes(x)     = owned_axes(_geometry_field(x))
+
 @inline halo_backend(mha::AbstractHaloCollection) = halo_backend(_first_field(mha))
 @inline halo_width(mha::AbstractHaloCollection)   = halo_width(_first_field(mha))
 @inline tile_count(mha::AbstractHaloCollection)   = tile_count(_first_field(mha))

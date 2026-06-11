@@ -31,23 +31,7 @@ end
 
 const HaloArrayField = AbstractSingleHaloArray
 
-@inline _spatial_ndims(x) = ndims(x)
-@inline _spatial_owned_size(x) = owned_size(x)
-@inline _spatial_interior_size(x) = interior_size(x)
-@inline _spatial_global_size(x) = global_size(x)
-@inline _spatial_storage_size(x) = storage_size(x)
-@inline _spatial_axes(x) = axes(x)
-@inline _spatial_owned_axes(x) = owned_axes(x)
-
-# Collections carry the spatial dimension in the type and expose a reference
-# field via _first_field — one method covers MultiHaloArray and ArrayOfHaloArray.
-@inline _spatial_ndims(::AbstractHaloCollection{T,N,S}) where {T,N,S} = S
-@inline _spatial_owned_size(x::AbstractHaloCollection) = owned_size(_first_field(x))
-@inline _spatial_interior_size(x::AbstractHaloCollection) = interior_size(_first_field(x))
-@inline _spatial_global_size(x::AbstractHaloCollection) = global_size(_first_field(x))
-@inline _spatial_storage_size(x::AbstractHaloCollection) = storage_size(_first_field(x))
-@inline _spatial_axes(x::AbstractHaloCollection) = axes(_first_field(x))
-@inline _spatial_owned_axes(x::AbstractHaloCollection) = owned_axes(_first_field(x))
+# _spatial_* geometry helpers live in abstract_haloarray.jl.
 
 function _check_array_fields(arrays::AbstractArray)
     isempty(arrays) && throw(ArgumentError("ArrayOfHaloArray requires at least one field"))
