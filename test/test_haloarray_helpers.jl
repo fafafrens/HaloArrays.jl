@@ -357,12 +357,12 @@ end
     @testset "owned cell ranges" begin
         ha = LocalHaloArray(Int, (4, 5), 1; boundary_condition=:repeating)
         ranges = CellRanges(ha)
-        owned_cells = @inferred get_owned_cells(ranges)
+        owned_cells = @inferred get_interior_cells(ranges)
 
         @test collect(owned_cells) == collect(CartesianIndices((2:5, 2:6)))
 
-        color0_ranges = @inferred get_colored_owned_cell_ranges(ranges, 0)
-        color1_ranges = @inferred get_colored_owned_cell_ranges(ranges, 1)
+        color0_ranges = @inferred get_colored_interior_cell_ranges(ranges, 0)
+        color1_ranges = @inferred get_colored_interior_cell_ranges(ranges, 1)
 
         @test length(color0_ranges) == 2
         @test length(color1_ranges) == 2
@@ -381,13 +381,13 @@ end
         @test all(I -> mod(sum(Tuple(I)), 2) == 1, color1_cells)
         @test !_has_nearest_neighbor_conflict(color0_cells)
         @test !_has_nearest_neighbor_conflict(color1_cells)
-        @test_throws ArgumentError get_colored_owned_cell_ranges(ranges, -1)
-        @test_throws ArgumentError get_colored_owned_cell_ranges(ranges, 2)
+        @test_throws ArgumentError get_colored_interior_cell_ranges(ranges, -1)
+        @test_throws ArgumentError get_colored_interior_cell_ranges(ranges, 2)
 
-        cell_region = @inferred get_owned_cell_region(ranges)
-        color0_region = @inferred get_colored_owned_cell_region(ranges, 0)
-        color1_region = @inferred get_colored_owned_cell_region(ranges, 1, Dim(1))
-        color0_dim2_region = @inferred get_colored_owned_cell_region(ranges, 0, Dim(2))
+        cell_region = @inferred get_interior_cell_region(ranges)
+        color0_region = @inferred get_colored_interior_cell_region(ranges, 0)
+        color1_region = @inferred get_colored_interior_cell_region(ranges, 1, Dim(1))
+        color0_dim2_region = @inferred get_colored_interior_cell_region(ranges, 0, Dim(2))
 
         @test cell_region == CellKernelRegion(CartesianIndex(2, 2), (4, 5))
         @test color0_region == ColoredCellKernelRegion(CartesianIndex(2, 2), (2, 5), (4, 5), 0, 1)
@@ -403,17 +403,17 @@ end
         @test Set(_colored_cell_region_indices(color0_dim2_region)) == Set(color0_cells)
         @test all(I -> mod(sum(Tuple(I)), 2) == 0, _colored_cell_region_indices(color0_region))
         @test all(I -> mod(sum(Tuple(I)), 2) == 1, _colored_cell_region_indices(color1_region))
-        @test_throws ArgumentError get_colored_owned_cell_region(ranges, -1)
-        @test_throws ArgumentError get_colored_owned_cell_region(ranges, 2)
-        @test_throws ArgumentError get_colored_owned_cell_region(ranges, 0, 0)
-        @test_throws ArgumentError get_colored_owned_cell_region(ranges, 0, 3)
+        @test_throws ArgumentError get_colored_interior_cell_region(ranges, -1)
+        @test_throws ArgumentError get_colored_interior_cell_region(ranges, 2)
+        @test_throws ArgumentError get_colored_interior_cell_region(ranges, 0, 0)
+        @test_throws ArgumentError get_colored_interior_cell_region(ranges, 0, 3)
 
         one_d = LocalHaloArray(Int, (4,), 1; boundary_condition=:repeating)
         one_d_ranges = CellRanges(one_d)
-        one_d_color0 = @inferred get_colored_owned_cell_ranges(one_d_ranges, 0)
-        one_d_color1 = @inferred get_colored_owned_cell_ranges(one_d_ranges, 1)
+        one_d_color0 = @inferred get_colored_interior_cell_ranges(one_d_ranges, 0)
+        one_d_color1 = @inferred get_colored_interior_cell_ranges(one_d_ranges, 1)
 
-        @test collect(get_owned_cells(one_d_ranges)) == collect(CartesianIndices((2:5,)))
+        @test collect(get_interior_cells(one_d_ranges)) == collect(CartesianIndices((2:5,)))
         @test length(one_d_color0) == 1
         @test length(one_d_color1) == 1
         @test _cell_subrange_indices(one_d_color0) == collect(CartesianIndices((2:2:4,)))
@@ -421,12 +421,12 @@ end
 
         one_cell = LocalHaloArray(Int, (1,), 1; boundary_condition=:repeating)
         one_cell_ranges = CellRanges(one_cell)
-        one_cell_color0 = @inferred get_colored_owned_cell_ranges(one_cell_ranges, 0)
-        one_cell_color1 = @inferred get_colored_owned_cell_ranges(one_cell_ranges, 1)
-        one_cell_region_color0 = @inferred get_colored_owned_cell_region(one_cell_ranges, 0)
-        one_cell_region_color1 = @inferred get_colored_owned_cell_region(one_cell_ranges, 1)
+        one_cell_color0 = @inferred get_colored_interior_cell_ranges(one_cell_ranges, 0)
+        one_cell_color1 = @inferred get_colored_interior_cell_ranges(one_cell_ranges, 1)
+        one_cell_region_color0 = @inferred get_colored_interior_cell_region(one_cell_ranges, 0)
+        one_cell_region_color1 = @inferred get_colored_interior_cell_region(one_cell_ranges, 1)
 
-        @test collect(get_owned_cells(one_cell_ranges)) == [CartesianIndex(2)]
+        @test collect(get_interior_cells(one_cell_ranges)) == [CartesianIndex(2)]
         @test _cell_subrange_indices(one_cell_color0) == [CartesianIndex(2)]
         @test isempty(_cell_subrange_indices(one_cell_color1))
         @test one_cell_region_color0 == ColoredCellKernelRegion(CartesianIndex(2), (1,), (1,), 0, 1)
@@ -436,17 +436,17 @@ end
 
         three_d = LocalHaloArray(Int, (3, 4, 2), 1; boundary_condition=:repeating)
         three_d_ranges = CellRanges(three_d)
-        three_d_color0 = @inferred get_colored_owned_cell_ranges(three_d_ranges, 0)
-        three_d_color1 = @inferred get_colored_owned_cell_ranges(three_d_ranges, 1)
+        three_d_color0 = @inferred get_colored_interior_cell_ranges(three_d_ranges, 0)
+        three_d_color1 = @inferred get_colored_interior_cell_ranges(three_d_ranges, 1)
         three_d_color0_cells = _cell_subrange_indices(three_d_color0)
         three_d_color1_cells = _cell_subrange_indices(three_d_color1)
-        three_d_color0_region = @inferred get_colored_owned_cell_region(three_d_ranges, 0)
-        three_d_color1_region = @inferred get_colored_owned_cell_region(three_d_ranges, 1)
+        three_d_color0_region = @inferred get_colored_interior_cell_region(three_d_ranges, 0)
+        three_d_color1_region = @inferred get_colored_interior_cell_region(three_d_ranges, 1)
 
         @test length(three_d_color0) == 4
         @test length(three_d_color1) == 4
         @test Set(vcat(three_d_color0_cells, three_d_color1_cells)) ==
-              Set(collect(get_owned_cells(three_d_ranges)))
+              Set(collect(get_interior_cells(three_d_ranges)))
         @test !_has_nearest_neighbor_conflict(three_d_color0_cells)
         @test !_has_nearest_neighbor_conflict(three_d_color1_cells)
         @test three_d_color0_region ==
@@ -469,12 +469,12 @@ end
 
         for other in (mpi_ha, threaded_ha, fields, array_fields)
             other_ranges = CellRanges(other)
-            @test collect(get_owned_cells(other_ranges)) == collect(get_owned_cells(ranges))
-            @test _cell_subrange_indices(get_colored_owned_cell_ranges(other_ranges, 0)) == color0_cells
-            @test _cell_subrange_indices(get_colored_owned_cell_ranges(other_ranges, 1)) == color1_cells
-            @test get_owned_cell_region(other_ranges) == cell_region
-            @test get_colored_owned_cell_region(other_ranges, 0) == color0_region
-            @test get_colored_owned_cell_region(other_ranges, 1) == color1_region
+            @test collect(get_interior_cells(other_ranges)) == collect(get_interior_cells(ranges))
+            @test _cell_subrange_indices(get_colored_interior_cell_ranges(other_ranges, 0)) == color0_cells
+            @test _cell_subrange_indices(get_colored_interior_cell_ranges(other_ranges, 1)) == color1_cells
+            @test get_interior_cell_region(other_ranges) == cell_region
+            @test get_colored_interior_cell_region(other_ranges, 0) == color0_region
+            @test get_colored_interior_cell_region(other_ranges, 1) == color1_region
         end
     end
 
@@ -585,7 +585,7 @@ end
     @testset "CellKernelRegion cell_index and is_cell_index_inbounds" begin
         u = LocalHaloArray(Float64, (4,), 1; boundary_condition=:repeating)
         cr = CellRanges(u)
-        region = get_owned_cell_region(cr)
+        region = get_interior_cell_region(cr)
 
         # first owned cell is at storage index halo+1 = 2
         @test cell_index(region, (1,)) == (2,)
@@ -600,7 +600,7 @@ end
         # 2-D: halo=1, owned (3,3), storage 2:4 in each dim
         u2 = LocalHaloArray(Float64, (3, 3), 1; boundary_condition=:repeating)
         cr2 = CellRanges(u2)
-        r2 = get_owned_cell_region(cr2)
+        r2 = get_interior_cell_region(cr2)
 
         @test cell_index(r2, (1, 1)) == (2, 2)
         @test cell_index(r2, (3, 3)) == (4, 4)
@@ -614,8 +614,8 @@ end
         u = LocalHaloArray(Float64, (4,), 1; boundary_condition=:repeating)
         cr = CellRanges(u)
 
-        r0 = get_colored_owned_cell_region(cr, 0)   # color 0: even storage index
-        r1 = get_colored_owned_cell_region(cr, 1)   # color 1: odd storage index
+        r0 = get_colored_interior_cell_region(cr, 0)   # color 0: even storage index
+        r1 = get_colored_interior_cell_region(cr, 1)   # color 1: odd storage index
 
         # color 0 maps J=(1,) → storage 2, J=(2,) → storage 4
         @test cell_index(r0, (1,)) == (2,)
@@ -642,7 +642,7 @@ end
         # 2-D: 4×4 owned cells, compressed_dim=2
         u2 = LocalHaloArray(Float64, (4, 4), 1; boundary_condition=:repeating)
         cr2 = CellRanges(u2)
-        r2c0 = get_colored_owned_cell_region(cr2, 0; compressed_dim=2)
+        r2c0 = get_colored_interior_cell_region(cr2, 0; compressed_dim=2)
 
         # launch size: (4, ceil(4/2)) = (4, 2)
         @test r2c0.size == (4, 2)

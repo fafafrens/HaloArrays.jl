@@ -94,7 +94,7 @@ end
         reduced_owned_size = (local_dims[2],)
         @test size(reduced) == reduced_global_size
         @test global_size(reduced) == reduced_global_size
-        @test owned_size(reduced) == reduced_owned_size
+        @test interior_size(reduced) == reduced_owned_size
         @test halo_width(reduced) == halo
 
         expected = zeros(Int, local_dims[2])
@@ -125,8 +125,8 @@ end
         reduced_owned_size = (local_dims[2],)
         @test size(fields.arrays.u) == reduced_global_size
         @test size(fields.arrays.v) == reduced_global_size
-        @test owned_size(fields.arrays.u) == reduced_owned_size
-        @test owned_size(fields.arrays.v) == reduced_owned_size
+        @test interior_size(fields.arrays.u) == reduced_owned_size
+        @test interior_size(fields.arrays.v) == reduced_owned_size
     else
         @test !isactive(maybe_fields)
     end

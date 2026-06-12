@@ -17,10 +17,10 @@
         @test tile_size(halo) == (4, 5)
         @test halo isa AbstractArray{Int,2}
         @test size(halo) == (12, 10)
-        @test owned_size(halo) == (12, 10)
+        @test interior_size(halo) == (12, 10)
         @test global_size(halo) == (12, 10)
         @test axes(halo) == map(Base.OneTo, global_size(halo))
-        @test owned_axes(halo) == map(Base.OneTo, owned_size(halo))
+        @test interior_axes(halo) == map(Base.OneTo, interior_size(halo))
         @test halo_width(halo) == 2
         @test tile_count(halo) == 6
         @test storage_size(halo) == (8, 9)
@@ -365,16 +365,16 @@
         @test collect(reshape([u[i, j] for i in 1:nx, j in 1:ny], nx, ny)) == expected
     end
 
-    @testset "owned_to_global_index round-trips against scalar indexing" begin
+    @testset "interior_to_global_index round-trips against scalar indexing" begin
         u = ThreadedHaloArray(Float64, (3, 2), 1; dims=(2, 2), boundary_condition=:repeating)
 
         # Write a unique value per global cell, addressed via the tile-local
-        # owned index mapped through owned_to_global_index.
+        # owned index mapped through interior_to_global_index.
         for tile_id in 1:tile_count(u)
             data = tile_parent(u, tile_id)
             h = halo_width(u)
             for oi in 1:tile_size(u)[1], oj in 1:tile_size(u)[2]
-                gI = owned_to_global_index(u, tile_id, (oi, oj))
+                gI = interior_to_global_index(u, tile_id, (oi, oj))
                 data[oi + h, oj + h] = 100 * gI[1] + gI[2]
             end
         end
@@ -386,9 +386,9 @@
         end
 
         # First tile, first owned cell → global (1,1); bounds are checked.
-        @test owned_to_global_index(u, 1, (1, 1)) == (1, 1)
-        @test_throws BoundsError owned_to_global_index(u, 1, (0, 1))
-        @test_throws BoundsError owned_to_global_index(u, 1, (tile_size(u)[1] + 1, 1))
+        @test interior_to_global_index(u, 1, (1, 1)) == (1, 1)
+        @test_throws BoundsError interior_to_global_index(u, 1, (0, 1))
+        @test_throws BoundsError interior_to_global_index(u, 1, (tile_size(u)[1] + 1, 1))
     end
 
     @testset "fill_from_local_indices! fills per-tile interior" begin

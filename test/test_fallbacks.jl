@@ -18,11 +18,11 @@ using HaloArrays
 
     @testset "CellRanges fallback" begin
         cr = CellRanges(arrays)
-        cells = get_owned_cells(cr)
+        cells = get_interior_cells(cr)
         @test size(cells) == (4, 4)
         # colored subranges cover all owned cells
-        c0 = get_colored_owned_cell_ranges(cr, 0)
-        c1 = get_colored_owned_cell_ranges(cr, 1)
+        c0 = get_colored_interior_cell_ranges(cr, 0)
+        c1 = get_colored_interior_cell_ranges(cr, 1)
         @test sum(length, c0) + sum(length, c1) == 16
     end
 
@@ -68,7 +68,7 @@ end
 
     @testset "CellRanges on ArrayOfHaloArray" begin
         cr = CellRanges(vel)
-        @test size(get_owned_cells(cr)) == tsz   # per-tile range (interior_range of one tile)
+        @test size(get_interior_cells(cr)) == tsz   # per-tile range (interior_range of one tile)
     end
 end
 

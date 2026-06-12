@@ -30,7 +30,7 @@ function update_color!(phi::SerialField2D, rng, color::Bool, p)
 
     @inbounds for I in CartesianIndices(interior_range(phi))
         storage_i, storage_j = Tuple(I)
-        global_i, global_j = owned_to_global_index(phi, (storage_i - h, storage_j - h))
+        global_i, global_j = interior_to_global_index(phi, (storage_i - h, storage_j - h))
 
         if checkerboard_color(global_i, global_j) == color
             mean = p.kappa * neighbor_sum_2d(data, I) / p.denom

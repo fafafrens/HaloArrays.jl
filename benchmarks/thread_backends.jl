@@ -24,8 +24,8 @@ function backend_names(options)
     return names
 end
 
-function make_halo(owned_size, halo_width, tile_dims, backend)
-    tile_size = tile_size_from_owned_size(owned_size, tile_dims)
+function make_halo(interior_size, halo_width, tile_dims, backend)
+    tile_size = tile_size_from_owned_size(interior_size, tile_dims)
     halo = ThreadedHaloArray(Float64, tile_size, halo_width;
         dims=tile_dims, boundary_condition=:repeating, thread_backend=backend)
     fill_benchmark_data!(halo)
@@ -49,16 +49,16 @@ function main()
     halo_width = option_int(options, "halo", 1)
     samples = option_int(options, "samples", 30)
     warmups = option_int(options, "warmups", 5)
-    owned_size = option_owned_size(options, ndims, 128)
+    interior_size = option_owned_size(options, ndims, 128)
     tile_dims = option_tuple(options, "tile-dims", ndims, 2)
     timer = Symbol(option_string(options, "timer", "manual"))
     backends = backend_names(options)
 
     println("ThreadBackend comparison benchmark")
     println("  ndims:         ", ndims)
-    println("  owned size:    ", owned_size)
+    println("  owned size:    ", interior_size)
     println("  tile dims:     ", tile_dims)
-    println("  tile size:     ", tile_size_from_owned_size(owned_size, tile_dims))
+    println("  tile size:     ", tile_size_from_owned_size(interior_size, tile_dims))
     println("  halo width:    ", halo_width)
     println("  Julia threads: ", nthreads())
     println("  backends:      ", join(backends, ", "))
@@ -71,16 +71,16 @@ function main()
 
     rows = Dict{String,Any}[]
     for name in backends
-        halo = make_halo(owned_size, halo_width, tile_dims, _BACKENDS[name])
+        halo = make_halo(interior_size, halo_width, tile_dims, _BACKENDS[name])
         dest = similar(halo)
         fill!(dest, 0.0)
 
         metadata = Dict{String,Any}(
             "backend" => string(name),
             "ndims" => ndims,
-            "owned_size" => joined_tuple(owned_size),
+            "interior_size" => joined_tuple(interior_size),
             "tile_dims" => joined_tuple(tile_dims),
-            "tile_size" => joined_tuple(tile_size_from_owned_size(owned_size, tile_dims)),
+            "tile_size" => joined_tuple(tile_size_from_owned_size(interior_size, tile_dims)),
             "halo_width" => halo_width,
             "threads" => nthreads(),
         )

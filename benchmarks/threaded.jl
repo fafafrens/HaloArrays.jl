@@ -2,8 +2,8 @@ include("common.jl")
 
 using OhMyThreads: @tasks
 
-function make_threaded_halo(::Val{N}, owned_size, halo_width, tile_dims) where {N}
-    tile_size = tile_size_from_owned_size(owned_size, tile_dims)
+function make_threaded_halo(::Val{N}, interior_size, halo_width, tile_dims) where {N}
+    tile_size = tile_size_from_owned_size(interior_size, tile_dims)
     return ThreadedHaloArray(Float64, tile_size, halo_width; dims=tile_dims, boundary_condition=:repeating)
 end
 
@@ -49,17 +49,17 @@ function main()
     halo_width = option_int(options, "halo", 1)
     samples = option_int(options, "samples", 30)
     warmups = option_int(options, "warmups", 5)
-    owned_size = option_owned_size(options, ndims, 64)
+    interior_size = option_owned_size(options, ndims, 64)
     tile_dims = option_tuple(options, "tile-dims", ndims, 2)
 
-    halo = make_threaded_halo(Val(ndims), owned_size, halo_width, tile_dims)
+    halo = make_threaded_halo(Val(ndims), interior_size, halo_width, tile_dims)
     dest = similar(halo)
     fill_benchmark_data!(halo)
     fill!(dest, 0.0)
 
     println("ThreadedHaloArray benchmark")
     println("  ndims:       ", ndims)
-    println("  owned size:  ", owned_size)
+    println("  owned size:  ", interior_size)
     println("  tile dims:   ", tile_dims)
     println("  tile size:   ", tile_size(halo))
     println("  halo width:  ", halo_width)
@@ -69,7 +69,7 @@ function main()
 
     metadata = Dict{String,Any}(
         "ndims" => ndims,
-        "owned_size" => joined_tuple(owned_size),
+        "interior_size" => joined_tuple(interior_size),
         "tile_dims" => joined_tuple(tile_dims),
         "tile_size" => joined_tuple(tile_size(halo)),
         "halo_width" => halo_width,

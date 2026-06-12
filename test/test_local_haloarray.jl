@@ -12,12 +12,12 @@ using HaloArrays
 
         @test ha isa LocalHaloArray
         @test size(ha) == (4,)
-        @test owned_size(ha) == (4,)
+        @test interior_size(ha) == (4,)
         @test interior_size(ha) == (4,)
         @test storage_size(ha) == (8,)
         @test halo_width(ha) == 2
         @test axes(ha) == (Base.OneTo(4),)
-        @test owned_axes(ha) == axes(interior_view(ha))
+        @test interior_axes(ha) == axes(interior_view(ha))
         @test collect(eachindex(ha)) == collect(eachindex(interior_view(ha)))
         @test collect(ha) == [10, 20, 30, 40]
         @test ha[2] == 20
@@ -31,7 +31,7 @@ using HaloArrays
         @test parent(ha)[3:6] == [10, 20, 30, 40]
         @test parent(ha)[7:8] == [40, 30]
         @test get_comm(ha) === nothing
-        @test global_size(ha) == owned_size(ha)
+        @test global_size(ha) == interior_size(ha)
     end
 
     @testset "periodic boundaries wrap local interior" begin
@@ -154,7 +154,7 @@ end
     @test halo_width(ha) == 0
     @test storage_size(ha) == (5,)
     @test interior_size(ha) == (5,)
-    @test owned_size(ha) == (5,)
+    @test interior_size(ha) == (5,)
 
     interior_view(ha) .= 1:5
     @test parent(ha) == [1, 2, 3, 4, 5]

@@ -248,10 +248,10 @@ function fill_benchmark_data!(halo::MultiHaloArray)
     return halo
 end
 
-function tile_size_from_owned_size(owned_size, tile_dims)
-    all(d -> owned_size[d] % tile_dims[d] == 0, eachindex(owned_size)) ||
+function tile_size_from_owned_size(interior_size, tile_dims)
+    all(d -> interior_size[d] % tile_dims[d] == 0, eachindex(interior_size)) ||
         error("--owned-size must be divisible by --tile-dims for ThreadedHaloArray benchmarks")
-    return ntuple(d -> owned_size[d] ÷ tile_dims[d], length(owned_size))
+    return ntuple(d -> interior_size[d] ÷ tile_dims[d], length(interior_size))
 end
 
 function joined_tuple(values)

@@ -31,11 +31,11 @@ function main()
     halo_width = option_int(options, "halo", 1)
     samples = option_int(options, "samples", 10)
     warmups = option_int(options, "warmups", 2)
-    owned_size = option_owned_size(options, ndims, 64)
+    interior_size = option_owned_size(options, ndims, 64)
     output = option_string(options, "output", joinpath(tempdir(), "haloarrays_bench"))
 
     topology = make_periodic_topology(comm, ndims)
-    halo = HaloArray(Float64, owned_size, halo_width, topology; boundary_condition=:periodic)
+    halo = HaloArray(Float64, interior_size, halo_width, topology; boundary_condition=:periodic)
     fill_benchmark_data!(halo)
 
     gather_base = output * "_gather_save"
@@ -49,7 +49,7 @@ function main()
         println("  ranks:       ", nproc)
         println("  topology:    ", topology.dims)
         println("  ndims:       ", ndims)
-        println("  owned size:  ", owned_size)
+        println("  owned size:  ", interior_size)
         println("  halo width:  ", halo_width)
         println("  output base: ", output)
         println("  samples:     ", samples)
@@ -61,7 +61,7 @@ function main()
         "ranks" => nproc,
         "topology" => joined_tuple(topology.dims),
         "ndims" => ndims,
-        "owned_size" => joined_tuple(owned_size),
+        "interior_size" => joined_tuple(interior_size),
         "halo_width" => halo_width,
     )
     rows = Dict{String,Any}[]

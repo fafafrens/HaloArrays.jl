@@ -14,7 +14,7 @@
 #    synchronous shared-memory copy (no async transfer to overlap). The win is
 #    parallelism of the per-cell loops, via tile_foreach over the tiles.
 #  * Each cell's radius needs its GLOBAL index. With the tile decomposition that
-#    is owned_to_global_index(field, tile_id, owned_idx) — the per-tile mapping,
+#    is interior_to_global_index(field, tile_id, owned_idx) — the per-tile mapping,
 #    uniform with HaloArray/LocalHaloArray.
 #  * The inter-tile face flux is not double-counted: each tile updates only its
 #    owned cells, so a shared face contributes -F to one tile's last cell and +F
@@ -140,14 +140,14 @@ end
 function rel_rhs!(du, u, eos, r_min, dr)
     synchronize_halo!(u)                       # inter-tile copies + axis/outflow BC
     ranges = FaceRanges(u)
-    cells  = get_owned_cells(CellRanges(u))    # per-tile owned cells (same each tile)
+    cells  = get_interior_cells(CellRanges(u))    # per-tile owned cells (same each tile)
     h      = halo_width(u.N)
 
     tile_foreach(thread_backend(u.N), tile_id -> begin
         du_data = tile_parent(du, tile_id)     # NamedTuple of this tile's arrays
         u_data  = tile_parent(u, tile_id)
         # global index of this tile's first owned cell − 1, via the uniform API
-        offset  = owned_to_global_index(u.N, tile_id, (1,))[1] - 1
+        offset  = interior_to_global_index(u.N, tile_id, (1,))[1] - 1
         set_geometric_source_tile!(du_data, u_data, eos, cells,
             I -> r_min + (offset + (I[1] - h) - 0.5) * dr)        # du = S(U, r)
         accumulate_flux_divergence!(du_data, u_data, ranges, 1, inv(dr),
@@ -169,11 +169,11 @@ end
 
 function diagnostics(u, eos, r_min, dr)
     h = halo_width(u.N)
-    cells = get_owned_cells(CellRanges(u))
+    cells = get_interior_cells(CellRanges(u))
     charge = 0.0; energy = 0.0; vmax = 0.0
     for tile_id in 1:tile_count(u)
         d = tile_parent(u, tile_id)
-        offset = owned_to_global_index(u.N, tile_id, (1,))[1] - 1
+        offset = interior_to_global_index(u.N, tile_id, (1,))[1] - 1
         @inbounds for I in cells
             U = conserved_cell(d, I)
             _, _, v = prim_from_cons(eos, U)
@@ -211,7 +211,7 @@ function run_cylindrical_blast_threaded(; A=1.0, nx=400, ntiles=max(1, Threads.n
         dM = tile_parent(u.M, tile_id)
         dE = tile_parent(u.E, tile_id)
         for oi in 1:tile_size(u)[1]
-            gi = owned_to_global_index(u.N, tile_id, (oi,))[1]
+            gi = interior_to_global_index(u.N, tile_id, (oi,))[1]
             r  = r_min + (gi - 0.5) * dr
             n, p = r < r_mid ? (1.0, 1.0) : (0.125, 0.1)
             T = p / n

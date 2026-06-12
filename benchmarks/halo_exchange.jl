@@ -1,7 +1,7 @@
 include("common.jl")
 
-function make_halo(::Val{N}, owned_size, halo_width, topology) where {N}
-    return HaloArray(Float64, owned_size, halo_width, topology; boundary_condition=:periodic)
+function make_halo(::Val{N}, interior_size, halo_width, topology) where {N}
+    return HaloArray(Float64, interior_size, halo_width, topology; boundary_condition=:periodic)
 end
 
 function exchange_methods()
@@ -74,10 +74,10 @@ function main()
     halo_width = option_int(options, "halo", 1)
     samples = option_int(options, "samples", 30)
     warmups = option_int(options, "warmups", 5)
-    owned_size = option_owned_size(options, ndims, 64)
+    interior_size = option_owned_size(options, ndims, 64)
 
     topology = make_periodic_topology(comm, ndims)
-    halo = make_halo(Val(ndims), owned_size, halo_width, topology)
+    halo = make_halo(Val(ndims), interior_size, halo_width, topology)
     methods = exchange_methods()
     names = selected_methods(options)
 
@@ -88,7 +88,7 @@ function main()
         println("  ranks:       ", nproc)
         println("  topology:    ", topology.dims)
         println("  ndims:       ", ndims)
-        println("  owned size:  ", owned_size)
+        println("  owned size:  ", interior_size)
         println("  halo width:  ", halo_width)
         println("  samples:     ", samples)
         println("  warmups:     ", warmups)
@@ -99,7 +99,7 @@ function main()
         "ranks" => nproc,
         "topology" => joined_tuple(topology.dims),
         "ndims" => ndims,
-        "owned_size" => joined_tuple(owned_size),
+        "interior_size" => joined_tuple(interior_size),
         "halo_width" => halo_width,
     )
     rows = Dict{String,Any}[]

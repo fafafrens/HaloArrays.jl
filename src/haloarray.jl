@@ -112,7 +112,7 @@ tile id: `interior_view(u, tile_id)`. See also [`interior_range`](@ref).
     @views halo.data[interior_range(halo)...]
 end
 
-# size, axes, length, owned_axes, eachindex, iterate, versors, similar dispatchers,
+# size, axes, length, interior_axes, eachindex, iterate, versors, similar dispatchers,
 # map!/map inherited from AbstractSingleHaloArray
 
 # ---- global / topology accessors (pure field access, no MPI calls) ----
@@ -120,12 +120,12 @@ end
 """
     global_size(u) -> dims
 
-Size of the **whole** grid across all ranks / tiles (`owned_size .* topology.dims`).
-For [`LocalHaloArray`](@ref) it equals [`owned_size`](@ref); for [`HaloArray`](@ref)
+Size of the **whole** grid across all ranks / tiles (`interior_size .* topology.dims`).
+For [`LocalHaloArray`](@ref) it equals [`interior_size`](@ref); for [`HaloArray`](@ref)
 (MPI) and [`ThreadedHaloArray`](@ref) it is larger than this rank's/tile's share.
 """
 function global_size(halo::HaloArray{T,N}) where {T,N}
-    local_interior = owned_size(halo)
+    local_interior = interior_size(halo)
     dims = halo.topology.dims
     ntuple(i -> local_interior[i] * dims[i], Val(N))
 end
@@ -134,7 +134,7 @@ end
 @inline isactive(a::HaloArray)    = isactive(a.topology)
 @inline is_root(a::HaloArray; root::Integer=0) = is_root(a.topology; root=root)
 
-function owned_to_global_index(halo::HaloArray{T,N}, owned_idx::NTuple{N,<:Integer}) where {T,N}
+function interior_to_global_index(halo::HaloArray{T,N}, owned_idx::NTuple{N,<:Integer}) where {T,N}
     coords     = halo.topology.cart_coords
     owned_dims = interior_size(halo)
     all(i -> 1 <= owned_idx[i] <= owned_dims[i], 1:N) ||
@@ -279,7 +279,7 @@ end
 
 # Base.copy, Base.zero, Base.fill!, Base.copyto! inherited from AbstractSingleHaloArray
 
-# fill_interior!, fill_from_local_indices!, Base.foreach, arithmetic,
+# fill_from_local_indices!, Base.foreach, arithmetic,
 # LinearAlgebra.norm inherited from AbstractSingleHaloArray
 
 # Base.map!/map inherited from AbstractSingleHaloArray
@@ -307,7 +307,7 @@ function fill_from_global_indices!(f, halo::HaloArray{T,N,A,Halo}) where {T,N,A,
     for local_I in CartesianIndices(local_shape)
         full_I = Tuple(local_I)
         local_interior_I = ntuple(i -> full_I[i]-Halo, Val(N))
-        global_I = owned_to_global_index(halo, local_interior_I)
+        global_I = interior_to_global_index(halo, local_interior_I)
         halo.data[local_I] = f(global_I)
     end
     return halo
@@ -318,7 +318,7 @@ end
 
 function Base.show(io::IO, obj::HaloArray)
     print(io, "HaloArray of global size ", size(obj),
-          " (owned: ", owned_size(obj), ", storage: ", storage_size(obj),
+          " (owned: ", interior_size(obj), ", storage: ", storage_size(obj),
           "), halo=", halo_width(obj), "\n")
     print(io, "  eltype: ", eltype(obj), "\n")
     print(io, "  topology: ", obj.topology, "\n")

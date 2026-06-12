@@ -21,8 +21,7 @@ MaybeHaloArray(a::A) where {T,N,A<:AbstractHaloArray{T,N}} =
 
 
 Base.size(m::MaybeHaloArray) = global_size(m)
-owned_size(m::MaybeHaloArray) = owned_size(m.data)
-owned_axes(m::MaybeHaloArray) = owned_axes(m.data)
+interior_axes(m::MaybeHaloArray) = interior_axes(m.data)
 interior_size(m::MaybeHaloArray) = interior_size(m.data)
 global_size(m::MaybeHaloArray) = global_size(m.data)
 storage_size(m::MaybeHaloArray) = storage_size(m.data)

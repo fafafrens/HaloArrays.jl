@@ -86,7 +86,7 @@ Base.propertynames(mha::MultiHaloArray) = keys(getfield(mha, :arrays))
 # eltype/ndims come from AbstractArray{T,D} via FieldCollection{T,D,S,C}.
 
 # size/axes/eachindex/length, n_field, interior/owned/global/storage size, and
-# owned_axes come from AbstractHaloCollection (field_shape prefix + _spatial_*).
+# interior_axes come from AbstractHaloCollection (field_shape prefix + _spatial_*).
 @inline field_shape(mha::MultiHaloArray) = (length(mha.arrays),)
 @inline Base.parent(halo::MultiHaloArray)  = map(parent, halo.arrays)
 

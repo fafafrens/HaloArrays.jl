@@ -138,16 +138,15 @@ ThreadedHaloArray(tile_size::NTuple{N,<:Integer}, halo::Integer; kwargs...) wher
     ThreadedHaloArray(Float64, tile_size, halo; kwargs...)
 
 # eltype/ndims come from AbstractArray{T,N}; parent from AbstractSingleHaloArray.
-@inline owned_size(halo::ThreadedHaloArray) = ntuple(d -> halo.tile_size[d] * halo.topology.dims[d], Val(ndims(halo)))
+@inline interior_size(halo::ThreadedHaloArray) = ntuple(d -> halo.tile_size[d] * halo.topology.dims[d], Val(ndims(halo)))
 # size, axes, length inherited from AbstractSingleHaloArray
-# owned_axes uses owned_size (tiles have no single interior_view without tile_id)
-@inline owned_axes(halo::ThreadedHaloArray)         = map(Base.OneTo, owned_size(halo))
-@inline owned_axes(halo::ThreadedHaloArray, d::Int) = Base.OneTo(owned_size(halo, d))
+# interior_axes uses interior_size (tiles have no single interior_view without tile_id)
+@inline interior_axes(halo::ThreadedHaloArray)         = map(Base.OneTo, interior_size(halo))
+@inline interior_axes(halo::ThreadedHaloArray, d::Int) = Base.OneTo(interior_size(halo, d))
 # eachindex/iterate use global CartesianIndices (interior_view without tile_id was removed)
 @inline Base.eachindex(halo::ThreadedHaloArray) = CartesianIndices(axes(halo))
 @inline Base.iterate(halo::ThreadedHaloArray) = iterate(CartesianIndices(axes(halo)))
 @inline Base.iterate(halo::ThreadedHaloArray, state) = iterate(CartesianIndices(axes(halo)), state)
-@inline interior_size(halo::ThreadedHaloArray) = owned_size(halo)
 @inline halo_width(::Type{<:ThreadedHaloArray{T,N,A,Halo}}) where {T,N,A,Halo} = Halo
 @inline halo_width(::ThreadedHaloArray{T,N,A,Halo}) where {T,N,A,Halo} = Halo
 """    tile_size(u) -> dims
@@ -174,14 +173,14 @@ The Cartesian position of tile `tile_id` within the tile layout (`dims`)."""
 @inline tile_coordinates(halo::ThreadedHaloArray, tile_id::Integer) = tile_coordinates(halo.topology, tile_id)
 
 """
-    owned_to_global_index(u::ThreadedHaloArray, tile_id, owned_idx) -> NTuple
+    interior_to_global_index(u::ThreadedHaloArray, tile_id, owned_idx) -> NTuple
 
 Map a tile-local owned (interior) index `owned_idx` — 1-based, excluding the
 halo — in tile `tile_id` to its global index in the full domain. Mirrors
-`owned_to_global_index` on [`HaloArray`](@ref) and [`LocalHaloArray`](@ref),
+`interior_to_global_index` on [`HaloArray`](@ref) and [`LocalHaloArray`](@ref),
 with the extra `tile_id` since the owned region is per tile.
 """
-@inline function owned_to_global_index(halo::ThreadedHaloArray{T,N},
+@inline function interior_to_global_index(halo::ThreadedHaloArray{T,N},
         tile_id::Integer, owned_idx::NTuple{N,<:Integer}) where {T,N}
     coord = tile_coordinates(halo, tile_id)
     ts    = tile_size(halo)
@@ -189,7 +188,7 @@ with the extra `tile_id` since the owned region is per tile.
         throw(BoundsError(halo, owned_idx))
     return ntuple(d -> (coord[d] - 1) * ts[d] + owned_idx[d], Val(N))
 end
-@inline global_size(halo::ThreadedHaloArray) = owned_size(halo)
+@inline global_size(halo::ThreadedHaloArray) = interior_size(halo)
 @inline is_root(halo::ThreadedHaloArray; root::Integer=0) = is_root(halo.topology; root=root)
 # isactive, get_comm inherited from AbstractSerialHaloArray
 
@@ -491,14 +490,9 @@ end
 start_halo_exchange!(halo::ThreadedHaloArray) = halo_exchange!(halo)
 finish_halo_exchange!(halo::ThreadedHaloArray) = halo
 
-function fill_interior!(halo::ThreadedHaloArray, value)
-    tile_foreach(thread_backend(halo), tile_id -> _fill_threaded_interior_tile!(halo, tile_id, value),
-        eachindex(parent(halo)); scheduler=:static)
-    return halo
-end
-
+# interior-only, like the generic fill!; per-tile, in parallel
 function Base.fill!(halo::ThreadedHaloArray, value)
-    tile_foreach(thread_backend(halo), tile_id -> fill!(tile_parent(halo, tile_id), value),
+    tile_foreach(thread_backend(halo), tile_id -> _fill_threaded_interior_tile!(halo, tile_id, value),
         eachindex(parent(halo)); scheduler=:static)
     return halo
 end

@@ -18,7 +18,7 @@ validity is predictable and the hot path stays local.
   - [`LocalHaloArray`](@ref) — single process, no MPI
   - [`ThreadedHaloArray`](@ref) — shared memory, tiled across threads
   - [`HaloArray`](@ref) — distributed over an MPI [`CartesianTopology`](@ref)
-- **Explicit semantics** — global `size`/`axes`, [`owned_size`](@ref)/[`owned_axes`](@ref),
+- **Explicit semantics** — global `size`/`axes`, [`interior_size`](@ref)/[`interior_axes`](@ref),
   [`interior_view`](@ref), `parent`; no hidden communication in `getindex`.
 - **Multi-field containers** ([`MultiHaloArray`](@ref), `LocalMultiHaloArray`,
   `ThreadedMultiHaloArray`, [`ArrayOfHaloArray`](@ref)) that exchange every field at once.

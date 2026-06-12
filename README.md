@@ -22,7 +22,7 @@ validity is predictable and the hot path stays local.
 - **Three interchangeable backends behind one API** — `LocalHaloArray` (single
   process), `ThreadedHaloArray` (shared-memory tiles), `HaloArray` (MPI over a
   `CartesianTopology`).
-- **Explicit semantics** — global `size`/`axes`, `owned_size`/`owned_axes`,
+- **Explicit semantics** — global `size`/`axes`, `interior_size`/`interior_axes`,
   `interior_view`, `parent`; no hidden communication in `getindex`.
 - **Multi-field containers** (`MultiHaloArray`, `ArrayOfHaloArray`, …) that
   exchange every field at once.

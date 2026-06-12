@@ -131,29 +131,29 @@ end
 end
 
 """
-    get_owned_cell_region(ranges)
+    get_interior_cell_region(ranges)
 
 Return compact launch metadata for the owned-cell region.
 """
-@inline get_owned_cell_region(ranges::CellRanges) = CellKernelRegion(get_owned_cells(ranges))
+@inline get_interior_cell_region(ranges::CellRanges) = CellKernelRegion(get_interior_cells(ranges))
 
 """
-    get_colored_owned_cell_region(ranges, color; compressed_dim=1)
-    get_colored_owned_cell_region(ranges, color, compressed_dim)
+    get_colored_interior_cell_region(ranges, color; compressed_dim=1)
+    get_colored_interior_cell_region(ranges, color, compressed_dim)
 
 Return compact launch metadata for one checkerboard cell color. The launch
 region is compressed in `compressed_dim`; kernels should reconstruct the
 physical cell index and check the compressed dimension upper bound.
 """
-@inline get_colored_owned_cell_region(ranges::CellRanges,
+@inline get_colored_interior_cell_region(ranges::CellRanges,
                                       color::Integer;
                                       compressed_dim::Integer=1) =
-    get_colored_owned_cell_region(ranges, color, compressed_dim)
-@inline get_colored_owned_cell_region(ranges::CellRanges,
+    get_colored_interior_cell_region(ranges, color, compressed_dim)
+@inline get_colored_interior_cell_region(ranges::CellRanges,
                                       color::Integer,
                                       compressed_dim::Integer) =
-    ColoredCellKernelRegion(get_owned_cells(ranges), color, compressed_dim)
-@inline get_colored_owned_cell_region(ranges::CellRanges,
+    ColoredCellKernelRegion(get_interior_cells(ranges), color, compressed_dim)
+@inline get_colored_interior_cell_region(ranges::CellRanges,
                                       color::Integer,
                                       ::Dim{D}) where {D} =
-    get_colored_owned_cell_region(ranges, color, D)
+    get_colored_interior_cell_region(ranges, color, D)

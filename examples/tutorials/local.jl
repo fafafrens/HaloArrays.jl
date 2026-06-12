@@ -37,7 +37,7 @@ section("1 — Storage layout")
 u1d = LocalHaloArray(Float64, (4,), 1; boundary_condition=:periodic)
 interior_view(u1d) .= [10.0, 20.0, 30.0, 40.0]   # interior_view = owned cells only
 
-println("owned / storage size : ", owned_size(u1d), " / ", storage_size(u1d))  # (4,) / (6,)
+println("owned / storage size : ", interior_size(u1d), " / ", storage_size(u1d))  # (4,) / (6,)
 println("u1d[2], axes(u1d)    : ", u1d[2], ", ", axes(u1d))                     # 20.0, (1:4,)
 println("full storage         : ", collect(parent(u1d)))                        # ghosts still 0
 
@@ -67,15 +67,15 @@ show_bc("antireflecting", ((Antireflecting(), Antireflecting()),))
 # One (left, right) pair per dimension:
 u2d = LocalHaloArray(Float64, (3, 3), 1;
     boundary_condition=((Periodic(), Periodic()), (Reflecting(), Reflecting())))
-println("  2-D mixed BC: size=", owned_size(u2d), " halo=", halo_width(u2d))
+println("  2-D mixed BC: size=", interior_size(u2d), " halo=", halo_width(u2d))
 
 # ============================================================
 # 3. RANGE HELPERS
 # ============================================================
 # These name the index ranges a stencil loop needs, so you don't hand-write
 # CartesianIndices(interior_range(u)) every time:
-#   CellRanges — cell-centred loops:  get_owned_cells,
-#                get_colored_owned_cell_ranges (checkerboard / Gauss-Seidel)
+#   CellRanges — cell-centred loops:  get_interior_cells,
+#                get_colored_interior_cell_ranges (checkerboard / Gauss-Seidel)
 #   FaceRanges — finite-volume flux loops:  get_left_face / get_internal_face /
 #                get_right_face, and get_unit_vector (offset across a face)
 
@@ -85,9 +85,9 @@ u = LocalHaloArray(Float64, (6,), 1; boundary_condition=:periodic)
 interior_view(u) .= Float64.(1:6)
 
 cr = CellRanges(u)
-println("owned cells  : ", collect(get_owned_cells(cr)))
-println("checkerboard : ", collect.(get_colored_owned_cell_ranges(cr, 0)),
-        " / ", collect.(get_colored_owned_cell_ranges(cr, 1)))
+println("owned cells  : ", collect(get_interior_cells(cr)))
+println("checkerboard : ", collect.(get_colored_interior_cell_ranges(cr, 0)),
+        " / ", collect.(get_colored_interior_cell_ranges(cr, 1)))
 
 fr = FaceRanges(u)
 println("faces (left / internal / right):")
@@ -271,8 +271,8 @@ interior_view(vel[1]) .= 1.0          # u-component
 interior_view(vel[2]) .= 0.0          # v-component
 synchronize_halo!(vel)                # refreshes every field at once
 
-println("  field shape / owned size : ", field_shape(vel), " / ", owned_size(vel[1]))
-println("  owned cells              : ", size(get_owned_cells(CellRanges(vel))))
+println("  field shape / owned size : ", field_shape(vel), " / ", interior_size(vel[1]))
+println("  owned cells              : ", size(get_interior_cells(CellRanges(vel))))
 
 # A 2×2 stress-tensor field; broadcast hits all four components:
 sigma = ArrayOfHaloArray(LocalHaloArray, Float64, (2, 2), (8, 8), 1;

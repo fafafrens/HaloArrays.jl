@@ -74,7 +74,7 @@ function _check_periodic_1d_halo_exchange!(exchange!)
 end
 
 function _fill_2d_rank_pattern!(ha, rank)
-    nx, ny = owned_size(ha)
+    nx, ny = interior_size(ha)
     interior = interior_view(ha)
     for i in 1:nx, j in 1:ny
         interior[i, j] = 1000 * rank + 100 * i + j
@@ -121,7 +121,7 @@ function _check_periodic_2d_halo_exchange!(exchange!)
 end
 
 function _fill_3d_rank_pattern!(ha, rank)
-    nx, ny, nz = owned_size(ha)
+    nx, ny, nz = interior_size(ha)
     interior = interior_view(ha)
     for i in 1:nx, j in 1:ny, k in 1:nz
         interior[i, j, k] = 100_000 * rank + 10_000 * i + 100 * j + k
@@ -534,7 +534,7 @@ end
         I[1]
     end
 
-    global_start = owned_to_global_index(ha, (1,))[1]
-    global_end   = owned_to_global_index(ha, (owned_size(ha, 1),))[1]
+    global_start = interior_to_global_index(ha, (1,))[1]
+    global_end   = interior_to_global_index(ha, (interior_size(ha, 1),))[1]
     @test collect(interior_view(ha)) == collect(global_start:global_end)
 end

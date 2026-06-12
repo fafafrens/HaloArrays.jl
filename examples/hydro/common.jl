@@ -140,7 +140,7 @@ function fill_pressure_bump!(::_HydroFlatBackend, u; gamma=1.4)
 
     @inbounds for I in CartesianIndices(interior_range(u[:rho]))
         storage_i, storage_j = Tuple(I)
-        global_i, global_j = owned_to_global_index(u[:rho], (storage_i - h, storage_j - h))
+        global_i, global_j = interior_to_global_index(u[:rho], (storage_i - h, storage_j - h))
         rho, mx, my, energy = initial_hydro_state(global_i, global_j, nx, ny, gamma)
 
         data.rho[I] = rho

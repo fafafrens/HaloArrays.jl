@@ -100,7 +100,7 @@ synchronize_halo!(u_gpu)
 
 backend    = KA.get_backend(parent(u_gpu))
 kernel!    = laplacian_kernel!(backend, (16, 16))
-owned      = owned_size(u_gpu)          # (64, 64)
+owned      = interior_size(u_gpu)          # (64, 64)
 inv_dx2    = Float32((nx)^2)
 inv_dy2    = Float32((ny)^2)
 
@@ -120,7 +120,7 @@ println("max |Δu|  : ", maximum(abs, du_cpu))   # near 0 for constant field
 # (1-based, includes ghost padding).
 #
 # Workflow:
-#   1.  region = get_owned_cell_region(CellRanges(u))
+#   1.  region = get_interior_cell_region(CellRanges(u))
 #   2.  Launch with ndrange = region.size
 #   3.  Inside kernel: I = cell_index(region, J)
 #                      where J = @index(Global, NTuple)
@@ -139,7 +139,7 @@ println("=" ^ 60)
     end
 end
 
-region = get_owned_cell_region(CellRanges(u_gpu))
+region = get_interior_cell_region(CellRanges(u_gpu))
 println("launch size (owned)  : ", region.size)
 println("first owned cell     : ", region.first)   # storage coords, = (halo+1, halo+1)
 
@@ -160,7 +160,7 @@ println("storage[2,2] (J=1,1) : ", corner_val)   # I=(2,2) → 2*100+2 = 202.0
 # Cells of the same color are independent and can be updated in
 # one parallel kernel launch.
 #
-# get_colored_owned_cell_region(ranges, color; compressed_dim)
+# get_colored_interior_cell_region(ranges, color; compressed_dim)
 #   compressed_dim — the spatial dimension along which the launch
 #                    grid is compressed.  Choosing the fastest-
 #                    varying memory dimension gives coalesced access.
@@ -191,7 +191,7 @@ for color in 0:1
     synchronize_halo!(u_gpu)
     KA.synchronize(backend)
 
-    region_c = get_colored_owned_cell_region(ranges, color; compressed_dim=2)
+    region_c = get_colored_interior_cell_region(ranges, color; compressed_dim=2)
     println("color=$color  launch size : ", region_c.size)
 
     any(==(0), region_c.size) && continue
@@ -304,7 +304,7 @@ function run_heat_gpu(; n=(128,128), alpha=1.0f0, nt=200, cfl=0.4f0, groupsize=(
     inv_dy2 = alpha / dy^2
 
     cr      = CellRanges(u)
-    region  = get_owned_cell_region(cr)
+    region  = get_interior_cell_region(cr)
 
     rhs_k!  = heat_rhs_kernel!(bk, groupsize)
     step_k! = euler_update_kernel!(bk, groupsize)

@@ -21,9 +21,9 @@ function split_exchange!(halo)
     return halo
 end
 
-function run_periodic_cases!(rows, ::Val{N}, comm, rank, owned_size, halo_width, samples, warmups, metadata) where {N}
+function run_periodic_cases!(rows, ::Val{N}, comm, rank, interior_size, halo_width, samples, warmups, metadata) where {N}
     topology = diagnostic_topology(Val(N), comm, true)
-    halo = HaloArray(Float64, owned_size, halo_width, topology; boundary_condition=:periodic)
+    halo = HaloArray(Float64, interior_size, halo_width, topology; boundary_condition=:periodic)
     fill_benchmark_data!(halo)
 
     case_metadata = merge(copy(metadata), Dict{String,Any}(
@@ -40,9 +40,9 @@ function run_periodic_cases!(rows, ::Val{N}, comm, rank, owned_size, halo_width,
     return nothing
 end
 
-function run_physical_cases!(rows, ::Val{N}, comm, rank, owned_size, halo_width, boundary_mode, samples, warmups, metadata) where {N}
+function run_physical_cases!(rows, ::Val{N}, comm, rank, interior_size, halo_width, boundary_mode, samples, warmups, metadata) where {N}
     topology = diagnostic_topology(Val(N), comm, false)
-    halo = HaloArray(Float64, owned_size, halo_width, topology; boundary_condition=boundary_mode)
+    halo = HaloArray(Float64, interior_size, halo_width, topology; boundary_condition=boundary_mode)
     fill_benchmark_data!(halo)
 
     case_metadata = merge(copy(metadata), Dict{String,Any}(
@@ -69,7 +69,7 @@ function main()
     halo_width = option_int(options, "halo", 1)
     samples = option_int(options, "samples", 30)
     warmups = option_int(options, "warmups", 5)
-    owned_size = option_owned_size(options, ndims, 64)
+    interior_size = option_owned_size(options, ndims, 64)
     boundary_mode = Symbol(option_string(options, "boundary", "repeating"))
 
     if boundary_mode === :periodic
@@ -80,7 +80,7 @@ function main()
         println("MPI diagnostics benchmark")
         println("  ranks:       ", nproc)
         println("  ndims:       ", ndims)
-        println("  owned size:  ", owned_size)
+        println("  owned size:  ", interior_size)
         println("  halo width:  ", halo_width)
         println("  physical boundary: ", boundary_mode)
         println("  samples:     ", samples)
@@ -91,13 +91,13 @@ function main()
     metadata = Dict{String,Any}(
         "ranks" => nproc,
         "ndims" => ndims,
-        "owned_size" => joined_tuple(owned_size),
+        "interior_size" => joined_tuple(interior_size),
         "halo_width" => halo_width,
     )
     rows = Dict{String,Any}[]
 
-    run_periodic_cases!(rows, Val(ndims), comm, rank, owned_size, halo_width, samples, warmups, metadata)
-    run_physical_cases!(rows, Val(ndims), comm, rank, owned_size, halo_width, boundary_mode, samples, warmups, metadata)
+    run_periodic_cases!(rows, Val(ndims), comm, rank, interior_size, halo_width, samples, warmups, metadata)
+    run_physical_cases!(rows, Val(ndims), comm, rank, interior_size, halo_width, boundary_mode, samples, warmups, metadata)
 
     if rank == 0
         maybe_write_csv(options, rows)

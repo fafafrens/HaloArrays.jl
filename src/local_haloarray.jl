@@ -50,7 +50,7 @@ function LocalHaloArray(owned_dims::NTuple{N,Int}, halo::Int; boundary_condition
     return LocalHaloArray(Float64, owned_dims, halo; boundary_condition)
 end
 
-# size, axes, length, eltype, ndims, parent, owned_axes, eachindex, iterate
+# size, axes, length, eltype, ndims, parent, interior_axes, eachindex, iterate
 # inherited from AbstractSingleHaloArray / AbstractArray.
 
 is_root(::LocalHaloArray; root::Integer=0) = (root == 0)
@@ -90,9 +90,9 @@ end
 
 # Non-Int dims are normalized to Dims by Base's generic similar fallbacks.
 
-# Base.copy, Base.zero, Base.fill!, Base.copyto!, fill_interior!,
+# Base.copy, Base.zero, Base.fill!, Base.copyto!,
 # fill_from_local_indices!, Base.foreach, arithmetic, norm,
-# owned_axes, eachindex, iterate, versors, Base.similar dispatchers,
+# interior_axes, eachindex, iterate, versors, Base.similar dispatchers,
 # Base.map!/map — all inherited from AbstractSingleHaloArray
 
 function Base.map(f, src::Vararg{LocalHaloArray,N}) where {N}
@@ -110,10 +110,10 @@ function fill_from_global_indices!(f, halo::LocalHaloArray)
     return halo
 end
 
-owned_to_global_index(::LocalHaloArray, owned_idx::NTuple{N,<:Integer}) where {N} = owned_idx
+interior_to_global_index(::LocalHaloArray, owned_idx::NTuple{N,<:Integer}) where {N} = owned_idx
 global_to_storage_index(halo::LocalHaloArray, global_idx::NTuple{N,<:Integer}) where {N} =
-    all(i -> 1 <= global_idx[i] <= owned_size(halo, i), 1:N) ? ntuple(i -> global_idx[i] + halo_width(halo), Val(N)) : nothing
-global_size(halo::LocalHaloArray) = owned_size(halo)
+    all(i -> 1 <= global_idx[i] <= interior_size(halo, i), 1:N) ? ntuple(i -> global_idx[i] + halo_width(halo), Val(N)) : nothing
+global_size(halo::LocalHaloArray) = interior_size(halo)
 
 function Base.getindex(halo::LocalHaloArray, I::Vararg{Integer})
     idx = _check_global_scalar_indices(halo, I)
@@ -129,7 +129,7 @@ function Base.setindex!(halo::LocalHaloArray, value, I::Vararg{Integer})
 end
 
 function Base.show(io::IO, obj::LocalHaloArray)
-    print(io, "LocalHaloArray of global size ", size(obj), " (owned size: ", owned_size(obj), ", storage size: ", storage_size(obj), "), halo width: ", halo_width(obj), "\n")
+    print(io, "LocalHaloArray of global size ", size(obj), " (owned size: ", interior_size(obj), ", storage size: ", storage_size(obj), "), halo width: ", halo_width(obj), "\n")
     print(io, "  eltype: ", eltype(obj), "\n")
     print(io, "  boundary_condition: ", obj.boundary_condition, "\n")
 end

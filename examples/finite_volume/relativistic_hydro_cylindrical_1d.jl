@@ -141,7 +141,7 @@ end
 # du[I] = S(U_I, r_I)  with  S = −(α/r)(Nv, Mv, M).  This SETS du — it is the
 # first contribution to the RHS, so it replaces the fill!(du,0) + accumulate
 # pair; the flux divergence is then added on top.  Iterates owned cells via
-# get_owned_cells(CellRanges(u)) — the cell analogue of the face loop.  Because
+# get_interior_cells(CellRanges(u)) — the cell analogue of the face loop.  Because
 # it reads ONLY owned cells (never ghosts), it can run while the halo exchange
 # is still in flight (see rel_rhs!).
 
@@ -149,7 +149,7 @@ function add_geometric_source!(du, u, eos, r_min, dr)
     du_data = parent(du)
     u_data  = parent(u)
     h = halo_width(u.N)
-    @inbounds for I in get_owned_cells(CellRanges(u))
+    @inbounds for I in get_interior_cells(CellRanges(u))
         U = conserved_cell(u_data, I)
         _, _, v = prim_from_cons(eos, U)
         r = r_min + (I[1] - h - 0.5) * dr
@@ -192,7 +192,7 @@ function diagnostics(u, eos, r_min, dr)
     d = parent(u)
     h = halo_width(u.N)
     charge = 0.0; energy = 0.0; vmax = 0.0
-    @inbounds for I in get_owned_cells(CellRanges(u))
+    @inbounds for I in get_interior_cells(CellRanges(u))
         U = conserved_cell(d, I)
         _, _, v = prim_from_cons(eos, U)
         r = r_min + (I[1] - h - 0.5) * dr

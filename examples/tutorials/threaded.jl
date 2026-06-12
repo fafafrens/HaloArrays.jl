@@ -59,7 +59,7 @@ u = ThreadedHaloArray(Float64, tile_size, 1; dims=tile_dims, boundary_condition=
 println("tile_size   : ", tile_size)
 println("tile_dims   : ", tile_dims)
 println("tile_count  : ", tile_count(u))
-println("owned_size  : ", owned_size(u))    # full global owned extent
+println("interior_size  : ", interior_size(u))    # full global owned extent
 println("global_size : ", global_size(u))
 println("halo_width  : ", halo_width(u))
 println("storage per tile: ", storage_size(u))   # tile_size + 2*halo in each dim
@@ -301,7 +301,7 @@ synchronize_halo!(vel2)
 
 # tile_count, CellRanges, FaceRanges all accept the container directly
 println("tile_count  : ", tile_count(vel2))
-println("owned cells : ", size(get_owned_cells(CellRanges(vel2))))
+println("owned cells : ", size(get_interior_cells(CellRanges(vel2))))
 println("face ranges : ", get_left_face(FaceRanges(vel2), 1))
 
 println()

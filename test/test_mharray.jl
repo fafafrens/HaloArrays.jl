@@ -71,8 +71,8 @@ end
     @test size(from_bcs) == (2, 3, 2)
     @test size(from_bcs) == global_size(from_bcs)
     @test axes(from_bcs) == map(Base.OneTo, global_size(from_bcs))
-    @test owned_axes(from_bcs) == map(Base.OneTo, owned_size(from_bcs))
-    @test owned_size(from_bcs) == (2, 3, 2)
+    @test interior_axes(from_bcs) == map(Base.OneTo, interior_size(from_bcs))
+    @test interior_size(from_bcs) == (2, 3, 2)
     @test global_size(from_bcs) == (2, 3, 2)
     @test eltype(from_bcs) === Float64
 
@@ -86,8 +86,8 @@ end
     @test local_fields[:rho] isa LocalHaloArray
     @test size(local_fields) == (2, 3)
     @test size(local_fields) == global_size(local_fields)
-    @test owned_axes(local_fields) == map(Base.OneTo, owned_size(local_fields))
-    @test owned_size(local_fields) == (2, 3)
+    @test interior_axes(local_fields) == map(Base.OneTo, interior_size(local_fields))
+    @test interior_size(local_fields) == (2, 3)
     @test local_fields[1] === local_fields.arrays.rho
     @test local_fields[1, 2] == 2
     local_fields[2, 3] = 35
@@ -110,7 +110,7 @@ end
     @test resized_local isa MultiHaloArray
     @test eltype(resized_local) === Float32
     @test size(resized_local) == (2, 5)
-    @test owned_size(resized_local) == (2, 5)
+    @test interior_size(resized_local) == (2, 5)
     @test_throws DimensionMismatch similar(local_fields, Float32, (3, 5))
 
     synchronize_halo!(local_fields)
@@ -130,8 +130,8 @@ end
     @test threaded_fields[:rho] isa ThreadedHaloArray
     @test size(threaded_fields) == (2, 6)
     @test size(threaded_fields) == global_size(threaded_fields)
-    @test owned_axes(threaded_fields) == map(Base.OneTo, owned_size(threaded_fields))
-    @test owned_size(threaded_fields) == (2, 6)
+    @test interior_axes(threaded_fields) == map(Base.OneTo, interior_size(threaded_fields))
+    @test interior_size(threaded_fields) == (2, 6)
 
     shifted_threaded = threaded_fields .+ 3
     @test shifted_threaded isa MultiHaloArray
@@ -158,8 +158,9 @@ end
     threaded_zero = zero(threaded_fields)
     @test threaded_zero isa MultiHaloArray
     @test fill!(threaded_zero, -3) === threaded_zero
+    # fill! is interior-only; ghosts are refreshed by synchronize_halo!
     for field in values(threaded_zero.arrays), tile_id in 1:tile_count(threaded_zero)
-        @test all(==(-3), tile_parent(field, tile_id))
+        @test all(==(-3), interior_view(field, tile_id))
     end
 
     resized_threaded = similar(threaded_fields, Float32, (2, 8))
@@ -190,7 +191,7 @@ end
     @test ndims(nested_fields) == 3
     @test size(nested_fields) == (2, 3, 2)
     @test size(nested_fields) == global_size(nested_fields)
-    @test owned_size(nested_fields) == (2, 3, 2)
+    @test interior_size(nested_fields) == (2, 3, 2)
     @test interior_size(nested_fields) == (2, 3, 2)
     @test global_size(nested_fields) == (2, 3, 2)
     @test storage_size(nested_fields) == (2, 5, 4)

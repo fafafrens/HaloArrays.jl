@@ -127,7 +127,7 @@ end
 # is_root, isactive inherited from AbstractHaloCollection (abstract_haloarray.jl)
 
 # size/axes/eachindex/length, n_field, interior/owned/global/storage size, and
-# owned_axes come from AbstractHaloCollection (field_shape prefix + _spatial_*).
+# interior_axes come from AbstractHaloCollection (field_shape prefix + _spatial_*).
 
 function Base.getindex(mha::ArrayOfHaloArray{T,D,S}, I...) where {T,D,S}
     field_ndims = D - S

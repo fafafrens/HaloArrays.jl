@@ -17,8 +17,8 @@ function mode_topology(::Val{N}, comm, mode::Symbol) where {N}
     return CartesianTopology(comm, Tuple(Int.(dims)); periodic=ntuple(_ -> is_periodic, Val(N)))
 end
 
-function make_threaded_boundary_halo(::Val{N}, owned_size, halo_width, tile_dims, mode::Symbol) where {N}
-    tile_size = tile_size_from_owned_size(owned_size, tile_dims)
+function make_threaded_boundary_halo(::Val{N}, interior_size, halo_width, tile_dims, mode::Symbol) where {N}
+    tile_size = tile_size_from_owned_size(interior_size, tile_dims)
     return ThreadedHaloArray(Float64, tile_size, halo_width; dims=tile_dims, boundary_condition=mode)
 end
 
@@ -40,10 +40,10 @@ function mpi_case!(rows, name, f, samples, warmups, metadata; comm, rank)
     return nothing
 end
 
-function run_rank_local_cases!(rows, ::Val{N}, owned_size, halo_width, tile_dims, modes, samples, warmups, timer, metadata) where {N}
+function run_rank_local_cases!(rows, ::Val{N}, interior_size, halo_width, tile_dims, modes, samples, warmups, timer, metadata) where {N}
     for mode in modes
-        local_u = LocalHaloArray(Float64, owned_size, halo_width; boundary_condition=mode)
-        threaded_u = make_threaded_boundary_halo(Val(N), owned_size, halo_width, tile_dims, mode)
+        local_u = LocalHaloArray(Float64, interior_size, halo_width; boundary_condition=mode)
+        threaded_u = make_threaded_boundary_halo(Val(N), interior_size, halo_width, tile_dims, mode)
 
         fill_benchmark_data!(local_u)
         fill_benchmark_data!(threaded_u)
@@ -62,10 +62,10 @@ function run_rank_local_cases!(rows, ::Val{N}, owned_size, halo_width, tile_dims
     return nothing
 end
 
-function run_mpi_cases!(rows, ::Val{N}, comm, rank, owned_size, halo_width, modes, samples, warmups, metadata) where {N}
+function run_mpi_cases!(rows, ::Val{N}, comm, rank, interior_size, halo_width, modes, samples, warmups, metadata) where {N}
     for mode in modes
         topology = mode_topology(Val(N), comm, mode)
-        mpi_u = HaloArray(Float64, owned_size, halo_width, topology; boundary_condition=mode)
+        mpi_u = HaloArray(Float64, interior_size, halo_width, topology; boundary_condition=mode)
         fill_benchmark_data!(mpi_u)
 
         mode_metadata = merge(copy(metadata), Dict{String,Any}(
@@ -91,7 +91,7 @@ function main()
     halo_width = option_int(options, "halo", 1)
     samples = option_int(options, "samples", 30)
     warmups = option_int(options, "warmups", 5)
-    owned_size = option_owned_size(options, ndims, 64)
+    interior_size = option_owned_size(options, ndims, 64)
     tile_dims = option_tuple(options, "tile-dims", ndims, 2)
     modes = boundary_modes(options)
     timer = Symbol(option_string(options, "timer", "manual"))
@@ -100,9 +100,9 @@ function main()
         println("Boundary-condition benchmark")
         println("  ranks:       ", nproc)
         println("  ndims:       ", ndims)
-        println("  owned size:  ", owned_size)
+        println("  owned size:  ", interior_size)
         println("  tile dims:   ", tile_dims)
-        println("  tile size:   ", tile_size_from_owned_size(owned_size, tile_dims))
+        println("  tile size:   ", tile_size_from_owned_size(interior_size, tile_dims))
         println("  Julia threads: ", nthreads())
         println("  halo width:  ", halo_width)
         println("  modes:       ", join(modes, ", "))
@@ -115,20 +115,20 @@ function main()
     metadata = Dict{String,Any}(
         "ranks" => nproc,
         "ndims" => ndims,
-        "owned_size" => joined_tuple(owned_size),
+        "interior_size" => joined_tuple(interior_size),
         "halo_width" => halo_width,
         "tile_dims" => joined_tuple(tile_dims),
-        "tile_size" => joined_tuple(tile_size_from_owned_size(owned_size, tile_dims)),
+        "tile_size" => joined_tuple(tile_size_from_owned_size(interior_size, tile_dims)),
         "threads" => nthreads(),
     )
     rows = Dict{String,Any}[]
 
     if rank == 0
-        run_rank_local_cases!(rows, Val(ndims), owned_size, halo_width, tile_dims, modes, samples, warmups, timer, metadata)
+        run_rank_local_cases!(rows, Val(ndims), interior_size, halo_width, tile_dims, modes, samples, warmups, timer, metadata)
     end
 
     MPI.Barrier(comm)
-    run_mpi_cases!(rows, Val(ndims), comm, rank, owned_size, halo_width, modes, samples, warmups, metadata)
+    run_mpi_cases!(rows, Val(ndims), comm, rank, interior_size, halo_width, modes, samples, warmups, metadata)
 
     if rank == 0
         maybe_write_csv(options, rows)

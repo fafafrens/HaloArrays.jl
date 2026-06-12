@@ -170,7 +170,7 @@ function _fv_max_exact_error_1d(u::_FVSerialHaloArray, exact_value, args...)
     @inbounds for I in CartesianIndices(interior_range(u))
         storage_i = Tuple(I)
         owned_i = ntuple(d -> storage_i[d] - h, Val(ndims(u)))
-        global_i = owned_to_global_index(u, owned_i)[1]
+        global_i = interior_to_global_index(u, owned_i)[1]
         local_error = max(local_error, abs(parent(u)[I] - exact_value(global_i, nx, args...)))
     end
 

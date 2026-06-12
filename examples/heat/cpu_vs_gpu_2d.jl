@@ -34,7 +34,7 @@ end
 
 function zero_owned_cpu!(u)
     data = parent(u)
-    @inbounds for I in get_owned_cells(CellRanges(u))
+    @inbounds for I in get_interior_cells(CellRanges(u))
         data[I] = zero(eltype(data))
     end
     return u
@@ -82,7 +82,7 @@ function apply_heat_update_cpu!(u_next, u, du, dt)
     data = parent(u)
     du_data = parent(du)
 
-    @inbounds for I in get_owned_cells(CellRanges(u))
+    @inbounds for I in get_interior_cells(CellRanges(u))
         out[I] = data[I] + dt * du_data[I]
     end
 
@@ -132,7 +132,7 @@ end
 
 function heat_step_gpu!(kernels, u_next, du, u, alpha, dt, dx)
     backend, zero!, flux!, update! = kernels
-    cell_region = get_owned_cell_region(CellRanges(u))
+    cell_region = get_interior_cell_region(CellRanges(u))
     ranges = FaceRanges(u)
 
     launch_cell_kernel!(zero!, parent(du), cell_region)

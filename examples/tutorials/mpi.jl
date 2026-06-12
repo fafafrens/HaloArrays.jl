@@ -76,16 +76,16 @@ halo_w     = 1
 u = HaloArray(Float64, owned_dims, halo_w, topology; boundary_condition=:periodic)
 
 if rank == 0
-    println("owned_dims   : ", owned_size(u))
+    println("owned_dims   : ", interior_size(u))
     println("storage_size : ", storage_size(u))   # includes ghost cells
     println("global_size  : ", global_size(u))    # entire distributed grid
     println("halo_width   : ", halo_width(u))
 end
 
 # Logical indexing through u uses global 1-based indices on this rank's
-# subdomain.  owned_axes returns the global-index range this rank owns.
+# subdomain.  interior_axes returns the global-index range this rank owns.
 if rank == 0
-    println("owned_axes   : ", owned_axes(u))
+    println("interior_axes   : ", interior_axes(u))
 end
 
 # Fill each cell with its global linear index as a simple pattern

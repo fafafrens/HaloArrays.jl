@@ -185,7 +185,7 @@ function phi4_sweep!(kernel!, backend, phi, params, key::UInt64, sweep::Integer)
         synchronize_halo!(phi)
         KA.synchronize(backend)
 
-        region = get_colored_owned_cell_region(ranges, color; compressed_dim = 2)
+        region = get_colored_interior_cell_region(ranges, color; compressed_dim = 2)
 
         if any(iszero, region.size)
             continue

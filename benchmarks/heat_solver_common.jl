@@ -8,8 +8,8 @@ function stable_heat_dt(alpha, cfl, dx)
     return cfl / (alpha * sum(inv(abs2(d)) for d in dxs))
 end
 
-function problem_size_from_topology(owned_size, topology_dims)
-    return ntuple(d -> owned_size[d] * topology_dims[d], length(owned_size))
+function problem_size_from_topology(interior_size, topology_dims)
+    return ntuple(d -> interior_size[d] * topology_dims[d], length(interior_size))
 end
 
 function heat_initial_value(I, problem_size)

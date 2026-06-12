@@ -12,13 +12,13 @@
 - [`CartesianTopology`](@ref): MPI Cartesian topology helper.
 
 `size(u)` and `axes(u)` describe the global logical domain for every halo
-container. Local owned data is accessed through [`owned_size`](@ref),
-[`owned_axes`](@ref), and [`interior_view`](@ref).
+container. Local owned data is accessed through [`interior_size`](@ref),
+[`interior_axes`](@ref), and [`interior_view`](@ref).
 
 Scalar indexing on `HaloArray` uses global indices, but it is local-only: it
 works only for global cells owned by the current MPI rank and throws otherwise.
 It is intended for diagnostics and setup, not stencil kernels or hot loops. Use
-`interior_view`, `parent`, `owned_to_global_index`, and `global_to_storage_index`
+`interior_view`, `parent`, `interior_to_global_index`, and `global_to_storage_index`
 when you need explicit local/global behavior.
 
 ## Typical workflow
@@ -36,7 +36,7 @@ This keeps interior ownership explicit and halo validity predictable.
 The package separates logical array shape from owned storage:
 
 - `size(u)` / `axes(u)`: global logical array shape.
-- [`owned_size`](@ref)`(u)` / [`owned_axes`](@ref)`(u)`: cells owned by this rank or local backend.
+- [`interior_size`](@ref)`(u)` / [`interior_axes`](@ref)`(u)`: cells owned by this rank or local backend.
 - [`interior_view`](@ref)`(u)`: writable owned cells, excluding halos.
 - `parent(u)`: raw storage including halos.
 - [`storage_size`](@ref)`(u)`: raw storage size including halos.
@@ -199,8 +199,8 @@ For collections the ranges are spatial only — select a field first.
 ## Cell loops
 
 [`CellRanges`](@ref)`(u)` gives the owned-cell range. For ordinary out-of-place
-stencils use [`get_owned_cells`](@ref); for nearest-neighbor in-place red-black
-updates use [`get_colored_owned_cell_ranges`](@ref)`(ranges, color)` (strided
+stencils use [`get_interior_cells`](@ref); for nearest-neighbor in-place red-black
+updates use [`get_colored_interior_cell_ranges`](@ref)`(ranges, color)` (strided
 `CartesianIndices`, so the inner loop has no parity branch). Cell colors use
 `mod(sum(Tuple(I)), 2)`.
 

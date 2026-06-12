@@ -55,7 +55,7 @@ function halo_backend end
 
 Size of the backing storage **including** ghost padding (`owned + 2*halo` per
 dimension); for [`ThreadedHaloArray`](@ref) this is the per-tile storage.
-Contrast with [`owned_size`](@ref) (ghost-free) and [`global_size`](@ref).
+Contrast with [`interior_size`](@ref) (ghost-free) and [`global_size`](@ref).
 """
 @inline storage_size(halo::AbstractSingleHaloArray)         = size(parent(halo))
 @inline storage_size(halo::AbstractSingleHaloArray, i::Int) = size(parent(halo), i)
@@ -80,30 +80,26 @@ See also [`interior_view`](@ref).
 end
 
 """
-    owned_size(halo)
+    interior_size(halo[, i])
 
-Return the owned interior size of a halo container on the current process.
-
-For `HaloArray` this is the owned MPI subdomain size, not the global
-distributed size. For serial containers it is equal to their full logical
-interior size.
+Size of the interior (ghost-free) region this process owns. For `HaloArray`
+this is the local MPI subdomain size, not the global distributed size; for
+serial containers it equals the full logical size.
 """
-@inline owned_size(halo::AbstractHaloArray) = interior_size(halo)
-@inline owned_size(halo::AbstractHaloArray, i::Int) = owned_size(halo)[i]
+@inline interior_size(halo::AbstractHaloArray, i::Int) = interior_size(halo)[i]
 
 """
-    owned_axes(halo)
+    interior_axes(halo[, i])
 
-Return the owned-cell axes of a halo container on the current process.
-
-Use `axes(halo)` for the global logical axes and `owned_axes(halo)` when
-looping over data that this process can update directly.
+Axes of the interior (ghost-free) region this process owns. Use `axes(halo)`
+for the global logical axes and `interior_axes(halo)` when looping over data
+this process can update directly.
 """
-@inline owned_axes(halo::AbstractHaloArray) = map(Base.OneTo, owned_size(halo))
-@inline owned_axes(halo::AbstractHaloArray, i::Int) = owned_axes(halo)[i]
+@inline interior_axes(halo::AbstractHaloArray) = map(Base.OneTo, interior_size(halo))
+@inline interior_axes(halo::AbstractHaloArray, i::Int) = interior_axes(halo)[i]
 
 function storage_size end
-function owned_to_global_index end
+function interior_to_global_index end
 function global_to_storage_index end
 function is_root end
 
@@ -140,7 +136,7 @@ function validate_boundary_condition(topology::AbstractCartesianTopology, bounda
 end
 
 # ---- AbstractSingleHaloArray defaults ---------------------------------
-# ThreadedHaloArray overrides fill!, copyto!, fill_interior!,
+# ThreadedHaloArray overrides fill!, copyto!,
 # fill_from_local_indices!, and Base.foreach with tforeach variants.
 
 @inline Base.size(halo::AbstractSingleHaloArray)         = global_size(halo)
@@ -169,12 +165,14 @@ function Base.foreach(f, halo::AbstractSingleHaloArray)
 end
 
 """
-    fill_interior!(u, value)
+    fill!(u, value)
 
-Set every owned (ghost-free) cell of `u` to `value`. Ghosts are left untouched —
-call [`synchronize_halo!`](@ref) afterwards if a stencil will read them.
+Set every interior (ghost-free) cell of `u` to `value` — consistent with the
+interior-only semantics of broadcast and reductions. Ghosts are left untouched;
+call [`synchronize_halo!`](@ref) before a stencil reads them. Use
+`fill!(parent(u), value)` to overwrite the raw storage including ghosts.
 """
-function fill_interior!(halo::AbstractSingleHaloArray, value)
+function Base.fill!(halo::AbstractSingleHaloArray, value)
     fill!(interior_view(halo), value)
     return halo
 end
@@ -212,13 +210,9 @@ function Base.zero(halo::AbstractSingleHaloArray)
     return z
 end
 
-function Base.fill!(halo::AbstractSingleHaloArray, value)
-    fill!(parent(halo), value)
-    return halo
-end
 
-@inline owned_axes(halo::AbstractSingleHaloArray)         = axes(interior_view(halo))
-@inline owned_axes(halo::AbstractSingleHaloArray, i::Int) = axes(interior_view(halo), i)
+@inline interior_axes(halo::AbstractSingleHaloArray)         = axes(interior_view(halo))
+@inline interior_axes(halo::AbstractSingleHaloArray, i::Int) = axes(interior_view(halo), i)
 
 @inline versors(::AbstractSingleHaloArray{<:Any,N}) where {N} = versors(Val(N))
 
@@ -264,17 +258,16 @@ function _fields end
 @inline _spatial_ndims(::AbstractHaloCollection{T,N,S}) where {T,N,S} = S
 @inline _spatial_interior_range(x) = interior_range(_geometry_field(x))
 @inline _spatial_interior_size(x)  = interior_size(_geometry_field(x))
-@inline _spatial_owned_size(x)     = owned_size(_geometry_field(x))
 @inline _spatial_global_size(x)    = global_size(_geometry_field(x))
 @inline _spatial_storage_size(x)   = storage_size(_geometry_field(x))
 @inline _spatial_axes(x)           = axes(_geometry_field(x))
-@inline _spatial_owned_axes(x)     = owned_axes(_geometry_field(x))
+@inline _spatial_interior_axes(x)     = interior_axes(_geometry_field(x))
 
 # ---- collection shape / axes -------------------------------------------
 # Every size/axes query on a collection is the field-axes prefix (field_shape:
 # (n_field,) for named collections, the container Shape for indexed ones)
-# followed by the shared spatial geometry of the fields. owned_size falls back
-# to the generic owned_size = interior_size alias above.
+# followed by the shared spatial geometry of the fields. interior_size falls back
+# to the generic interior_size = interior_size alias above.
 @inline n_field(c::AbstractHaloCollection) = length(_fields(c))
 @inline interior_size(c::AbstractHaloCollection) = (field_shape(c)..., _spatial_interior_size(c)...)
 @inline global_size(c::AbstractHaloCollection)   = (field_shape(c)..., _spatial_global_size(c)...)
@@ -286,8 +279,8 @@ function _fields end
 @inline Base.axes(c::AbstractHaloCollection) = (map(Base.OneTo, field_shape(c))..., _spatial_axes(c)...)
 @inline Base.axes(c::AbstractHaloCollection, i::Int) = axes(c)[i]
 @inline Base.eachindex(c::AbstractHaloCollection) = CartesianIndices(axes(c))
-@inline owned_axes(c::AbstractHaloCollection) = (map(Base.OneTo, field_shape(c))..., _spatial_owned_axes(c)...)
-@inline owned_axes(c::AbstractHaloCollection, i::Int) = owned_axes(c)[i]
+@inline interior_axes(c::AbstractHaloCollection) = (map(Base.OneTo, field_shape(c))..., _spatial_interior_axes(c)...)
+@inline interior_axes(c::AbstractHaloCollection, i::Int) = interior_axes(c)[i]
 
 # ---- whole-collection data ops via the field container -------------------
 # _map_fields(g, c): apply g to every field and rebuild the same kind of

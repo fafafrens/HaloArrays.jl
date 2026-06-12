@@ -319,7 +319,7 @@ function su2_wilson_sweep!(
         synchronize_halo!(U)
         KA.synchronize(backend)
 
-        region = get_colored_owned_cell_region(ranges, color; compressed_dim = 2)
+        region = get_colored_interior_cell_region(ranges, color; compressed_dim = 2)
         any(iszero, region.size) && continue
 
         kx!(
@@ -340,7 +340,7 @@ function su2_wilson_sweep!(
         synchronize_halo!(U)
         KA.synchronize(backend)
 
-        region = get_colored_owned_cell_region(ranges, color; compressed_dim = 2)
+        region = get_colored_interior_cell_region(ranges, color; compressed_dim = 2)
         any(iszero, region.size) && continue
 
         ky!(
