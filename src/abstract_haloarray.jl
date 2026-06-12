@@ -53,7 +53,7 @@ function halo_backend end
 """
     storage_size(u[, i]) -> dims
 
-Size of the backing storage **including** ghost padding (`owned + 2*halo` per
+Size of the backing storage **including** ghost padding (`interior + 2*halo` per
 dimension); for [`ThreadedHaloArray`](@ref) this is the per-tile storage.
 Contrast with [`interior_size`](@ref) (ghost-free) and [`global_size`](@ref).
 """
@@ -68,7 +68,7 @@ end
 """
     interior_range(u) -> NTuple of UnitRanges
 
-The index ranges of the owned cells **within the padded storage** (`(halo+1) :
+The index ranges of the interior cells **within the padded storage** (`(halo+1) :
 (size-halo)` per dimension). Use it to index `parent(u)` in a stencil with
 ghost-safe offsets, e.g. `for I in CartesianIndices(interior_range(u))`. For
 [`ThreadedHaloArray`](@ref) the range is the same for every tile.
@@ -82,7 +82,7 @@ end
 """
     interior_size(halo[, i])
 
-Size of the interior (ghost-free) region this process owns. For `HaloArray`
+Size of the interior (ghost-free) region local to this process. For `HaloArray`
 this is the local MPI subdomain size, not the global distributed size; for
 serial containers it equals the full logical size.
 """
@@ -91,7 +91,7 @@ serial containers it equals the full logical size.
 """
     interior_axes(halo[, i])
 
-Axes of the interior (ghost-free) region this process owns. Use `axes(halo)`
+Axes of the interior (ghost-free) region local to this process. Use `axes(halo)`
 for the global logical axes and `interior_axes(halo)` when looping over data
 this process can update directly.
 """
@@ -180,8 +180,8 @@ end
 """
     fill_from_local_indices!(f, u)
 
-Set each owned cell from `f(i, j, …)`, where the indices are **local** to this
-rank's/tile's owned region (1-based, ghost-free). For coordinates on the global
+Set each interior cell from `f(i, j, …)`, where the indices are **local** to this
+rank's/tile's interior region (1-based, ghost-free). For coordinates on the global
 grid (the usual choice for initial conditions), use
 [`fill_from_global_indices!`](@ref).
 """

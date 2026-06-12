@@ -16,7 +16,7 @@ struct Reflecting       <: AbstractBoundaryCondition end
 """Odd reflection about the wall: `ghost = -interior` (the field vanishes at the
 wall) — e.g. a velocity component normal to a solid wall. Cf. [`Reflecting`](@ref)."""
 struct Antireflecting  <: AbstractBoundaryCondition end
-"Zero-gradient: each ghost cell copies the nearest owned value."
+"Zero-gradient: each ghost cell copies the nearest interior value."
 struct Repeating       <: AbstractBoundaryCondition end
 "Ghost cells wrap around from the opposite side of the domain (periodic)."
 struct Periodic        <: AbstractBoundaryCondition end
@@ -54,18 +54,18 @@ struct Dim{D}; end
     HaloArray(T, owned_dims, halo, topology; boundary_condition=:repeating)
     HaloArray(T, owned_dims, halo; boundary_condition=:repeating)   # builds a topology
 
-The MPI-distributed halo array. Each rank owns an `owned_dims` patch of the
+The MPI-distributed halo array. Each rank stores an `owned_dims` interior patch of the
 global grid surrounded by `halo` ghost cells; [`synchronize_halo!`](@ref)
 exchanges those ghosts with neighbouring ranks over an MPI Cartesian topology
 and applies the boundary condition at the physical domain edges.
 
-`owned_dims` is the size of *this rank's* patch — the global grid is
+`owned_dims` is the size of *this rank's interior* patch — the global grid is
 `owned_dims .* topology.dims`. Reductions (`sum`, `dot`, `norm`, …) are global
 (MPI `Allreduce`); scalar indexing is local-only and warns.
 
 # Arguments
 - `T`: element type (defaults to `Float64`).
-- `owned_dims::NTuple{N,Int}`: this rank's owned (interior) extent.
+- `owned_dims::NTuple{N,Int}`: this rank's interior extent.
 - `halo::Int`: ghost-cell width on each side.
 - `topology`: a [`CartesianTopology`](@ref). If omitted, one is built over
   `MPI.COMM_WORLD` with periodicity inferred from the boundary condition.
@@ -104,7 +104,7 @@ type, so it is a compile-time constant. Also callable on the type.
 """
     interior_view(u) -> view
 
-A mutable view of `u`'s owned (ghost-free) cells. The usual way to read/write
+A mutable view of `u`'s interior (ghost-free) cells. The usual way to read/write
 initial data: `interior_view(u) .= ...`. For [`ThreadedHaloArray`](@ref) pass a
 tile id: `interior_view(u, tile_id)`. See also [`interior_range`](@ref).
 """
@@ -156,7 +156,7 @@ end
     idx = _check_global_scalar_indices(halo, I)
     storage_idx = global_to_storage_index(halo, idx)
     storage_idx === nothing &&
-        throw(ArgumentError("Global index $idx is not owned by this MPI rank; HaloArray scalar indexing is local-only."))
+        throw(ArgumentError("Global index $idx is not in this MPI rank's interior region; HaloArray scalar indexing is local-only."))
     return storage_idx
 end
 
@@ -183,21 +183,21 @@ end
 
 # ---- send/recv buffer views -------------------------------------------
 #
-# Along one dimension D (storage size `sd = owned + 2*halo`), the storage is
+# Along one dimension D (storage size `sd = interior + 2*halo`), the storage is
 #
 #     index:   1 .. halo | halo+1 ..  sd-halo  | sd-halo+1 .. sd
-#              ghost(lo)  |   owned (interior)  |    ghost(hi)
+#              ghost(lo)  |       interior      |    ghost(hi)
 #
 # Two width-`halo` slabs matter at each boundary side:
 #   • the GHOST slab  — the cells to WRITE   → `_recv_window` ("receive")
-#   • the EDGE slab   — the `halo` owned cells touching that ghost slab,
+#   • the EDGE slab   — the `halo` interior cells touching that ghost slab,
 #                       the cells to READ    → `_send_window` ("send")
 #
 #   Side 1 (low):   ghost = 1:halo            edge = halo+1 : 2*halo
 #   Side 2 (high):  ghost = sd-halo+1 : sd    edge = sd-2*halo+1 : sd-halo
 #
 # `get_send_view`/`get_recv_view` return *views* (writing into a recv view
-# mutates the array) of width `halo` along D, spanning the OWNED extent in
+# mutates the array) of width `halo` along D, spanning the interior extent in
 # every other dimension. They behave identically for HaloArray (MPI) and
 # LocalHaloArray.
 #
@@ -218,7 +218,7 @@ end
 @inline _recv_window(::Side{1}, sd::Int, halo::Int) = 1:halo
 @inline _recv_window(::Side{2}, sd::Int, halo::Int) = (sd-halo+1):sd
 
-# Select `window` along dimension D and the owned span (halo+1 : size-halo)
+# Select `window` along dimension D and the interior span (halo+1 : size-halo)
 # in every other dimension.
 @inline function _halo_window_view(window, arr::AbstractArray{<:Any,N}, D::Integer, halo::Int) where {N}
     view(arr, ntuple(I -> I == D ? window : (halo+1):(size(arr,I)-halo), Val(N))...)
@@ -229,7 +229,7 @@ end
 """
     get_send_view(side, dim, field) -> view
 
-A view of the `halo`-wide band of *interior* (owned) cells adjacent to the
+A view of the `halo`-wide band of interior cells adjacent to the
 `(side, dim)` boundary — the cells a halo exchange reads, and the interior edge a
 boundary condition reads. Paired with [`get_recv_view`](@ref) (same shape) when
 writing a boundary condition. See also the layout discussion in the source.
@@ -265,7 +265,7 @@ end
 
 # validate_boundary_condition is inherited from AbstractCartesianTopology (abstract_haloarray.jl)
 
-# ---- owned-dims helper (used by Base.similar in mpi_support.jl) ------
+# ---- local-interior-dims helper (used by Base.similar in mpi_support.jl) ------
 
 function _global_to_owned_dims(halo::HaloArray{T,N}, dims::NTuple{M,<:Integer}) where {T,N,M}
     M == N || throw(DimensionMismatch("HaloArray similar dims must have $N dimensions"))
@@ -290,7 +290,7 @@ end
 """
     fill_from_global_indices!(f, u)
 
-Set each owned cell from `f(I, J, …)` evaluated at its **global** grid index
+Set each interior cell from `f(I, J, …)` evaluated at its **global** grid index
 (1-based over the whole domain). Each rank/tile fills only the cells it owns, so
 the same `f` produces a consistent global field across MPI ranks and threads —
 the idiomatic way to set an initial condition. Cf. [`fill_from_local_indices!`](@ref).
@@ -318,7 +318,7 @@ end
 
 function Base.show(io::IO, obj::HaloArray)
     print(io, "HaloArray of global size ", size(obj),
-          " (owned: ", interior_size(obj), ", storage: ", storage_size(obj),
+          " (interior: ", interior_size(obj), ", storage: ", storage_size(obj),
           "), halo=", halo_width(obj), "\n")
     print(io, "  eltype: ", eltype(obj), "\n")
     print(io, "  topology: ", obj.topology, "\n")

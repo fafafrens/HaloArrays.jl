@@ -19,7 +19,7 @@ end
 Return the lower-side boundary face cells in dimension `dim`.
 
 These are ghost cells. In a face loop, pair each index `IL` with
-`IR = IL + face_offset(halo, dim)` to visit the `ghost | owned` face.
+`IR = IL + face_offset(halo, dim)` to visit the `ghost | interior` face.
 """
 function left_face_range(halo, dim::Int)
     _check_face_dim(halo, dim)
@@ -32,9 +32,9 @@ left_face_range(halo, ::Dim{D}) where {D} = left_face_range(halo, D)
 """
     internal_face_range(halo, dim)
 
-Return the internal faces for a sweep along `dim`: the owned cells that have an
-owned `+dim` neighbour (only `dim` is trimmed by one), while every *transverse*
-dimension keeps its full owned extent. This is what a per-direction conservative
+Return the internal faces for a sweep along `dim`: the interior cells that have an
+interior `+dim` neighbour (only `dim` is trimmed by one), while every *transverse*
+dimension keeps its full interior extent. This is what a per-direction conservative
 flux update needs — it does not drop the last transverse row/column, so the
 boundary-face fluxes cancel correctly there. Pair each index `IL` with
 `IR = IL + face_offset(halo, dim)`.
@@ -51,9 +51,9 @@ end
 
 Return the upper-side boundary face cells in dimension `dim`.
 
-These are owned cells adjacent to the upper ghost side. In a face loop, pair
+These are interior cells adjacent to the upper ghost side. In a face loop, pair
 each index `IL` with `IR = IL + face_offset(halo, dim)` to visit the
-`owned | ghost` face.
+`interior | ghost` face.
 """
 function right_face_range(halo, dim::Int)
     _check_face_dim(halo, dim)
@@ -75,10 +75,10 @@ For `MultiHaloArray` and `ArrayOfHaloArray`, the ranges are spatial only. Apply
 them after selecting an individual field.
 
 - `get_left_face(ranges, dim)`: lower-side ghost cells.
-- `get_internal_face(ranges, dim)`: internal owned faces along `dim` (transverse-full).
-- `get_right_face(ranges, dim)`: upper-side owned cells.
+- `get_internal_face(ranges, dim)`: internal interior faces along `dim` (transverse-full).
+- `get_right_face(ranges, dim)`: upper-side interior cells.
 
-Minimal owned-cell update:
+Minimal interior-cell update:
 
 ```julia
 ranges = FaceRanges(u)
@@ -128,7 +128,7 @@ end
 """
     get_left_face(ranges, dim)
 
-Lower-side boundary faces in `dim` (the `ghost | owned` faces): the ghost cells
+Lower-side boundary faces in `dim` (the `ghost | interior` faces): the ghost cells
 to fill, spanning the full transverse extent. Pair each `IL` with
 `IL + get_unit_vector(ranges, dim)`. See also [`get_internal_face`](@ref),
 [`get_right_face`](@ref).
@@ -140,7 +140,7 @@ get_left_face(ranges::FaceRanges, ::Dim{D}) where {D} = get_left_face(ranges, D)
     get_internal_face(ranges, dim)
 
 Internal faces for a conservative sweep along `dim` (transverse dimensions kept
-full): the owned cells with an owned `+dim` neighbour. Pair each `IL` with
+full): the interior cells with an interior `+dim` neighbour. Pair each `IL` with
 `IL + get_unit_vector(ranges, dim)`.
 """
 get_internal_face(ranges::FaceRanges, dim::Int) = ranges.internal_face_dirs[dim]
@@ -148,7 +148,7 @@ get_internal_face(ranges::FaceRanges, ::Dim{D}) where {D} = get_internal_face(ra
 """
     get_right_face(ranges, dim)
 
-Upper-side boundary faces in `dim` (the `owned | ghost` faces): the owned cells
+Upper-side boundary faces in `dim` (the `interior | ghost` faces): the interior cells
 adjacent to the upper ghost layer, spanning the full transverse extent. Pair each
 `IL` with `IL + get_unit_vector(ranges, dim)`. See also [`get_left_face`](@ref),
 [`get_internal_face`](@ref).
@@ -176,7 +176,7 @@ using the precomputed `ranges`. This is the left / internal / right face loop in
 a single call.
 
 Each face's numerical `flux` is evaluated once from the two adjacent cell states
-and scattered with opposite signs onto the owned cells — `du[IL] -= scale*F` and
+and scattered with opposite signs onto the interior cells — `du[IL] -= scale*F` and
 `du[IR] += scale*F` — skipping whichever side is a ghost at a physical boundary.
 
 - `flux(UL, UR) -> F`: numerical flux between the lower (`UL`) and upper (`UR`)

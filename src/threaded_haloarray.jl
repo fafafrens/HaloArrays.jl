@@ -73,11 +73,11 @@ each tile can be updated independently on its own thread.
 
 # Arguments
 - `T`: element type (defaults to `Float64` if omitted).
-- `tile_size::NTuple{N,Int}`: owned cells per tile in each dimension.
+- `tile_size::NTuple{N,Int}`: interior cells per tile in each dimension.
 - `halo::Int`: ghost-cell width on each side.
 - `dims::NTuple{N,Int}`: number of tiles in each dimension (the tile layout).
   Defaults to `(1, …, Threads.nthreads())` — one tile per thread along the last
-  dimension. The global owned size is `tile_size .* dims`.
+  dimension. The global interior size is `tile_size .* dims`.
 - `boundary_condition`: applied at the physical domain edges (see
   [`LocalHaloArray`](@ref) for the accepted forms).
 - `thread_backend::`[`ThreadBackend`](@ref): how per-tile work is dispatched
@@ -151,7 +151,7 @@ ThreadedHaloArray(tile_size::NTuple{N,<:Integer}, halo::Integer; kwargs...) wher
 @inline halo_width(::ThreadedHaloArray{T,N,A,Halo}) where {T,N,A,Halo} = Halo
 """    tile_size(u) -> dims
 
-Owned (ghost-free) cells per tile, in each dimension. The global owned size is
+Interior (ghost-free) cells per tile, in each dimension. The global interior size is
 `tile_size(u) .* dims` (the tile layout)."""
 @inline tile_size(halo::ThreadedHaloArray) = halo.tile_size
 
@@ -173,12 +173,12 @@ The Cartesian position of tile `tile_id` within the tile layout (`dims`)."""
 @inline tile_coordinates(halo::ThreadedHaloArray, tile_id::Integer) = tile_coordinates(halo.topology, tile_id)
 
 """
-    interior_to_global_index(u::ThreadedHaloArray, tile_id, owned_idx) -> NTuple
+    interior_to_global_index(u::ThreadedHaloArray, tile_id, interior_idx) -> NTuple
 
-Map a tile-local owned (interior) index `owned_idx` — 1-based, excluding the
+Map a tile-local interior index `interior_idx` — 1-based, excluding the
 halo — in tile `tile_id` to its global index in the full domain. Mirrors
 `interior_to_global_index` on [`HaloArray`](@ref) and [`LocalHaloArray`](@ref),
-with the extra `tile_id` since the owned region is per tile.
+with the extra `tile_id` since the interior region is per tile.
 """
 @inline function interior_to_global_index(halo::ThreadedHaloArray{T,N},
         tile_id::Integer, owned_idx::NTuple{N,<:Integer}) where {T,N}

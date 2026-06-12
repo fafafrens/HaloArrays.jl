@@ -1,8 +1,8 @@
 """
     CellKernelRegion
 
-Compact owned-cell metadata for launch-style loops. `first` is the first owned
-cell in storage coordinates and `size` is the owned-cell extent.
+Compact interior-cell metadata for launch-style loops. `first` is the first
+interior cell in storage coordinates and `size` is the interior-cell extent.
 """
 struct CellKernelRegion{N}
     first::CartesianIndex{N}
@@ -15,7 +15,7 @@ end
 Compact metadata for race-free colored cell kernels.
 
 `size` is the launch size, compressed by two in `compressed_dim`.
-`full_size` is the uncompressed owned-cell extent. GPU kernels reconstruct the
+`full_size` is the uncompressed interior-cell extent. GPU kernels reconstruct the
 physical cell from the launch index and do a final bound check in the
 compressed dimension.
 """
@@ -95,9 +95,9 @@ end
 """
     is_cell_index_inbounds(region, I)
 
-Return whether a storage-space cell index `I` lies inside the owned-cell extent
+Return whether a storage-space cell index `I` lies inside the interior-cell extent
 described by `region`. This is mainly needed by compressed colored GPU kernels,
-where the last launch index may reconstruct one cell past the owned boundary.
+where the last launch index may reconstruct one cell past the interior boundary.
 """
 @inline function is_cell_index_inbounds(region::Union{CellKernelRegion{N},ColoredCellKernelRegion{N}},
                                         I::NTuple{N,<:Integer}) where {N}
@@ -133,7 +133,7 @@ end
 """
     get_interior_cell_region(ranges)
 
-Return compact launch metadata for the owned-cell region.
+Return compact launch metadata for the interior-cell region.
 """
 @inline get_interior_cell_region(ranges::CellRanges) = CellKernelRegion(get_interior_cells(ranges))
 

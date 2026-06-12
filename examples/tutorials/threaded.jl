@@ -59,7 +59,7 @@ u = ThreadedHaloArray(Float64, tile_size, 1; dims=tile_dims, boundary_condition=
 println("tile_size   : ", tile_size)
 println("tile_dims   : ", tile_dims)
 println("tile_count  : ", tile_count(u))
-println("interior_size  : ", interior_size(u))    # full global owned extent
+println("interior_size  : ", interior_size(u))    # full global interior extent
 println("global_size : ", global_size(u))
 println("halo_width  : ", halo_width(u))
 println("storage per tile: ", storage_size(u))   # tile_size + 2*halo in each dim
@@ -132,13 +132,13 @@ println("=" ^ 60)
 synchronize_halo!(u)   # serial on purpose — see note above
 
 # Verify: the ghost cell of tile 2 (left side) should equal the
-# last owned cell of tile 1.
+# last interior cell of tile 1.
 if tile_count(u) >= 2
-    tile1_last_owned  = tile_parent(u, 1)[last(range[1])]
+    tile1_last_interior  = tile_parent(u, 1)[last(range[1])]
     tile2_left_ghost  = tile_parent(u, 2)[1]          # ghost at storage index 1
-    println("tile 1 last owned cell : ", tile1_last_owned)
+    println("tile 1 last interior cell : ", tile1_last_interior)
     println("tile 2 left ghost cell : ", tile2_left_ghost)
-    println("match: ", tile1_last_owned == tile2_left_ghost)
+    println("match: ", tile1_last_interior == tile2_left_ghost)
 end
 
 # Async halo exchange (overlap sync with independent computation)
@@ -301,7 +301,7 @@ synchronize_halo!(vel2)
 
 # tile_count, CellRanges, FaceRanges all accept the container directly
 println("tile_count  : ", tile_count(vel2))
-println("owned cells : ", size(get_interior_cells(CellRanges(vel2))))
+println("interior cells : ", size(get_interior_cells(CellRanges(vel2))))
 println("face ranges : ", get_left_face(FaceRanges(vel2), 1))
 
 println()

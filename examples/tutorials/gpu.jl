@@ -70,12 +70,12 @@ println("halo_width  : ", halo_width(phi_gpu))
 # ============================================================
 #
 # GPU kernels receive parent(u) — the raw halo-padded storage.
-# interior_range(u) gives the CartesianIndices of owned cells;
+# interior_range(u) gives the CartesianIndices of interior cells;
 # ghost cells live outside that range but are still valid memory,
 # readable for stencil access.
 #
-# Launch size is the owned-cell size, not the storage size, so
-# the kernel maps its global thread index I directly to an owned
+# Launch size is the interior-cell size, not the storage size, so
+# the kernel maps its global thread index I directly to an interior
 # storage index by offsetting by halo_width.
 
 println()
@@ -100,11 +100,11 @@ synchronize_halo!(u_gpu)
 
 backend    = KA.get_backend(parent(u_gpu))
 kernel!    = laplacian_kernel!(backend, (16, 16))
-owned      = interior_size(u_gpu)          # (64, 64)
+launch_size = interior_size(u_gpu)         # (64, 64)
 inv_dx2    = Float32((nx)^2)
 inv_dy2    = Float32((ny)^2)
 
-kernel!(parent(du_gpu), parent(u_gpu), inv_dx2, inv_dy2; ndrange=owned)
+kernel!(parent(du_gpu), parent(u_gpu), inv_dx2, inv_dy2; ndrange=launch_size)
 KA.synchronize(backend)
 
 du_cpu = Array(interior_view(du_gpu))
@@ -116,7 +116,7 @@ println("max |Δu|  : ", maximum(abs, du_cpu))   # near 0 for constant field
 #
 # Manually adding the halo offset in every kernel is error-prone.
 # CellKernelRegion encapsulates the mapping from compact launch
-# coordinates (1-based, owned cells only) to storage coordinates
+# coordinates (1-based, interior cells only) to storage coordinates
 # (1-based, includes ghost padding).
 #
 # Workflow:
@@ -140,8 +140,8 @@ println("=" ^ 60)
 end
 
 region = get_interior_cell_region(CellRanges(u_gpu))
-println("launch size (owned)  : ", region.size)
-println("first owned cell     : ", region.first)   # storage coords, = (halo+1, halo+1)
+println("launch size (interior)  : ", region.size)
+println("first interior cell     : ", region.first)   # storage coords, = (halo+1, halo+1)
 
 kernel2! = fill_index_kernel!(backend, (16, 16))
 kernel2!(parent(u_gpu), region; ndrange=region.size)
@@ -155,7 +155,7 @@ println("storage[2,2] (J=1,1) : ", corner_val)   # I=(2,2) → 2*100+2 = 202.0
 # ============================================================
 #
 # For in-place Gauss-Seidel or Metropolis updates where a cell
-# reads its own updated neighbours, you must split the owned cells
+# reads its own updated neighbours, you must split the interior cells
 # into two non-adjacent subsets (checkerboard coloring).
 # Cells of the same color are independent and can be updated in
 # one parallel kernel launch.
@@ -208,9 +208,9 @@ end
 # a compact 1-D (per face type) launch index to a storage index.
 #
 # Three region types per dimension:
-#   get_left_face_region(fr, dim)     — ghost | owned boundary faces
-#   get_internal_face_region(fr, dim) — owned | owned internal faces
-#   get_right_face_region(fr, dim)    — owned | ghost boundary faces
+#   get_left_face_region(fr, dim)     — ghost | interior boundary faces
+#   get_internal_face_region(fr, dim) — interior | interior internal faces
+#   get_right_face_region(fr, dim)    — interior | ghost boundary faces
 #
 # Inside the kernel use cell_index(region, J) to get IL (lower cell).
 # The upper cell is IL + region.offset.
@@ -230,7 +230,7 @@ println("=" ^ 60)
             ur = u[IR[1], IR[2]]
             flux = 0.5f0 * (ul + ur) * inv_dx   # simple central flux
             # face contributes to both adjacent cells
-            # (boundary face kernels only update the owned side — see below)
+            # (boundary face kernels only update the interior side — see below)
             du[IL[1], IL[2]] -= flux
             du[IR[1], IR[2]] += flux
         end

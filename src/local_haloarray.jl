@@ -7,11 +7,11 @@ every side of the `owned_dims` interior, carrying the boundary condition to
 apply when the halo is refreshed.
 
 This is the simplest backend — no MPI, no threads. Logical indexing, `axes`,
-and `eachindex` address the owned cells only; the ghost padding is hidden.
+and `eachindex` address the interior cells only; the ghost padding is hidden.
 
 # Arguments
 - `T`: element type (defaults to `Float64` if omitted).
-- `owned_dims::NTuple{N,Int}`: size of the owned (interior) region.
+- `owned_dims::NTuple{N,Int}`: size of the interior region.
 - `halo::Int`: ghost-cell width on each side, in each dimension.
 - `boundary_condition`: how ghosts are filled by [`synchronize_halo!`](@ref) /
   [`boundary_condition!`](@ref). A symbol (`:periodic`, `:repeating`,
@@ -21,7 +21,7 @@ and `eachindex` address the owned cells only; the ghost padding is hidden.
 # Examples
 ```julia
 u = LocalHaloArray(Float64, (64, 64), 1; boundary_condition=:periodic)
-interior_view(u) .= 1.0      # write the owned cells
+interior_view(u) .= 1.0      # write the interior cells
 synchronize_halo!(u)         # fill ghost cells from the boundary condition
 ```
 
@@ -129,7 +129,7 @@ function Base.setindex!(halo::LocalHaloArray, value, I::Vararg{Integer})
 end
 
 function Base.show(io::IO, obj::LocalHaloArray)
-    print(io, "LocalHaloArray of global size ", size(obj), " (owned size: ", interior_size(obj), ", storage size: ", storage_size(obj), "), halo width: ", halo_width(obj), "\n")
+    print(io, "LocalHaloArray of global size ", size(obj), " (interior size: ", interior_size(obj), ", storage size: ", storage_size(obj), "), halo width: ", halo_width(obj), "\n")
     print(io, "  eltype: ", eltype(obj), "\n")
     print(io, "  boundary_condition: ", obj.boundary_condition, "\n")
 end

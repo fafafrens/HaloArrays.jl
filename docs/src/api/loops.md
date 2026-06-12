@@ -1,6 +1,6 @@
 # Loops & kernel regions
 
-Finite-volume face loops, owned-cell loops, and the compact launch metadata for
+Finite-volume face loops, interior-cell loops, and the compact launch metadata for
 GPU / KernelAbstractions kernels.
 
 ```@autodocs

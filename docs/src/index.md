@@ -8,7 +8,7 @@ across threads, or is decomposed across MPI ranks. Write a stencil or solver
 once against `interior_view`, `synchronize_halo!`, and global `size`/`axes`
 semantics, and run it **unchanged on any backend**.
 
-The design keeps *logical* and *owned* data distinct and keeps communication out
+The design keeps *logical* and *interior* data distinct and keeps communication out
 of indexing: `synchronize_halo!` is the only place halos are filled, so halo
 validity is predictable and the hot path stays local.
 
@@ -45,7 +45,7 @@ MPI-backed features require an MPI runtime (OpenMPI or MPICH).
 ```julia
 using HaloArrays
 u = LocalHaloArray(Float64, (64, 64), 1; boundary_condition=:periodic)
-interior_view(u) .= 1.0      # write owned cells
+interior_view(u) .= 1.0      # write interior cells
 synchronize_halo!(u)         # fill ghost cells (here: periodic wrap)
 ```
 

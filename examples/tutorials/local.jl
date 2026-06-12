@@ -26,7 +26,7 @@ section(title) = (println(); println("="^60); println(title); println("="^60))
 # A stencil update needs a ring of "ghost" cells around the data a process
 # owns, filled from neighbours or boundary conditions before each sweep.
 # LocalHaloArray wraps a plain array and tracks the halo width and boundary
-# condition.  Indexing (u[i], axes, eachindex) always refers to the OWNED
+# condition.  Indexing (u[i], axes, eachindex) always refers to the interior
 # cells — the ghost offset is hidden from you.
 #
 #   storage:  [ ghost | 1 2 3 4 | ghost ]   (halo_width = 1)
@@ -35,9 +35,9 @@ section(title) = (println(); println("="^60); println(title); println("="^60))
 section("1 — Storage layout")
 
 u1d = LocalHaloArray(Float64, (4,), 1; boundary_condition=:periodic)
-interior_view(u1d) .= [10.0, 20.0, 30.0, 40.0]   # interior_view = owned cells only
+interior_view(u1d) .= [10.0, 20.0, 30.0, 40.0]   # interior_view = interior cells only
 
-println("owned / storage size : ", interior_size(u1d), " / ", storage_size(u1d))  # (4,) / (6,)
+println("interior / storage size : ", interior_size(u1d), " / ", storage_size(u1d))  # (4,) / (6,)
 println("u1d[2], axes(u1d)    : ", u1d[2], ", ", axes(u1d))                     # 20.0, (1:4,)
 println("full storage         : ", collect(parent(u1d)))                        # ghosts still 0
 
@@ -46,7 +46,7 @@ println("full storage         : ", collect(parent(u1d)))                        
 # ============================================================
 # synchronize_halo! fills the ghost cells from the chosen condition:
 #   :periodic        ghosts wrap from the far side
-#   :repeating       ghosts copy the nearest owned value (zero-gradient)
+#   :repeating       ghosts copy the nearest interior value (zero-gradient)
 #   Reflecting()     ghost = +interior  (mirror)
 #   Antireflecting() ghost = -interior  (zero value at the wall)
 # N-D arrays pass one (left, right) pair per dimension.
@@ -85,7 +85,7 @@ u = LocalHaloArray(Float64, (6,), 1; boundary_condition=:periodic)
 interior_view(u) .= Float64.(1:6)
 
 cr = CellRanges(u)
-println("owned cells  : ", collect(get_interior_cells(cr)))
+println("interior cells  : ", collect(get_interior_cells(cr)))
 println("checkerboard : ", collect.(get_colored_interior_cell_ranges(cr, 0)),
         " / ", collect.(get_colored_interior_cell_ranges(cr, 1)))
 
@@ -271,8 +271,8 @@ interior_view(vel[1]) .= 1.0          # u-component
 interior_view(vel[2]) .= 0.0          # v-component
 synchronize_halo!(vel)                # refreshes every field at once
 
-println("  field shape / owned size : ", field_shape(vel), " / ", interior_size(vel[1]))
-println("  owned cells              : ", size(get_interior_cells(CellRanges(vel))))
+println("  field shape / interior size : ", field_shape(vel), " / ", interior_size(vel[1]))
+println("  interior cells              : ", size(get_interior_cells(CellRanges(vel))))
 
 # A 2×2 stress-tensor field; broadcast hits all four components:
 sigma = ArrayOfHaloArray(LocalHaloArray, Float64, (2, 2), (8, 8), 1;

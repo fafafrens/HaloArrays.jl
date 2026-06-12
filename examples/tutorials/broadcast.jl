@@ -27,7 +27,7 @@ println("=" ^ 60)
 #
 # The fundamental rule:
 #
-#   broadcast on a HaloArray operates ONLY on interior (owned)
+#   broadcast on a HaloArray operates ONLY on interior cells
 #   cells.  Ghost cells are NEVER written by broadcast.
 #
 # This is intentional: ghost cells have a well-defined owner

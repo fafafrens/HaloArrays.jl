@@ -61,7 +61,7 @@ julia --project=examples -t 4 examples/heat/local_vs_threaded.jl
 
 `heat/cpu_vs_gpu_2d.jl` solves the same 2-D periodic problem with a CPU-backed and
 a Metal-backed `LocalHaloArray` (KernelAbstractions, colored face regions, the
-owned-cell region API). Requires an Apple GPU supported by Metal.jl:
+interior-cell region API). Requires an Apple GPU supported by Metal.jl:
 
 ```bash
 julia --project=examples examples/heat/cpu_vs_gpu_2d.jl

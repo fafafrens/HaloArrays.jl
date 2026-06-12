@@ -98,7 +98,7 @@ end
     _reflect_bc!(halo, s, d, -1)
 
 # ---- Repeating ------------------------------------------------
-# Zero-gradient: copy the nearest owned edge cell into every ghost cell.
+# Zero-gradient: copy the nearest interior edge cell into every ghost cell.
 @inline function boundary_condition!(halo::AbstractSingleHaloArray,
         ::Side{S}, ::Dim{dim}, ::Repeating) where {S,dim}
     N = ndims(halo)

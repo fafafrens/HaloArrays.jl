@@ -126,7 +126,7 @@ end
 # halo_backend, halo_width, tile_count, tile_size, tile_coordinates, neighbor_tile_id,
 # is_root, isactive inherited from AbstractHaloCollection (abstract_haloarray.jl)
 
-# size/axes/eachindex/length, n_field, interior/owned/global/storage size, and
+# size/axes/eachindex/length, n_field, interior/global/storage size, and
 # interior_axes come from AbstractHaloCollection (field_shape prefix + _spatial_*).
 
 function Base.getindex(mha::ArrayOfHaloArray{T,D,S}, I...) where {T,D,S}

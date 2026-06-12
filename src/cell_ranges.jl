@@ -5,12 +5,12 @@
 """
     CellRanges(halo)
 
-Precompute Cartesian index ranges for owned-cell loops.
+Precompute Cartesian index ranges for interior-cell loops.
 
 For `MultiHaloArray` and `ArrayOfHaloArray`, the ranges are spatial only. Apply
 them after selecting an individual field.
 
-- `get_interior_cells(ranges)`: all owned cells.
+- `get_interior_cells(ranges)`: all interior cells.
 - `get_colored_interior_cell_ranges(ranges, color)`: branch-free checkerboard
   subranges for nearest-neighbor in-place updates.
 """
@@ -29,7 +29,7 @@ end
 """
     get_interior_cells(ranges)
 
-Return the owned-cell Cartesian index range.
+Return the interior-cell Cartesian index range.
 """
 get_interior_cells(ranges::CellRanges) = ranges.owned_cells
 
@@ -65,7 +65,7 @@ end
     get_colored_interior_cell_ranges(ranges, color)
 
 Return a tuple of strided `CartesianIndices` that cover one checkerboard color
-of the owned cells. Colors are `0` and `1`, chosen by
+of the interior cells. Colors are `0` and `1`, chosen by
 `mod(sum(Tuple(I)), 2)`.
 """
 get_colored_interior_cell_ranges(ranges::CellRanges, color::Integer) =

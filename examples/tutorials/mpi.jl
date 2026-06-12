@@ -57,33 +57,33 @@ end
 # ============================================================
 #
 # HaloArray is the MPI-backed counterpart of LocalHaloArray.
-# Each rank owns a subdomain of size `owned_dims`.  Ghost cells
+# Each rank stores an interior subdomain of size `owned_dims`.  Ghost cells
 # at subdomain boundaries are filled from neighbouring ranks
 # during halo exchange.
 #
 # Construction:
 #   HaloArray(T, owned_dims, halo_width, topology; boundary_condition)
 #
-# owned_dims  — size of THIS rank's subdomain (not the global size)
+# owned_dims  — size of THIS rank's interior subdomain (not the global size)
 # halo_width  — ghost-cell layers on each face
 # topology    — CartesianTopology describing the process layout
 
 section("Section 2 — HaloArray")
 
-owned_dims = (8, 8)       # cells owned by this rank
+owned_dims = (8, 8)       # interior cells on this rank
 halo_w     = 1
 
 u = HaloArray(Float64, owned_dims, halo_w, topology; boundary_condition=:periodic)
 
 if rank == 0
-    println("owned_dims   : ", interior_size(u))
+    println("interior_size: ", interior_size(u))
     println("storage_size : ", storage_size(u))   # includes ghost cells
     println("global_size  : ", global_size(u))    # entire distributed grid
     println("halo_width   : ", halo_width(u))
 end
 
 # Logical indexing through u uses global 1-based indices on this rank's
-# subdomain.  interior_axes returns the global-index range this rank owns.
+# subdomain.  interior_axes returns the local interior axes.
 if rank == 0
     println("interior_axes   : ", interior_axes(u))
 end
@@ -114,7 +114,7 @@ section("Section 3 — Halo exchange")
 MPI.Barrier(comm)
 synchronize_halo!(u)
 
-# Verify: ghost cell from the left neighbour should hold the last owned
+# Verify: ghost cell from the left neighbour should hold the last interior
 # cell value of that neighbour.
 left_ghost  = parent(u)[1,         2]     # left ghost (dim 1, any j)
 right_ghost = parent(u)[end,       2]     # right ghost
@@ -134,7 +134,7 @@ boundary_condition!(u)
 # 4. GLOBAL REDUCTIONS AND GATHER
 # ============================================================
 #
-# Global SCALAR reductions over the owned interior cells of every
+# Global SCALAR reductions over the interior cells of every
 # rank use the ordinary Base functions — they Allreduce internally
 # and return the same result on every rank:
 #

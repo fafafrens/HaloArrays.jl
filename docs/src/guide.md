@@ -2,7 +2,7 @@
 
 ## Main types
 
-- [`HaloArray`](@ref): MPI-backed array with owned interior cells and halo cells.
+- [`HaloArray`](@ref): MPI-backed array with local interior cells and halo cells.
 - [`LocalHaloArray`](@ref): no-MPI halo array for local problems and boundary-condition-only workflows.
 - [`ThreadedHaloArray`](@ref): thread-local tiled halo array for shared-memory workflows.
 - `ThreadedMultiHaloArray`: named collection of threaded halo fields.
@@ -12,11 +12,11 @@
 - [`CartesianTopology`](@ref): MPI Cartesian topology helper.
 
 `size(u)` and `axes(u)` describe the global logical domain for every halo
-container. Local owned data is accessed through [`interior_size`](@ref),
+container. Local interior data is accessed through [`interior_size`](@ref),
 [`interior_axes`](@ref), and [`interior_view`](@ref).
 
 Scalar indexing on `HaloArray` uses global indices, but it is local-only: it
-works only for global cells owned by the current MPI rank and throws otherwise.
+works only for global cells in the current MPI rank's interior region and throws otherwise.
 It is intended for diagnostics and setup, not stencil kernels or hot loops. Use
 `interior_view`, `parent`, `interior_to_global_index`, and `global_to_storage_index`
 when you need explicit local/global behavior.
@@ -33,16 +33,16 @@ This keeps interior ownership explicit and halo validity predictable.
 
 ## Global and local semantics
 
-The package separates logical array shape from owned storage:
+The package separates logical array shape from interior storage:
 
 - `size(u)` / `axes(u)`: global logical array shape.
-- [`interior_size`](@ref)`(u)` / [`interior_axes`](@ref)`(u)`: cells owned by this rank or local backend.
-- [`interior_view`](@ref)`(u)`: writable owned cells, excluding halos.
+- [`interior_size`](@ref)`(u)` / [`interior_axes`](@ref)`(u)`: cells local to this rank or local backend.
+- [`interior_view`](@ref)`(u)`: writable interior cells, excluding halos.
 - `parent(u)`: raw storage including halos.
 - [`storage_size`](@ref)`(u)`: raw storage size including halos.
 
 For MPI-backed `HaloArray`, scalar `u[I...]` does not communicate. If `I` is not
-owned by the current rank, it errors. This keeps expensive communication out of
+in the current rank's interior region, it errors. This keeps expensive communication out of
 generic indexing and makes performance-critical code use local views explicitly.
 
 ## Halo exchange
@@ -198,7 +198,7 @@ For collections the ranges are spatial only — select a field first.
 
 ## Cell loops
 
-[`CellRanges`](@ref)`(u)` gives the owned-cell range. For ordinary out-of-place
+[`CellRanges`](@ref)`(u)` gives the interior-cell range. For ordinary out-of-place
 stencils use [`get_interior_cells`](@ref); for nearest-neighbor in-place red-black
 updates use [`get_colored_interior_cell_ranges`](@ref)`(ranges, color)` (strided
 `CartesianIndices`, so the inner loop has no parity branch). Cell colors use

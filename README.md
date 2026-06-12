@@ -13,7 +13,7 @@ across threads, or is decomposed across MPI ranks. Write a stencil or solver
 once against `interior_view`, `synchronize_halo!`, and global `size`/`axes`
 semantics, and run it **unchanged on any backend**.
 
-The design keeps *logical* and *owned* data distinct and keeps communication out
+The design keeps *logical* and *interior* data distinct and keeps communication out
 of indexing: `synchronize_halo!` is the only place halos are filled, so halo
 validity is predictable and the hot path stays local.
 
@@ -45,12 +45,12 @@ MPI-backed features require an MPI runtime (OpenMPI or MPICH).
 
 ## Quick start
 
-An array with one ghost layer — write the owned cells, then fill the halo:
+An array with one ghost layer — write the interior cells, then fill the halo:
 
 ```julia
 using HaloArrays
 u = LocalHaloArray(Float64, (64, 64), 1; boundary_condition=:periodic)
-interior_view(u) .= 1.0      # write owned cells
+interior_view(u) .= 1.0      # write interior cells
 synchronize_halo!(u)         # fill ghost cells (here: periodic wrap)
 ```
 
@@ -58,7 +58,7 @@ synchronize_halo!(u)         # fill ghost cells (here: periodic wrap)
 
 Write a stencil once and run it **unchanged** on a single process, on
 shared-memory tiles, and across MPI ranks. The only backend-specific code is how
-the owned-cell loop is traversed — flat arrays iterate their `parent`, tiled
+the interior-cell loop is traversed — flat arrays iterate their `parent`, tiled
 arrays iterate per tile — so two `heat_step!` methods cover all three, and
 multiple dispatch picks the right one:
 

@@ -4,7 +4,7 @@
 Compact face-region metadata for launch-style loops. `first` and `size`
 describe the lower-index cell region; `offset` maps each lower cell to the
 upper cell. `lower_owned` and `upper_owned` mark which side contributes to the
-owned update.
+interior update.
 """
 struct FaceKernelRegion{N}
     first::CartesianIndex{N}
@@ -20,7 +20,7 @@ end
 Compact metadata for race-free colored face loops. `first`, `size`, and
 `stride` describe the lower-index cell region for one face color; `offset` maps
 each lower cell to the upper cell. `lower_owned` and `upper_owned` mark which
-side contributes to the owned update.
+side contributes to the interior update.
 """
 struct ColoredFaceKernelRegion{N}
     first::CartesianIndex{N}
@@ -55,7 +55,7 @@ end
 """
     get_left_face_region(ranges, dim)
 
-Return compact launch metadata for the lower-side `ghost | owned` face.
+Return compact launch metadata for the lower-side `ghost | interior` face.
 """
 @inline get_left_face_region(ranges::FaceRanges, dim::Int) =
     FaceKernelRegion(get_left_face(ranges, dim), get_unit_vector(ranges, dim), false, true)
@@ -65,7 +65,7 @@ Return compact launch metadata for the lower-side `ghost | owned` face.
 """
     get_internal_face_region(ranges, dim)
 
-Return compact launch metadata for owned-cell internal faces.
+Return compact launch metadata for interior-cell internal faces.
 """
 @inline get_internal_face_region(ranges::FaceRanges, dim::Int) =
     FaceKernelRegion(get_internal_face(ranges, dim), get_unit_vector(ranges, dim), true, true)
@@ -75,7 +75,7 @@ Return compact launch metadata for owned-cell internal faces.
 """
     get_right_face_region(ranges, dim)
 
-Return compact launch metadata for the upper-side `owned | ghost` face.
+Return compact launch metadata for the upper-side `interior | ghost` face.
 """
 @inline get_right_face_region(ranges::FaceRanges, dim::Int) =
     FaceKernelRegion(get_right_face(ranges, dim), get_unit_vector(ranges, dim), true, false)
