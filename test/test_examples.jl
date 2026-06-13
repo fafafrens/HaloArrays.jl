@@ -14,7 +14,6 @@ using HaloArrays
 #   - MPI scripts          (need `mpiexec -n …`; covered by the MPI CI job)
 #   - Metal / KernelAbstractions GPU scripts
 #   - poisson/*            (needs SciMLOperators, not a test dependency)
-#   - relativistic_hydro_{Tmu_3d, mu0_2d, mu0_3d}  (work in progress)
 #
 # Gated by HALOARRAYS_RUN_EXAMPLE_TESTS (see runtests.jl); the dedicated CI job
 # runs it with JULIA_NUM_THREADS=2 so the threaded examples exercise >1 tile.
@@ -30,8 +29,11 @@ const SMOKE_EXAMPLES = [
     "finite_volume/relativistic_hydro_1d.jl",
     "finite_volume/relativistic_hydro_repeating_1d.jl",
     "finite_volume/relativistic_hydro_mu0_1d.jl",
+    "finite_volume/relativistic_hydro_mu0_2d.jl",
+    "finite_volume/relativistic_hydro_mu0_3d.jl",
     "finite_volume/relativistic_hydro_Tmu_1d.jl",
     "finite_volume/relativistic_hydro_Tmu_2d.jl",
+    "finite_volume/relativistic_hydro_Tmu_3d.jl",
     "finite_volume/relativistic_hydro_cylindrical_1d.jl",
     "finite_volume/relativistic_hydro_cylindrical_threaded_1d.jl",
     "heat/local.jl",
@@ -60,18 +62,16 @@ function _smoke_run(rel)
     # which a bare `Module()` does not — scripts that `include("common.jl")` need
     # it. Name it after the file so each script gets a fresh namespace.
     modname = Symbol("Example_", replace(rel, r"[^A-Za-z0-9]" => "_"))
-    Core.eval(Main, :(module $modname end))
-    sandbox = getfield(Main, modname)
+    sandbox = Core.eval(Main, :(module $modname end))
     return redirect_stdout(devnull) do
         try
             Base.include(sandbox, path)
             # Scripts that gate their driver behind
             # `if abspath(PROGRAM_FILE) == @__FILE__` define `main` but do not run
-            # it on include; the rest auto-run a `run_*()` at top level. Invoke
-            # `main` when present so the simulation actually executes either way.
-            if isdefined(sandbox, :main)
-                Base.invokelatest(getfield(sandbox, :main))
-            end
+            # it on include; the rest auto-run a `run_*()` at top level. Evaluate
+            # the `main` call inside the sandbox (in the post-include world) so the
+            # simulation runs either way, without a world-age binding warning.
+            Core.eval(sandbox, :(isdefined(@__MODULE__, :main) && main()))
             true
         catch err
             @error "example script failed" example = rel exception = (err, catch_backtrace())

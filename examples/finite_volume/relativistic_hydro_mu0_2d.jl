@@ -119,9 +119,9 @@ function rel_rhs!(du, u, eos, dx, dy)
     fill!(du, 0.0)
     synchronize_halo!(u)                  # :repeating fills the outflow ghosts
     fr = FaceRanges(u)
-    accumulate_flux_divergence!(parent(du), parent(u), fr, 1, inv(dx),
+    accumulate_flux_divergence!(field_storages(du), field_storages(u), fr, 1, inv(dx),
         (UL, UR) -> rusanov_flux(eos, UL, UR, 1), conserved_cell, add_conserved!)
-    accumulate_flux_divergence!(parent(du), parent(u), fr, 2, inv(dy),
+    accumulate_flux_divergence!(field_storages(du), field_storages(u), fr, 2, inv(dy),
         (UL, UR) -> rusanov_flux(eos, UL, UR, 2), conserved_cell, add_conserved!)
     return du
 end
@@ -137,7 +137,7 @@ end
 # ─── Diagnostics ──────────────────────────────────────────────────────────────
 
 function cfl_dt(u, eos, dx, dy, cfl)
-    d = parent(u)
+    d = field_storages(u)
     amax = 0.0
     for I in CartesianIndices(interior_range(u.E))
         U = conserved_cell(d, I)
@@ -147,7 +147,7 @@ function cfl_dt(u, eos, dx, dy, cfl)
 end
 
 function diagnostics(u, eos, dx, dy)
-    d = parent(u)
+    d = field_storages(u)
     energy = 0.0; vmax = 0.0; tmax = 0.0
     for I in CartesianIndices(interior_range(u.E))
         U = conserved_cell(d, I)
@@ -161,7 +161,7 @@ end
 
 # probe temperature at global cell (i, j)
 function probe_T(u, eos, i, j)
-    d = parent(u)
+    d = field_storages(u)
     h = halo_width(u.E)
     T, _, _ = prim_from_cons(eos, conserved_cell(d, CartesianIndex(i + h, j + h)))
     return T
@@ -224,4 +224,4 @@ end
 #Mx,My,E=interior_view.(eachfield(u))
 
 #heatmap(E)
-#surface(E)
+#surface(E)can you app

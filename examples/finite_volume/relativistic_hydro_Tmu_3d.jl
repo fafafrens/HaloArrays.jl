@@ -124,7 +124,7 @@ function rel_rhs!(du, u, eos, dx, dy, dz)
     synchronize_halo!(u)
     fr = FaceRanges(u)
     for (dim, scale) in ((1, inv(dx)), (2, inv(dy)), (3, inv(dz)))
-        accumulate_flux_divergence!(parent(du), parent(u), fr, dim, scale,
+        accumulate_flux_divergence!(field_storages(du), field_storages(u), fr, dim, scale,
             (UL, UR) -> rusanov_flux(eos, UL, UR, dim), conserved_cell, add_conserved!)
     end
     return du
@@ -139,7 +139,7 @@ function ssprk2_step!(u, u1, du, eos, dt, dx, dy, dz)
 end
 
 function cfl_dt(u, eos, dx, dy, dz, cfl)
-    d = parent(u)
+    d = field_storages(u)
     amax = 0.0
     for I in CartesianIndices(interior_range(u.E))
         U = conserved_cell(d, I)
@@ -151,7 +151,7 @@ function cfl_dt(u, eos, dx, dy, dz, cfl)
 end
 
 function diagnostics(u, eos, dV)
-    d = parent(u)
+    d = field_storages(u)
     charge = 0.0; energy = 0.0; vmax = 0.0
     for I in CartesianIndices(interior_range(u.E))
         U = conserved_cell(d, I)
@@ -164,7 +164,7 @@ function diagnostics(u, eos, dV)
 end
 
 function probe_n(u, eos, i, j, k)
-    d = parent(u)
+    d = field_storages(u)
     h = halo_width(u.E)
     T, μ, _, _, _ = prim_from_cons(eos, conserved_cell(d, CartesianIndex(i + h, j + h, k + h)))
     return charge_density(eos, T, μ)
