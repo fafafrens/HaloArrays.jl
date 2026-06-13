@@ -73,21 +73,12 @@ for func in (:mapreduce, :mapfoldl, :mapfoldr)
 end
 
 
-function Base.all(f::F, mha::MultiHaloArray) where {F<:Function}
-    field_results = map(values(mha.arrays)) do field
-        all(f, field)
-    end
-    return all(field_results)
-end
-
-function Base.any(f::F, mha::MultiHaloArray) where {F<:Function}
-    field_results = map(values(mha.arrays)) do field
-        any(f, field)
-    end
-    return any(field_results)
-end
-
-# ArrayOfHaloArray reductions are covered by the AbstractHaloCollection methods above.
+# Field-wise short-circuit all/any for any collection kind (named or indexed):
+# reduce over fields, each field reducing over its own interior.
+Base.all(f::F, c::FieldCollection) where {F<:Function} =
+    all(field -> all(f, field), _fields(c))
+Base.any(f::F, c::FieldCollection) where {F<:Function} =
+    any(field -> any(f, field), _fields(c))
 
 for func in (:mapreduce, :mapfoldl, :mapfoldr)
     @eval function Base.$func(

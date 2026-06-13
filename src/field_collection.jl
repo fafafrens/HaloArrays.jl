@@ -149,3 +149,142 @@ function ArrayOfHaloArray(arrays::AbstractArray; check=nothing)
     S = ndims(first(arrays))
     return FieldCollection{T, S + ndims(arrays), S, typeof(arrays)}(arrays)
 end
+
+# Rebuild the same kind of collection from a new field container (used by
+# _map_fields and similar).
+@inline _rebuild_collection(arrs::NamedTuple)    = MultiHaloArray(arrs)
+@inline _rebuild_collection(arrs::AbstractArray) = ArrayOfHaloArray(arrs)
+
+# ---- container-generic methods ---------------------------------------------
+# `values` is the identity on AbstractArrays and the field tuple on NamedTuples,
+# and `keys`/`map` preserve the container kind — so one definition covers both
+# flavors for everything below. (`parent` stays per-alias: for MultiHaloArray it
+# is the NamedTuple of raw storages, for ArrayOfHaloArray the field array itself
+# — a test-asserted contract.)
+
+@inline _fields(c::FieldCollection)      = values(getfield(c, :arrays))
+@inline _first_field(c::FieldCollection) = first(_fields(c))
+@inline _map_fields(g, c::FieldCollection) = _rebuild_collection(map(g, getfield(c, :arrays)))
+@inline _check_same_fields(dest::FieldCollection, src::FieldCollection) =
+    keys(getfield(dest, :arrays)) == keys(getfield(src, :arrays)) ||
+        throw(DimensionMismatch("collection copyto! requires matching field layout"))
+
+to_tuple(c::FieldCollection) = (_fields(c)...,)
+
+"""
+    active_fields(c)
+
+`isactive` of every field, in the same container kind (a `NamedTuple` of Bools
+for [`MultiHaloArray`](@ref), an array of Bools for [`ArrayOfHaloArray`](@ref)).
+"""
+active_fields(c::FieldCollection) = map(isactive, getfield(c, :arrays))
+
+# One tile accessor for both flavors: the result keeps the container kind.
+@inline tile_parent(c::FieldCollection, tile_id::Integer) =
+    map(a -> tile_parent(a, tile_id), getfield(c, :arrays))
+
+# ---- indexing: field axes first, then spatial axes --------------------------
+# `field_ndims = D - S` (1 for named collections). Short indexing with up to
+# field_ndims indices returns the field; full-dims indexing reaches a cell.
+# NamedTuples support integer indexing, so this covers both flavors.
+
+function Base.getindex(c::FieldCollection{T,D,S}, I...) where {T,D,S}
+    field_ndims = D - S
+
+    if length(I) <= field_ndims
+        return getindex(getfield(c, :arrays), I...)
+    elseif length(I) == D
+        field_idx = ntuple(d -> I[d], field_ndims)
+        spatial_idx = ntuple(d -> I[field_ndims + d], S)
+        return getindex(getfield(c, :arrays)[field_idx...], spatial_idx...)
+    else
+        throw(BoundsError(c, I))
+    end
+end
+
+Base.getindex(c::FieldCollection, I::CartesianIndex) = getindex(c, Tuple(I)...)
+
+function Base.setindex!(c::FieldCollection{T,D,S}, value, I...) where {T,D,S}
+    field_ndims = D - S
+
+    if length(I) == D
+        field_idx = ntuple(d -> I[d], field_ndims)
+        spatial_idx = ntuple(d -> I[field_ndims + d], S)
+        setindex!(getfield(c, :arrays)[field_idx...], value, spatial_idx...)
+        return c
+    else
+        throw(BoundsError(c, I))
+    end
+end
+
+Base.setindex!(c::FieldCollection, value, I::CartesianIndex) =
+    setindex!(c, value, Tuple(I)...)
+
+# ---- similar with explicit dims ----------------------------------------------
+# The field-shape prefix may only change for array containers; named collections
+# cannot grow or shrink their field set.
+
+@inline _reshape_field_container(arrs::AbstractArray, new_shape, prototype, build) =
+    (out = similar(arrs, typeof(prototype), new_shape);
+     for I in CartesianIndices(out); out[I] = build(); end; out)
+@inline _reshape_field_container(::NamedTuple, new_shape, prototype, build) =
+    throw(DimensionMismatch("cannot change the field count of a named collection (MultiHaloArray) via similar"))
+
+function Base.similar(c::FieldCollection{AA,D,S}, ::Type{T}, dims::Dims{M}) where {AA,D,S,T,M}
+    field_ndims = D - S
+    M == D ||
+        throw(DimensionMismatch("collection similar dims must have $D dimensions"))
+
+    new_field_shape = ntuple(d -> Int(dims[d]), Val(field_ndims))
+    spatial_dims = ntuple(d -> Int(dims[field_ndims + d]), Val(S))
+
+    if new_field_shape == field_shape(c)
+        return _map_fields(a -> similar(a, T, spatial_dims), c)
+    else
+        ref = _first_field(c)
+        prototype = similar(ref, T, spatial_dims)
+        arrs = _reshape_field_container(getfield(c, :arrays), new_field_shape,
+            prototype, () -> similar(ref, T, spatial_dims))
+        return _rebuild_collection(arrs)
+    end
+end
+
+# Non-Int dims are normalized to Dims by Base's generic similar fallbacks.
+Base.similar(c::FieldCollection, dims::Dims{M}) where {M} =
+    similar(c, eltype(c), dims)
+Base.similar(c::FieldCollection, dims::NTuple{M,<:Integer}) where {M} =
+    similar(c, eltype(c), dims)
+
+# ---- field-wise maps over the whole collection ------------------------------
+# These all keep the container kind: a NamedTuple result for MultiHaloArray, an
+# array result for ArrayOfHaloArray (`map`/`values` preserve the container).
+
+"""
+    map(f, c::FieldCollection)
+
+Apply `f` elementwise to every field, returning a collection of the same kind
+(a [`MultiHaloArray`](@ref) for named fields, an [`ArrayOfHaloArray`](@ref) for
+indexed fields).
+"""
+Base.map(f, c::FieldCollection) = _map_fields(field -> map(f, field), c)
+
+"""
+    interior_view(c::FieldCollection[, tile_id])
+
+The interior (ghost-free) view of every field, in the same container kind as the
+collection (a `NamedTuple` for [`MultiHaloArray`](@ref), an array for
+[`ArrayOfHaloArray`](@ref)). Pass `tile_id` for the per-tile interior of a
+threaded collection.
+"""
+interior_view(c::FieldCollection) = map(interior_view, getfield(c, :arrays))
+interior_view(c::FieldCollection, tile_id::Integer) =
+    map(a -> interior_view(a, tile_id), getfield(c, :arrays))
+
+"""
+    map_over_field(f, c::FieldCollection)
+
+Apply `f` to each **whole field** of `c` (not elementwise), returning the raw
+field container — a `NamedTuple` of results for [`MultiHaloArray`](@ref), an
+array of results for [`ArrayOfHaloArray`](@ref).
+"""
+map_over_field(f, c::FieldCollection) = map(f, getfield(c, :arrays))

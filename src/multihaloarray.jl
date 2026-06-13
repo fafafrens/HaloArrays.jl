@@ -90,107 +90,12 @@ Base.propertynames(mha::MultiHaloArray) = keys(getfield(mha, :arrays))
 @inline field_shape(mha::MultiHaloArray) = (length(mha.arrays),)
 @inline Base.parent(halo::MultiHaloArray)  = map(parent, halo.arrays)
 
-# AbstractHaloCollection helpers (concrete methods; stubs in abstract_haloarray.jl)
-@inline _first_field(mha::MultiHaloArray) = first(values(mha.arrays))
-@inline _fields(mha::MultiHaloArray)      = values(mha.arrays)
-@inline _map_fields(g, mha::MultiHaloArray) = MultiHaloArray(map(g, mha.arrays))
-@inline _check_same_fields(dest::MultiHaloArray, src::MultiHaloArray) =
-    keys(dest.arrays) == keys(src.arrays) ||
-        throw(DimensionMismatch("MultiHaloArray copyto! requires matching field names"))
-@inline tile_parent(halos::MultiHaloArray, tile_id::Integer) =
-    NamedTuple{keys(halos.arrays)}(map(a -> tile_parent(a, tile_id), values(halos.arrays)))
-# halo_backend, halo_width, tile_size, tile_count, tile_coordinates, neighbor_tile_id
-# inherited from AbstractHaloCollection (abstract_haloarray.jl)
-
-to_tuple(mha::MultiHaloArray) = (mha.arrays...,)
-
-function Base.getindex(mha::MultiHaloArray, field_index::Integer)
-    1 <= field_index <= n_field(mha) || throw(BoundsError(mha, (field_index,)))
-    return values(mha.arrays)[field_index]
-end
-
-function Base.getindex(mha::MultiHaloArray, field_index::Integer, I::Vararg{Integer})
-    return getindex(getindex(mha, field_index), I...)
-end
-
-function Base.setindex!(mha::MultiHaloArray, value, field_index::Integer, I::Vararg{Integer})
-    setindex!(getindex(mha, field_index), value, I...)
-    return mha
-end
-
-function Base.similar(mha::MultiHaloArray{AA,D,S}, ::Type{T}, dims::Dims{M}) where {AA,D,S,T,M}
-    M == S + 1 || throw(DimensionMismatch("MultiHaloArray similar dims must have $(S + 1) dimensions"))
-    Int(dims[1]) == n_field(mha) ||
-        throw(DimensionMismatch("MultiHaloArray similar cannot change the named field count from $(n_field(mha)) to $(dims[1])"))
-    spatial_dims = ntuple(d -> Int(dims[d + 1]), Val(S))
-
-    arrs = map(a -> similar(a, T, spatial_dims), values(mha.arrays))
-    names = keys(mha.arrays)
-    nt = NamedTuple{names}(arrs)
-    return MultiHaloArray(nt)
-end
-
-# Non-Int dims are normalized to Dims by Base's generic similar fallbacks.
-
-Base.similar(mha::MultiHaloArray, dims::Dims{M}) where {M} =
-    similar(mha, eltype(mha), dims)
-Base.similar(mha::MultiHaloArray, dims::NTuple{M,<:Integer}) where {M} =
-    similar(mha, eltype(mha), dims)
-
-# similar(mha[, T]) / copy / copyto! / fill! / zero come from
-# AbstractHaloCollection via _map_fields / _fields / _check_same_fields.
-
-function Base.map(f, mha::MultiHaloArray)
-    newfields = map(x -> map(f, x), values(mha.arrays))
-    new_ntuple = NamedTuple{keys(mha.arrays)}(newfields)
-    return MultiHaloArray(new_ntuple)
-end
-
-# foreach_field!(f!, ::AbstractHaloCollection) inherited from abstract_haloarray.jl
-
-
-function foreach_field!(f!, mha::MultiHaloArray, etc::Vararg{MultiHaloArray})
-    for (name, arr) in pairs(mha.arrays)
-        f!(arr, map(x -> x.arrays[name], etc)...)
-    end
-    return nothing
-end
-
-function map_over_field(f, mha::MultiHaloArray)
-
-    return map(f, mha.arrays)
-
-end
-
-function map_over_field(f, mha::MultiHaloArray,etc::Vararg{MultiHaloArray})
-    n_fields = n_field(mha)
-    keyset = keys(mha.arrays)
-
-    result = ntuple(n_fields) do n
-        f(mha.arrays[n], map(x -> x.arrays[n], etc)...)
-    end
-
-    return NamedTuple{keyset}(result)
-end
-
-"""
-    interior_view(mha::MultiHaloArray)
-
-Return a `NamedTuple` with the interior view of each field.
-"""
-function interior_view(mha::MultiHaloArray)
-    return NamedTuple{keys(mha.arrays)}(map(interior_view, values(mha.arrays)))
-end
-
-function interior_view(mha::MultiHaloArray, tile_id::Integer)
-    return NamedTuple{keys(mha.arrays)}(map(a -> interior_view(a, tile_id), values(mha.arrays)))
-end
-
-# isactive, is_root inherited from AbstractHaloCollection (abstract_haloarray.jl)
-
-function active_fields(mha::MultiHaloArray)
-    return (; (name => isactive(ha) for (name, ha) in mha.arrays)...)
-end
+# Everything else MultiHaloArray needs is container-generic and defined once on
+# FieldCollection (field_collection.jl) / AbstractHaloCollection
+# (abstract_haloarray.jl): the _fields/_first_field/_map_fields/_check_same_fields
+# hooks, tile_parent, to_tuple, active_fields, integer+Cartesian getindex/
+# setindex!, similar(c[, T][, dims]), copy/copyto!/fill!/zero, map, interior_view,
+# map_over_field, all/any, and halo_backend/halo_width/tile_*/isactive/is_root.
 
 # ---- LocalMultiHaloArray constructors -----------------------------------
 
