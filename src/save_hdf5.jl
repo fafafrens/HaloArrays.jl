@@ -313,6 +313,13 @@ function create_fixedsize_dataset_from_haloarray(g, name::String, halo::MaybeHal
     return create_fixedsize_dataset_from_haloarray(g, name, getdata(halo), num_timesteps)
 end
 
+"""
+    write_haloarray_timestep!(dset, halo, timestep)
+
+Write the interior (ghost-free) data of `halo` into the time-resolved dataset
+`dset` (from [`create_haloarray_output_file`](@ref)) at index `timestep`
+(0-based). Under MPI each rank writes its own subdomain collectively.
+"""
 function write_haloarray_timestep!(dset, halo::AbstractHaloArray, timestep)
     _hdf5_write_timestep!(dset, halo, timestep + 1)
     return nothing
@@ -323,6 +330,14 @@ function write_haloarray_timestep!(dset, halo::MaybeHaloArray, timestep)
     return write_haloarray_timestep!(dset, getdata(halo), timestep)
 end
 
+"""
+    create_haloarray_output_file(filename, dataset_name, halo, num_timesteps) -> (file, dataset)
+
+Open (or create) the HDF5 file `filename` and return it with a fixed-size
+`dataset` shaped to hold `num_timesteps` snapshots of `halo`. Write each step
+with [`write_haloarray_timestep!`](@ref); `close` the returned file when done.
+Under MPI the file is opened collectively across the array's communicator.
+"""
 function create_haloarray_output_file(filename::String, dataset_name::String,
                                       halo::AbstractHaloArray, num_timesteps::Int)
     comm = _hdf5_comm(halo)
@@ -365,6 +380,14 @@ function save_array_hdf5(filename::String, data; dataset::String="dataset")
     return _hdf5_save_snapshot(filename, data; dataset=dataset)
 end
 
+"""
+    gather_and_save_haloarray(filename, halo; root=0)
+
+Gather `halo` onto `root` and write the assembled global array to the HDF5 file
+`filename` as a single snapshot. Distributed arrays write only on `root`; serial
+arrays write directly. See [`gather_and_append_haloarray!`](@ref) to append
+successive timesteps to one dataset instead.
+"""
 function gather_and_save_haloarray(filename::String, halo::HaloArray; root::Int=0)
     comm = halo.topology.cart_comm
     gathered = _hdf5_gather_snapshot(halo; root=root)

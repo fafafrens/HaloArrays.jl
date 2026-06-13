@@ -1,3 +1,10 @@
+"""
+    gather_haloarray(halo::HaloArray; root=0) -> Array | nothing
+
+Collect a distributed [`HaloArray`](@ref) onto the `root` rank: each rank sends
+its interior (ghost-free) subdomain and `root` assembles the full global array.
+Returns the assembled `Array` on `root` and `nothing` on every other rank.
+"""
 function gather_haloarray(halo::HaloArray; root::Int=0)
     comm = halo.topology.cart_comm
     rank = MPI.Comm_rank(comm)

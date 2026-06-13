@@ -25,8 +25,8 @@ using HaloArrays
     owned_last = owned_first + interior_size(ha, 1) - 1
     @test interior_to_global_index(ha, (1,)) == (owned_first,)
     @test interior_to_global_index(ha, (5,)) == (owned_last,)
-    @test global_to_storage_index(ha, (owned_first,)) == (3,)
-    @test global_to_storage_index(ha, (owned_last,)) == (7,)
+    @test HaloArrays.global_to_storage_index(ha, (owned_first,)) == (3,)
+    @test HaloArrays.global_to_storage_index(ha, (owned_last,)) == (7,)
     @test_throws BoundsError interior_to_global_index(ha, (0,))
 
     fill!(ha, 3.0)

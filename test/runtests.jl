@@ -14,6 +14,9 @@ const MPI_SIZE = MPI.Comm_size(MPI_COMM)
 const RUN_UNIT_TESTS = !_env_false("HALOARRAYS_RUN_UNIT_TESTS")
 const RUN_MPI_TESTS  = !_env_false("HALOARRAYS_RUN_MPI_TESTS") &&
     (_env_true("HALOARRAYS_RUN_MPI_TESTS") || MPI_SIZE > 1)
+# Example smoke tests are opt-in (they run the full demo drivers); off by default
+# so the normal unit suite stays fast. Enabled by the dedicated CI examples job.
+const RUN_EXAMPLE_TESTS = _env_true("HALOARRAYS_RUN_EXAMPLE_TESTS")
 
 include_test(name) = include(joinpath(@__DIR__, name))
 
@@ -61,6 +64,12 @@ include_test(name) = include(joinpath(@__DIR__, name))
         end
     else
         @info "Skipping MPI tests (run with mpiexec -n 2 or set HALOARRAYS_RUN_MPI_TESTS=true)"
+    end
+
+    if RUN_EXAMPLE_TESTS
+        include_test("test_examples.jl")
+    else
+        @info "Skipping example smoke tests (set HALOARRAYS_RUN_EXAMPLE_TESTS=true to enable)"
     end
 
     MPI.Barrier(MPI_COMM)

@@ -107,12 +107,12 @@ end
 
         @test HaloArrays.left_face_range(ha, 1) == (1:1, 2:6)
         @test HaloArrays.right_face_range(ha, 1) == (5:5, 2:6)
-        @test face_offset(ha, 1) == CartesianIndex(1, 0)
+        @test HaloArrays.face_offset(ha, 1) == CartesianIndex(1, 0)
 
         dim2_ranges = FaceRanges(ha)
         @test collect(get_left_face(dim2_ranges, Dim(2))) == collect(CartesianIndices((2:5, 1:1)))
         @test collect(get_right_face(dim2_ranges, Dim(2))) == collect(CartesianIndices((2:5, 6:6)))
-        @test face_offset(ha, Dim(2)) == CartesianIndex(0, 1)
+        @test HaloArrays.face_offset(ha, Dim(2)) == CartesianIndex(0, 1)
         @test get_unit_vector(dim2_ranges, Dim(2)) == CartesianIndex(0, 1)
 
         # direction-aware internal faces keep the transverse dimension full

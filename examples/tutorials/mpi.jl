@@ -194,7 +194,7 @@ rho_max = maximum(state.rho)
 MPI.Barrier(comm)
 if rank == 0
     println("max(rho) after exchange : ", rho_max)
-    println("n_field  : ", n_field(state))
+    println("n_field  : ", HaloArrays.n_field(state))
 end
 
 # ============================================================

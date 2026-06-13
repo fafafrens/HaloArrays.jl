@@ -49,6 +49,26 @@ jobs:
           HALOARRAYS_RUN_UNIT_TESTS: "true"
           HALOARRAYS_RUN_MPI_TESTS: "false"
 
+  exampletests:
+    name: Example smoke tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+      - uses: julia-actions/cache@v2
+      - uses: julia-actions/julia-buildpkg@v1
+      # Runs every CPU example's full driver in a throwaway module so a runtime
+      # regression in an example fails CI instead of rotting silently. Threaded
+      # so the threaded examples exercise more than one tile.
+      - uses: julia-actions/julia-runtest@v1
+        env:
+          JULIA_NUM_THREADS: "2"
+          HALOARRAYS_RUN_UNIT_TESTS: "false"
+          HALOARRAYS_RUN_MPI_TESTS: "false"
+          HALOARRAYS_RUN_EXAMPLE_TESTS: "true"
+
   mpitests:
     name: MPI tests (${{ matrix.np }} ranks)
     strategy:
