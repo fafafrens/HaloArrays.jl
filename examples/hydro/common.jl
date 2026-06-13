@@ -89,8 +89,8 @@ end
 
 function _ideal_hydro_rhs!(::_HydroFlatBackend, du, u, p)
     ranges = FaceRanges(u)
-    u_data = parent(u)
-    du_data = parent(du)
+    u_data = field_storages(u)
+    du_data = field_storages(du)
 
     apply_hydro_fluxes!(du_data, u_data, ranges, 1, inv(p.dx), p.gamma)
     apply_hydro_fluxes!(du_data, u_data, ranges, 2, inv(p.dy), p.gamma)
@@ -136,7 +136,7 @@ end
 function fill_pressure_bump!(::_HydroFlatBackend, u; gamma=1.4)
     nx, ny = global_size(u[:rho])
     h = halo_width(u[:rho])
-    data = parent(u)
+    data = field_storages(u)
 
     @inbounds for I in CartesianIndices(interior_range(u[:rho]))
         storage_i, storage_j = Tuple(I)

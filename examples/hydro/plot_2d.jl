@@ -33,7 +33,7 @@ end
 function pressure_snapshot(u; gamma=1.4)
     nx, ny = global_size(u[:rho])
     h = halo_width(u[:rho])
-    data = parent(u)
+    data = field_storages(u)
     pressure = Matrix{Float64}(undef, nx, ny)
 
     @inbounds for I in CartesianIndices(interior_range(u[:rho]))
