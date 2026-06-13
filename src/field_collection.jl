@@ -303,3 +303,27 @@ field container — a `NamedTuple` of results for [`MultiHaloArray`](@ref), an
 array of results for [`ArrayOfHaloArray`](@ref).
 """
 map_over_field(f, c::FieldCollection) = map(f, getfield(c, :arrays))
+
+# ---- the two unwrap levels --------------------------------------------------
+
+"""
+    parent(c::FieldCollection)
+
+The collection's field container — the conventional one-level unwrap: a
+`NamedTuple` of fields for a [`MultiHaloArray`](@ref), an array of fields for an
+[`ArrayOfHaloArray`](@ref). For the raw padded backing array of every field
+(e.g. to index with ghost offsets in a stencil), use [`field_storages`](@ref).
+"""
+@inline Base.parent(c::FieldCollection) = getfield(c, :arrays)
+
+"""
+    field_storages(c::FieldCollection)
+
+The raw padded backing array of every field — `parent` pushed down to the
+leaves — in the same container kind as the collection (a `NamedTuple` for
+[`MultiHaloArray`](@ref), an array for [`ArrayOfHaloArray`](@ref)). Index these
+with **storage** indices (ghost-inclusive), e.g. over [`interior_range`](@ref)
+or a [`FaceRanges`](@ref) sweep. Contrast `parent` (the field container) and
+[`interior_view`](@ref) (ghost-free views).
+"""
+@inline field_storages(c::FieldCollection) = map(parent, getfield(c, :arrays))

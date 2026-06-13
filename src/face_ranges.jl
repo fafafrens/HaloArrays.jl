@@ -188,8 +188,9 @@ and scattered with opposite signs onto the interior cells — `du[IL] -= scale*F
   `data[I] += s*F`; pass a multi-field writer for collections.
 
 `du` and `u` are the raw storage the accessors understand — `parent(field)` for
-a single field, or the `parent(state)` NamedTuple for a multi-field collection —
-not the halo arrays themselves. `dim` may be an `Int` or a `Dim{D}`.
+a single field, or [`field_storages(state)`](@ref field_storages) (a NamedTuple/
+array of padded backing arrays) for a multi-field collection — not the halo
+arrays themselves. `dim` may be an `Int` or a `Dim{D}`.
 
 ```julia
 ranges = FaceRanges(u)

@@ -117,6 +117,14 @@ end
     @test parent(local_fields.arrays.rho) == [1, 1, 2, 3, 3]
     @test parent(local_fields.arrays.mom) == [-10, 10, 20, 30, -30]
 
+    # parent(collection) is the one-level unwrap: the NamedTuple of *fields*.
+    # field_storages(collection) pushes parent to the leaves: the NamedTuple of
+    # raw padded storages (what FV stencils index with ghost offsets).
+    @test parent(local_fields) === local_fields.arrays
+    @test parent(local_fields).rho isa LocalHaloArray
+    @test field_storages(local_fields).rho === parent(local_fields.arrays.rho)
+    @test keys(field_storages(local_fields)) == keys(local_fields.arrays)
+
     threaded_fields = MultiHaloArray(ThreadedHaloArray, Int, (3,), 1;
         dims=(2,),
         boundary_conditions=(; rho=:repeating, mom=:repeating))

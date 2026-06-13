@@ -76,7 +76,8 @@ Base.propertynames(mha::MultiHaloArray) = keys(getfield(mha, :arrays))
 # size/axes/eachindex/length, n_field, interior/global/storage size, and
 # interior_axes come from AbstractHaloCollection (field_shape prefix + _spatial_*).
 @inline field_shape(mha::MultiHaloArray) = (length(mha.arrays),)
-@inline Base.parent(halo::MultiHaloArray)  = map(parent, halo.arrays)
+# parent (the field NamedTuple) and field_storages (the storage NamedTuple) are
+# container-generic in field_collection.jl.
 
 # Everything else MultiHaloArray needs is container-generic and defined once on
 # FieldCollection (field_collection.jl) / AbstractHaloCollection

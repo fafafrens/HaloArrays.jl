@@ -146,8 +146,8 @@ end
 # is still in flight (see rel_rhs!).
 
 function add_geometric_source!(du, u, eos, r_min, dr)
-    du_data = parent(du)
-    u_data  = parent(u)
+    du_data = field_storages(du)
+    u_data  = field_storages(u)
     h = halo_width(u.N)
     @inbounds for I in get_interior_cells(CellRanges(u))
         U = conserved_cell(u_data, I)
@@ -173,7 +173,7 @@ function rel_rhs!(du, u, eos, r_min, dr)
     add_geometric_source!(du, u, eos, r_min, dr)     # du = S(U, r)  — overlaps comm
     finish_halo_exchange!(u)                         # wait for exchange
     boundary_condition!(u)                           # axis / outflow physical edges
-    accumulate_flux_divergence!(parent(du), parent(u), FaceRanges(u), 1, inv(dr),
+    accumulate_flux_divergence!(field_storages(du), field_storages(u), FaceRanges(u), 1, inv(dr),
         (UL, UR) -> rusanov_flux(eos, UL, UR), conserved_cell, add_conserved!)  # du += -∂_r F
     return du
 end
@@ -189,7 +189,7 @@ end
 # ─── Diagnostics (area-weighted, the cylindrical-conserved integrals) ─────────
 
 function diagnostics(u, eos, r_min, dr)
-    d = parent(u)
+    d = field_storages(u)
     h = halo_width(u.N)
     charge = 0.0; energy = 0.0; vmax = 0.0
     @inbounds for I in get_interior_cells(CellRanges(u))

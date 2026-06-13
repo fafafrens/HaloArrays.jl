@@ -44,6 +44,10 @@ end
     @test storage_size(fields) == (2, 2, 5)
     @test halo_width(fields) == 1
     @test parent(fields) === arrays
+    # field_storages pushes parent to the leaves: an array of raw storages,
+    # matching the field-container shape.
+    @test field_storages(fields) == map(parent, arrays)
+    @test size(field_storages(fields)) == size(arrays)
     @test fields[1, 2] === arrays[1, 2]
     @test eltype(typeof(fields)) === Float64
     @test_logs (:warn, r"Global scalar getindex") begin

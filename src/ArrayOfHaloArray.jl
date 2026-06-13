@@ -98,7 +98,8 @@ end
 
 # eltype/ndims come from AbstractArray{T,D} via FieldCollection{T,D,S,C}.
 @inline field_shape(mha::ArrayOfHaloArray) = size(getfield(mha, :arrays))
-@inline Base.parent(mha::ArrayOfHaloArray) = mha.arrays
+# parent (the field array) and field_storages (the array of storages) are
+# container-generic in field_collection.jl.
 
 # Everything else ArrayOfHaloArray needs is container-generic and defined once on
 # FieldCollection (field_collection.jl) / AbstractHaloCollection

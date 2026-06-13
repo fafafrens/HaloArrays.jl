@@ -120,7 +120,7 @@ end
     return 0.5 * (physical_flux(eos, UL) + physical_flux(eos, UR)) - 0.5 * smax * (UR - UL)
 end
 
-# ─── Field access on the NamedTuple returned by parent(state) ─────────────────
+# ─── Field access on the NamedTuple returned by field_storages(state) ─────────────────
 
 @inline conserved_cell(d, I) = SVector(d.D[I], d.S[I], d.tau[I])
 
@@ -147,7 +147,7 @@ function rel_rhs!(du, u, eos, apply_bc!, dx)
     fill!(du, 0.0)
     synchronize_halo!(u)
     apply_bc!(u)
-    accumulate_flux_divergence!(parent(du), parent(u), FaceRanges(u), 1, inv(dx),
+    accumulate_flux_divergence!(field_storages(du), field_storages(u), FaceRanges(u), 1, inv(dx),
         (UL, UR) -> rusanov_flux(eos, UL, UR), conserved_cell, add_conserved!)
     return du
 end
@@ -163,7 +163,7 @@ end
 # ─── Diagnostics ──────────────────────────────────────────────────────────────
 
 function cfl_dt(u, eos, dx, cfl)
-    d = parent(u)
+    d = field_storages(u)
     amax = 0.0
     for I in CartesianIndices(interior_range(u.D))
         amax = max(amax, max_wave_speed(eos, conserved_cell(d, I)))
@@ -172,7 +172,7 @@ function cfl_dt(u, eos, dx, cfl)
 end
 
 function diagnostics(u, eos, dx)
-    d = parent(u)
+    d = field_storages(u)
     mass = 0.0; energy = 0.0; vmax = 0.0
     for I in CartesianIndices(interior_range(u.D))
         U = conserved_cell(d, I)
@@ -226,7 +226,7 @@ function run_relativistic_sod(make_state, apply_bc!;
         mass1, energy1, vmax, step, t)
 
     # The right-going shock compresses the originally low-density right state.
-    d = parent(u)
+    d = field_storages(u)
     h = halo_width(u.D)
     i_probe = h + round(Int, 0.75 * nx)
     ρ_probe, _, _ = prim_from_cons(eos, conserved_cell(d, CartesianIndex(i_probe)))
