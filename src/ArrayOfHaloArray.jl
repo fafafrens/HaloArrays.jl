@@ -6,29 +6,20 @@
 # constructors below. The shape of `boundary_conditions` fixes the field shape.
 # (The element-type-first forms were removed: a dual-meaning first argument
 # caused method ambiguities against the specialized field-type constructors.)
-function ArrayOfHaloArray(::Type{<:HaloArray}, ::Type{T}, owned_dims::NTuple{N,Int},
+function ArrayOfHaloArray(FT::Type{<:HaloArray}, ::Type{T}, owned_dims::NTuple{N,Int},
         halo::Int, topology::CartesianTopology{N};
         boundary_conditions::AbstractArray) where {T,N}
-    arrays = map(boundary_conditions) do bc
-        HaloArray(T, owned_dims, halo, topology; boundary_condition=bc)
-    end
-    return ArrayOfHaloArray(arrays)
+    return ArrayOfHaloArray(map(bc -> _make_field(FT, T, owned_dims, halo, topology, bc), boundary_conditions))
 end
 
-function ArrayOfHaloArray(::Type{<:HaloArray}, ::Type{T}, owned_dims::NTuple{N,Int},
+function ArrayOfHaloArray(FT::Type{<:HaloArray}, ::Type{T}, owned_dims::NTuple{N,Int},
         halo::Int; boundary_conditions::AbstractArray) where {T,N}
-    arrays = map(boundary_conditions) do bc
-        HaloArray(T, owned_dims, halo; boundary_condition=bc)
-    end
-    return ArrayOfHaloArray(arrays)
+    return ArrayOfHaloArray(map(bc -> _make_field(FT, T, owned_dims, halo, bc), boundary_conditions))
 end
 
-function ArrayOfHaloArray(::Type{LocalHaloArray}, ::Type{T}, owned_dims::NTuple{N,Int},
+function ArrayOfHaloArray(FT::Type{LocalHaloArray}, ::Type{T}, owned_dims::NTuple{N,Int},
         halo::Int; boundary_conditions::AbstractArray) where {T,N}
-    arrays = map(boundary_conditions) do bc
-        LocalHaloArray(T, owned_dims, halo; boundary_condition=bc)
-    end
-    return ArrayOfHaloArray(arrays)
+    return ArrayOfHaloArray(map(bc -> _make_field(FT, T, owned_dims, halo, bc), boundary_conditions))
 end
 
 function ArrayOfHaloArray(::Type{LocalHaloArray}, owned_dims::NTuple{N,Int}, halo::Int;
@@ -77,12 +68,9 @@ function ArrayOfHaloArray(::Type{LocalHaloArray},
     return ArrayOfHaloArray(LocalHaloArray, Float64, field_shape, owned_dims, halo; kwargs...)
 end
 
-function ArrayOfHaloArray(::Type{ThreadedHaloArray}, ::Type{T}, tile_size::NTuple{N,<:Integer},
+function ArrayOfHaloArray(FT::Type{ThreadedHaloArray}, ::Type{T}, tile_size::NTuple{N,<:Integer},
         halo::Integer; dims::NTuple{N,<:Integer}, boundary_conditions::AbstractArray) where {T,N}
-    arrays = map(boundary_conditions) do bc
-        ThreadedHaloArray(T, tile_size, halo; dims=dims, boundary_condition=bc)
-    end
-    return ArrayOfHaloArray(arrays)
+    return ArrayOfHaloArray(map(bc -> _make_field(FT, T, tile_size, halo, bc; dims=dims), boundary_conditions))
 end
 
 function ArrayOfHaloArray(::Type{ThreadedHaloArray}, tile_size::NTuple{N,<:Integer},
@@ -91,7 +79,7 @@ function ArrayOfHaloArray(::Type{ThreadedHaloArray}, tile_size::NTuple{N,<:Integ
         dims=dims, boundary_conditions=boundary_conditions)
 end
 
-function ArrayOfHaloArray(::Type{ThreadedHaloArray}, ::Type{T},
+function ArrayOfHaloArray(FT::Type{ThreadedHaloArray}, ::Type{T},
         field_shape::NTuple{F,<:Integer}, tile_size::NTuple{N,<:Integer},
         halo::Integer;
         dims::NTuple{N,<:Integer},
@@ -99,10 +87,7 @@ function ArrayOfHaloArray(::Type{ThreadedHaloArray}, ::Type{T},
         boundary_conditions=nothing) where {T,F,N}
     shape = ntuple(d -> Int(field_shape[d]), Val(F))
     bcs = _arrayofhaloarray_boundary_conditions(shape, boundary_condition, boundary_conditions)
-    arrays = map(bcs) do bc
-        ThreadedHaloArray(T, tile_size, halo; dims=dims, boundary_condition=bc)
-    end
-    return ArrayOfHaloArray(arrays)
+    return ArrayOfHaloArray(map(bc -> _make_field(FT, T, tile_size, halo, bc; dims=dims), bcs))
 end
 
 function ArrayOfHaloArray(::Type{ThreadedHaloArray},

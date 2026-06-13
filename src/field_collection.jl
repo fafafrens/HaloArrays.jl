@@ -155,6 +155,21 @@ end
 @inline _rebuild_collection(arrs::NamedTuple)    = MultiHaloArray(arrs)
 @inline _rebuild_collection(arrs::AbstractArray) = ArrayOfHaloArray(arrs)
 
+# Build one backing field of the requested type for a single boundary condition.
+# This is the per-field core shared by the MultiHaloArray (named) and
+# ArrayOfHaloArray (indexed) constructor families: `map`ping it over a bcs
+# container (a NamedTuple or an array) yields the fields in the matching
+# container, which the alias constructor then wraps. Adding a backend means
+# adding one `_make_field` method, not editing both constructor families.
+@inline _make_field(::Type{<:HaloArray}, ::Type{T}, owned_dims, halo, topology, bc) where {T} =
+    HaloArray(T, owned_dims, halo, topology; boundary_condition=bc)
+@inline _make_field(::Type{<:HaloArray}, ::Type{T}, owned_dims, halo, bc) where {T} =
+    HaloArray(T, owned_dims, halo; boundary_condition=bc)
+@inline _make_field(::Type{<:LocalHaloArray}, ::Type{T}, owned_dims, halo, bc) where {T} =
+    LocalHaloArray(T, owned_dims, halo; boundary_condition=bc)
+@inline _make_field(::Type{<:ThreadedHaloArray}, ::Type{T}, tile_size, halo, bc; dims) where {T} =
+    ThreadedHaloArray(T, tile_size, halo; dims=dims, boundary_condition=bc)
+
 # ---- container-generic methods ---------------------------------------------
 # `values` is the identity on AbstractArrays and the field tuple on NamedTuples,
 # and `keys`/`map` preserve the container kind — so one definition covers both
