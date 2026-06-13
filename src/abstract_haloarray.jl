@@ -140,7 +140,10 @@ end
 # fill_from_local_indices!, and Base.foreach with tforeach variants.
 
 @inline Base.size(halo::AbstractSingleHaloArray)         = global_size(halo)
-@inline Base.size(halo::AbstractSingleHaloArray, i::Int) = size(halo)[i]
+# `size`/`axes` must return 1 / OneTo(1) for trailing dims `i > ndims` (the
+# AbstractArray contract — e.g. ArrayInterface.zeromatrix does `u .* u'`, which
+# asks for axes(u, 2) on a 1-D array).
+@inline Base.size(halo::AbstractSingleHaloArray, i::Int) = i <= ndims(halo) ? size(halo)[i] : 1
 @inline Base.axes(halo::AbstractSingleHaloArray)         = map(Base.OneTo, size(halo))
 @inline Base.axes(halo::AbstractSingleHaloArray, i::Int) = Base.OneTo(size(halo, i))
 @inline Base.length(halo::AbstractSingleHaloArray)       = prod(size(halo))
@@ -274,10 +277,10 @@ function _fields end
 @inline storage_size(c::AbstractHaloCollection)  = (field_shape(c)..., _spatial_storage_size(c)...)
 @inline storage_size(c::AbstractHaloCollection, i::Int) = storage_size(c)[i]
 @inline Base.size(c::AbstractHaloCollection)         = global_size(c)
-@inline Base.size(c::AbstractHaloCollection, i::Int) = size(c)[i]
+@inline Base.size(c::AbstractHaloCollection, i::Int) = i <= ndims(c) ? size(c)[i] : 1
 @inline Base.length(c::AbstractHaloCollection)       = prod(size(c))
 @inline Base.axes(c::AbstractHaloCollection) = (map(Base.OneTo, field_shape(c))..., _spatial_axes(c)...)
-@inline Base.axes(c::AbstractHaloCollection, i::Int) = axes(c)[i]
+@inline Base.axes(c::AbstractHaloCollection, i::Int) = i <= ndims(c) ? axes(c)[i] : Base.OneTo(1)
 @inline Base.eachindex(c::AbstractHaloCollection) = CartesianIndices(axes(c))
 @inline interior_axes(c::AbstractHaloCollection) = (map(Base.OneTo, field_shape(c))..., _spatial_interior_axes(c)...)
 @inline interior_axes(c::AbstractHaloCollection, i::Int) = interior_axes(c)[i]

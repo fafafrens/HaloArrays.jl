@@ -657,4 +657,26 @@ end
         end
     end
 
+    @testset "size/axes honor the trailing-dimension contract" begin
+        # size(A, i) / axes(A, i) must return 1 / OneTo(1) for i > ndims, per the
+        # AbstractArray contract — generic code (e.g. ArrayInterface.zeromatrix,
+        # which does `u .* u'`) relies on it.
+        u = LocalHaloArray(Float64, (4,), 1; boundary_condition=:periodic)
+        @test size(u, 2) == 1
+        @test size(u, 5) == 1
+        @test axes(u, 2) == Base.OneTo(1)
+
+        t = ThreadedHaloArray(Float64, (3,), 1; dims=(2,), boundary_condition=:periodic)
+        @test size(t, 2) == 1
+        @test axes(t, 2) == Base.OneTo(1)
+
+        mha = MultiHaloArray((; a=u, b=similar(u)))   # ndims == 2 (field axis + 1 spatial)
+        @test size(mha, 3) == 1
+        @test axes(mha, 3) == Base.OneTo(1)
+
+        m = MaybeHaloArray(u)
+        @test size(m, 2) == 1
+        @test axes(m, 2) == Base.OneTo(1)
+    end
+
 end
