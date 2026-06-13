@@ -554,7 +554,14 @@ end
 end
 
 @testset "MPI halo exchange — SVector eltype (1D periodic)" begin
-    _check_periodic_1d_svector_halo_exchange!(halo_exchange!)
+    # Every implementation, including the unsafe (raw-pointer, no-copy) buffer
+    # paths: an SVector cell is isbits, so its contiguous byte layout survives
+    # them all.
+    for (name, exchange!) in pairs(EXCHANGE_IMPLEMENTATIONS)
+        @testset "$name" begin
+            _check_periodic_1d_svector_halo_exchange!(exchange!)
+        end
+    end
 end
 
 @testset "MPI synchronize_halo! with physical boundaries" begin
