@@ -1,6 +1,7 @@
 using Test
 using MPI
 using HaloArrays
+using StaticArrays
 
 const EXCHANGE_IMPLEMENTATIONS = (
     blocking=halo_exchange!,
@@ -69,6 +70,52 @@ function _check_periodic_1d_halo_exchange!(exchange!)
     @test left_halo == expected_left
     @test right_halo == expected_right
     @test interior == expected_interior
+
+    return nothing
+end
+
+# Same 1-D periodic exchange but with an SVector cell type, to confirm a
+# multi-component (array-of-structs) field survives the MPI send/recv path.
+function _check_periodic_1d_svector_halo_exchange!(exchange!)
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+    nranks = MPI.Comm_size(comm)
+
+    @test nranks > 1
+
+    topology = CartesianTopology(comm, (0,); periodic=(true,))
+    halo_width_cells = 2
+    local_cells = 5
+    ha = HaloArray(
+        SVector{2,Int},
+        (local_cells,),
+        halo_width_cells,
+        topology;
+        boundary_condition=((Periodic(), Periodic()),),
+    )
+
+    interior = interior_view(ha)
+    for i in eachindex(interior)
+        interior[i] = SVector(100 * rank + i, -(100 * rank + i))
+    end
+    MPI.Barrier(comm)
+    exchange!(ha)
+    MPI.Barrier(comm)
+
+    left_rank = topology.neighbors[1][1]
+    right_rank = topology.neighbors[1][2]
+
+    left_halo = collect(parent(ha)[1:halo_width_cells])
+    right_halo = collect(parent(ha)[(halo_width_cells + local_cells + 1):(2 * halo_width_cells + local_cells)])
+
+    cell(v) = SVector(v, -v)
+    expected_left = [cell(100 * left_rank + local_cells - halo_width_cells + i) for i in 1:halo_width_cells]
+    expected_right = [cell(100 * right_rank + i) for i in 1:halo_width_cells]
+    expected_interior = [cell(100 * rank + i) for i in 1:local_cells]
+
+    @test left_halo == expected_left
+    @test right_halo == expected_right
+    @test collect(interior_view(ha)) == expected_interior
 
     return nothing
 end
@@ -504,6 +551,10 @@ end
         end
     end
     _check_exchange_implementations_agree()
+end
+
+@testset "MPI halo exchange — SVector eltype (1D periodic)" begin
+    _check_periodic_1d_svector_halo_exchange!(halo_exchange!)
 end
 
 @testset "MPI synchronize_halo! with physical boundaries" begin

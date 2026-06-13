@@ -46,6 +46,7 @@ include_test(name) = include(joinpath(@__DIR__, name))
         include_test("test_fallbacks.jl")
         include_test("test_maybe_broadcast.jl")
         include_test("test_local_threaded_reduction.jl")
+        include_test("test_svector_eltype.jl")
         include_test("test_hdf5_local_threaded.jl")
     else
         @info "Skipping unit tests (set HALOARRAYS_RUN_UNIT_TESTS=true to enable)"
