@@ -1,6 +1,7 @@
 using Test
 using MPI
 using HaloArrays
+using LinearAlgebra
 
 if !MPI.Initialized()
     MPI.Init()
@@ -677,6 +678,20 @@ end
         m = MaybeHaloArray(u)
         @test size(m, 2) == 1
         @test axes(m, 2) == Base.OneTo(1)
+
+        # getindex/setindex! must accept trailing singleton indices to match
+        # axes (e.g. Diagonal's ldiv!, used as a preconditioner, does `A[i, 1]`).
+        interior_view(u) .= [10.0, 20.0, 30.0, 40.0]
+        @test u[2] == u[2, 1] == u[2, 1, 1] == 20.0
+        @test_throws BoundsError u[2, 2]
+        u[3, 1] = 99.0
+        @test u[3] == 99.0
+        diag = LocalHaloArray(Float64, (4,), 1; boundary_condition=:periodic)
+        interior_view(diag) .= 2.0
+        x = LocalHaloArray(Float64, (4,), 1; boundary_condition=:periodic)
+        interior_view(x) .= [2.0, 4.0, 6.0, 8.0]
+        LinearAlgebra.ldiv!(LinearAlgebra.Diagonal(diag), x)
+        @test collect(interior_view(x)) == [1.0, 2.0, 3.0, 4.0]
     end
 
 end

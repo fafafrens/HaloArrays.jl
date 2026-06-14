@@ -334,10 +334,19 @@ function foreach_field!(f!, mha::AbstractHaloCollection)
 end
 
 @inline function _check_global_scalar_indices(halo::AbstractHaloArray, I::Tuple)
-    length(I) == ndims(halo) || throw(BoundsError(halo, I))
-    all(d -> first(axes(halo, d)) <= I[d] <= last(axes(halo, d)), eachindex(I)) ||
-        throw(BoundsError(halo, I))
-    return I
+    nd = ndims(halo)
+    length(I) >= nd || throw(BoundsError(halo, I))
+    # Trailing indices beyond ndims must be 1, per the AbstractArray contract:
+    # `A[i, 1]` is valid for a vector. Generic LinearAlgebra code relies on this
+    # (e.g. Diagonal's ldiv!, used as a preconditioner, indexes `B[i, 1]`).
+    @inbounds for d in (nd + 1):length(I)
+        isone(I[d]) || throw(BoundsError(halo, I))
+    end
+    idx = ntuple(d -> @inbounds(I[d]), Val(ndims(halo)))
+    @inbounds for d in 1:nd
+        first(axes(halo, d)) <= idx[d] <= last(axes(halo, d)) || throw(BoundsError(halo, I))
+    end
+    return idx
 end
 
 Base.getindex(halo::AbstractHaloArray, I::CartesianIndex) = getindex(halo, Tuple(I)...)
