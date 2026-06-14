@@ -86,6 +86,17 @@ julia --project=examples examples/finite_volume/burgers_diffeq_1d.jl
 julia --project=examples examples/finite_volume/advection_diffeq_1d.jl
 ```
 
+`stiff_reaction_diffusion_implicit_1d.jl` shows an **implicit** SciML solve with
+autodiff Jacobians using the `HaloArray` *as the ODE state* — matrix-free
+(`concrete_jac=false`) via `SimpleGMRES()`. The key point: pick a `similar`-based
+linear solver (`SimpleGMRES`, or `IterativeSolversJL_CG` for symmetric systems),
+not the `KrylovJL_*` wrappers, which allocate work vectors as `S(undef, n)` and
+can't construct a geometry-carrying `HaloArray`.
+
+```bash
+julia --project=examples examples/finite_volume/stiff_reaction_diffusion_implicit_1d.jl
+```
+
 `acoustics_characteristic_1d.jl` demonstrates a **coupled** boundary condition:
 1-D linear acoustics on two fields `(p, u)` with a characteristic non-reflecting
 outflow that mixes both fields at the edge (via `AbstractCoupledBoundaryCondition`

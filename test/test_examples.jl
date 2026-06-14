@@ -52,6 +52,7 @@ const DIFFEQ_EXAMPLES = [
     "finite_volume/advection_diffeq_1d.jl",
     "finite_volume/burgers_diffeq_1d.jl",
     "finite_volume/relativistic_hydro_Tmu_diffeq_1d.jl",
+    "finite_volume/stiff_reaction_diffusion_implicit_1d.jl",   # also needs LinearSolve
     "heat/local_vs_threaded.jl",
     "tutorials/diffeq.jl",
 ]
