@@ -10,26 +10,27 @@
 #   • We use an implicit integrator (FBDF) with autodiff Jacobians, solved
 #     *matrix-free* (`concrete_jac = false`) — no dense Jacobian is ever formed.
 #
-# The one catch — and the reason this passes an explicit `linsolve` — is how the
-# Krylov solver allocates its work vectors:
+# The one subtlety is the *linear solver* for the Newton/W system. A custom array
+# state works with any solver that allocates its work vectors via `similar(b)`
+# (which preserves the halo geometry) and applies the operator via `mul!`:
 #
-#   • `KrylovJL_GMRES()` (the usual default) builds them with `S(undef, n)`,
-#     assuming a plain `Vector` constructor. A HaloArray carries geometry (halo
-#     width, boundary conditions, shape) and has no such constructor, so that
-#     path errors out.
-#   • `SimpleGMRES()` builds them with `similar(b)` — which returns a proper
-#     HaloArray — and applies the operator via `mul!`. It therefore only ever
-#     touches the state through the vector-space interface the HaloArray already
-#     provides (`similar`, `dot`, `norm`, broadcast). That one works.
+#   • `SimpleGMRES()` — built into LinearSolve, `similar`-based. The simplest
+#     choice (used in the first run below).
+#   • `IterativeSolversJL_CG()` — `similar`-based and cheaper, but CG needs a
+#     symmetric (SPD) operator, so only for pure diffusion (no reaction term).
+#   • Krylov.jl via its `KrylovConstructor` (also `similar`-based) — wired in with
+#     a `LinearSolveFunction` in `krylov_gmres_bridge` below, so Krylov.jl's
+#     solvers (and its preconditioners) run with the HaloArray as the vector.
 #
-# So the rule for picking a linear solver for a custom array state is: it must
-# allocate via `similar(b)` (not `S(undef, n)`) and apply via `mul!`. For a
-# *symmetric* operator (pure diffusion, no reaction) `IterativeSolversJL_CG()`
-# works too and is cheaper — but CG needs an SPD `W`, so use GMRES in general.
+# What does *not* work is LinearSolve's `KrylovJL_*` wrappers: they allocate work
+# vectors via `S(undef, n)`, and a geometry-carrying HaloArray has no `(undef, n)`
+# constructor. You can still use Krylov.jl — through `KrylovConstructor`, as the
+# bridge shows — just not the `KrylovJL_*` wrapper.
 
 using HaloArrays
 using OrdinaryDiffEq
 using LinearSolve
+using Krylov
 using Printf
 
 const D = 1.0           # diffusion coefficient
@@ -48,7 +49,18 @@ function rhs!(du, u, p, t)
     return nothing
 end
 
-function run_stiff_reaction_diffusion(; nx = 128, tend = 0.3)
+# Route LinearSolve through Krylov.jl's native KrylovConstructor workspace, which
+# allocates with `similar(b)` and applies the (matrix-free) operator via `mul!`.
+# This is what lets Krylov.jl run with the HaloArray as the solver vector.
+function krylov_gmres_bridge(A, b, u, p, isfresh, Pl, Pr, cacheval; kwargs...)
+    workspace = krylov_workspace(Val(:gmres), KrylovConstructor(b))
+    gmres!(workspace, A, b)
+    copyto!(u, Krylov.solution(workspace))
+    return u
+end
+
+function run_stiff_reaction_diffusion(; nx = 128, tend = 0.3,
+        linsolve = SimpleGMRES(), label = "SimpleGMRES")
     dx = 1.0 / nx
     u0 = LocalHaloArray(Float64, (nx,), 1; boundary_condition = :periodic)
     iv = interior_view(u0)
@@ -59,14 +71,14 @@ function run_stiff_reaction_diffusion(; nx = 128, tend = 0.3)
     prob = ODEProblem(rhs!, u0, (0.0, tend), inv(dx^2))
 
     # Implicit, autodiff Jacobians, matrix-free, HaloArray as the state.
-    alg = FBDF(linsolve = SimpleGMRES(), concrete_jac = false)
+    alg = FBDF(linsolve = linsolve, concrete_jac = false)
     sol = solve(prob, alg; reltol = 1e-7, abstol = 1e-7, save_everystep = false)
 
     # High-accuracy explicit reference for a correctness check.
     ref = solve(prob, Tsit5(); reltol = 1e-10, abstol = 1e-10, save_everystep = false)
     err = maximum(abs, collect(interior_view(sol.u[end])) .- collect(interior_view(ref.u[end])))
 
-    @printf("implicit FBDF + SimpleGMRES (autodiff, matrix-free)\n")
+    @printf("implicit FBDF + %s (autodiff, matrix-free)\n", label)
     @printf("  retcode           : %s\n", sol.retcode)
     @printf("  accepted steps    : %d  (vs explicit Tsit5: %d)\n",
             sol.stats.naccept, ref.stats.naccept)
@@ -77,7 +89,11 @@ function run_stiff_reaction_diffusion(; nx = 128, tend = 0.3)
 end
 
 function main()
-    run_stiff_reaction_diffusion()
+    # Two linear-solver routes, both with the HaloArray as the ODE state:
+    run_stiff_reaction_diffusion(; linsolve = SimpleGMRES(), label = "SimpleGMRES")
+    println()
+    run_stiff_reaction_diffusion(; linsolve = LinearSolveFunction(krylov_gmres_bridge),
+        label = "Krylov.jl (KrylovConstructor bridge)")
     return nothing
 end
 

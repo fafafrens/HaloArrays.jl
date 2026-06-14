@@ -23,6 +23,7 @@ HaloArraysPolyesterExt = "Polyester"
 Aqua = "0.8"
 DiffEqBase = "6, 7"
 HDF5 = "0.16, 0.17"
+Krylov = "0.9, 0.10"
 LinearAlgebra = "1"
 LinearSolve = "2, 3"
 MPI = "0.20, 0.21"
@@ -39,6 +40,7 @@ julia = "1.10"
 [extras]
 Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
 DiffEqBase = "2b5f629d-d688-5b77-993f-72d75c75574e"
+Krylov = "ba0b0d4f-ebba-5204-a429-3ac8c609bfb7"
 LinearSolve = "7ed4a6bd-45f5-4d41-b270-4a48e9bafcae"
 OrdinaryDiffEq = "1dea7af3-3e70-54e6-95c3-0bf5283fa5ed"
 Polyester = "f517fe37-dbe3-4b94-8317-1923a5111588"
@@ -47,4 +49,4 @@ Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test", "OrdinaryDiffEq", "DiffEqBase", "LinearSolve", "Printf", "Polyester", "Random", "Aqua"]
+test = ["Test", "OrdinaryDiffEq", "DiffEqBase", "LinearSolve", "Krylov", "Printf", "Polyester", "Random", "Aqua"]
