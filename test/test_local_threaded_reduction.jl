@@ -105,4 +105,28 @@ using LinearAlgebra: dot, norm
             @test tile_mapreduce(backend, identity, +, [7]) == 7   # single tile
         end
     end
+
+    @testset "in-place BLAS-1 vector ops (axpy!/axpby!/lmul!/rmul!)" begin
+        # These let Krylov.jl and other LinearAlgebra iterative solvers run on
+        # halo arrays without scalar-indexing fallbacks; interior-only via broadcast.
+        mk(v) = (a = LocalHaloArray(Float64, (4,), 1; boundary_condition=:periodic);
+                 interior_view(a) .= v; a)
+        x = mk([1.0, 2, 3, 4]); y = mk([10.0, 20, 30, 40])
+        axpy!(2.0, x, y)
+        @test collect(interior_view(y)) == [12.0, 24, 36, 48]
+        @test collect(interior_view(x)) == [1.0, 2, 3, 4]           # x untouched
+        lmul!(0.5, x)
+        @test collect(interior_view(x)) == [0.5, 1.0, 1.5, 2.0]
+        rmul!(x, 4.0)
+        @test collect(interior_view(x)) == [2.0, 4.0, 6.0, 8.0]
+        z = mk([1.0, 1, 1, 1]); axpby!(2.0, mk([1.0, 2, 3, 4]), 10.0, z)
+        @test collect(interior_view(z)) == [12.0, 14, 16, 18]
+
+        # threaded backend: same ops, per tile
+        tx = ThreadedHaloArray(Float64, (3,), 1; dims=(2,), boundary_condition=:repeating)
+        ty = similar(tx)
+        for t in 1:tile_count(tx); interior_view(tx, t) .= 1.0; interior_view(ty, t) .= 2.0; end
+        axpy!(3.0, tx, ty)
+        @test all(==(5.0), interior_view(ty, 1)) && all(==(5.0), interior_view(ty, 2))
+    end
 end
