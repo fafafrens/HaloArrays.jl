@@ -28,6 +28,7 @@ include("boundary.jl")
 include("halo_exchange.jl")
 include("gather.jl")
 include("reduction.jl")
+include("vector_space.jl")
 include("mpi_support.jl")
 include("save_hdf5.jl")
 

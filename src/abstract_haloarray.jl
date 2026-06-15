@@ -148,19 +148,8 @@ end
 @inline Base.axes(halo::AbstractSingleHaloArray, i::Int) = Base.OneTo(size(halo, i))
 @inline Base.length(halo::AbstractSingleHaloArray)       = prod(size(halo))
 
-Base.:/(halo::AbstractSingleHaloArray, x::Number) = halo ./ x
-Base.:*(halo::AbstractSingleHaloArray, x::Number) = halo .* x
-Base.:*(x::Number, halo::AbstractSingleHaloArray) = x .* halo
-
-function LinearAlgebra.norm(halo::AbstractSingleHaloArray, p::Real=2)
-    if p == 2
-        return sqrt(mapreduce(abs2, +, halo))
-    elseif p == Inf
-        return mapreduce(abs, max, halo)
-    else
-        return mapreduce(x -> abs(x)^p, +, halo)^(1/p)
-    end
-end
+# Scalar `*`/`/`, `norm`, `dot`, and the in-place BLAS-1 updates (the
+# vector-space / Hilbert-space interface) live in vector_space.jl.
 
 function Base.foreach(f, halo::AbstractSingleHaloArray)
     foreach(f, interior_view(halo))

@@ -112,24 +112,8 @@ Base.sum(f::F, halo::AbstractHaloArray) where {F<:Function} = mapreduce(f, +, ha
 Base.maximum(halo::AbstractHaloArray) = mapreduce(identity, max, halo)
 Base.minimum(halo::AbstractHaloArray) = mapreduce(identity, min, halo)
 
-# The inner product is a reduction: ⟨x,y⟩ = Σ conj(xᵢ)·yᵢ over interior cells.
-# Reusing the two-argument mapreduce makes it inherit the correct global
-# semantics on every backend — MPI Allreduce, threaded tile reduction, and
-# per-field for collections — exactly like sum/maximum above. This overrides
-# the generic AbstractArray dot, which would only reduce locally (silently
-# wrong across MPI ranks).
-LinearAlgebra.dot(x::AbstractHaloArray, y::AbstractHaloArray) = mapreduce(LinearAlgebra.dot, +, x, y)
-
-# In-place BLAS-1 updates, via the (interior-only) broadcast. Defining these lets
-# Krylov.jl and other LinearAlgebra-based iterative solvers run on halo arrays
-# without falling back to the generic scalar-`eachindex` loops (which are slower,
-# hurt inference, and warn under MPI). dot/norm above are the global reductions;
-# these are purely elementwise, so local-per-rank is correct.
-LinearAlgebra.rmul!(x::AbstractHaloArray, s::Number) = (x .= x .* s)
-LinearAlgebra.lmul!(s::Number, x::AbstractHaloArray) = (x .= s .* x)
-LinearAlgebra.axpy!(s::Number, x::AbstractHaloArray, y::AbstractHaloArray) = (y .= y .+ s .* x)
-LinearAlgebra.axpby!(s::Number, x::AbstractHaloArray, t::Number, y::AbstractHaloArray) =
-    (y .= s .* x .+ t .* y)
+# dot, norm, and the in-place BLAS-1 ops (rmul!/lmul!/axpy!/axpby!) — all built
+# on the mapreduce/broadcast above — live in vector_space.jl.
 
 
 # mapreduce_haloarray_dims and mapreduce_mhaloarray_dims live in mpi_support.jl
