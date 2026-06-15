@@ -49,38 +49,65 @@ LinearAlgebra.axpby!(s::Number, x::AbstractHaloArray, t::Number, y::AbstractHalo
     (y .= s .* x .+ t .* y)
 
 # ---- swap + Givens/Householder on two vectors (elementwise, MPI-safe) --------
-# These complete the BLAS-1 surface (SSWAP, SROT). They mix two whole vectors
-# elementwise — no reduction — so the interior-only broadcast is correct on every
-# backend (each rank/tile rotates its own cells). Both outputs depend on both old
-# inputs, so the new `x` is staged in a temporary before `x` is overwritten.
+# These complete the BLAS-1 surface (SSWAP, SROT). Each mixes two whole vectors
+# elementwise — no reduction — so it is correct local-per-rank/tile (MPI-safe).
+# Both outputs depend on both old inputs, so each cell is updated through scalar
+# locals in a single fused pass: no temporary vector, no extra traversal.
+#
+# The kernels loop over storage tiles exactly like the unified RHS — `tile_count`
+# is 1 for Local/MPI (the whole padded block / this rank's block) and many for a
+# ThreadedHaloArray — and index the raw `tile_parent` array over `interior_range`
+# (so no scalar-getindex on the halo array itself). Collections delegate per
+# field, reusing the single-array kernel.
 
 """
     swap!(x, y) -> (x, y)
 
-Swap the interior contents of two halo arrays in place (BLAS-1 `swap`). Ghost
-cells are left as-is (re-filled by the next [`synchronize_halo!`](@ref)). `x` and
-`y` must share geometry; works on any backend and is MPI-safe (each rank swaps
-its own cells).
+Swap the interior contents of two halo arrays in place (BLAS-1 `swap`), with no
+temporary allocation. Ghost cells are left as-is (re-filled by the next
+[`synchronize_halo!`](@ref)). `x` and `y` must share geometry; works on any
+backend and is MPI-safe (each rank/tile swaps its own cells).
 """
-function swap!(x::AbstractHaloArray, y::AbstractHaloArray)
-    tmp = copy(x)
-    x .= y
-    y .= tmp
+function swap!(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray)
+    @inbounds for tile in 1:tile_count(x)
+        px = tile_parent(x, tile); py = tile_parent(y, tile)
+        for I in CartesianIndices(interior_range(x))
+            px[I], py[I] = py[I], px[I]
+        end
+    end
     return x, y
 end
 
-# Givens rotation:  [x; y] .= [c s; -conj(s) c] * [x; y]  (LinearAlgebra.rotate!)
-function LinearAlgebra.rotate!(x::AbstractHaloArray, y::AbstractHaloArray, c, s)
-    xnew = c .* x .+ s .* y
-    y .= c .* y .- conj(s) .* x        # still the old `x` here
-    x .= xnew
+# Givens rotation:  x .= c*x + s*y,  y .= -conj(s)*x + c*y   (LinearAlgebra.rotate!)
+function LinearAlgebra.rotate!(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray, c, s)
+    @inbounds for tile in 1:tile_count(x)
+        px = tile_parent(x, tile); py = tile_parent(y, tile)
+        for I in CartesianIndices(interior_range(x))
+            a = px[I]; b = py[I]
+            px[I] = c * a + s * b
+            py[I] = c * b - conj(s) * a
+        end
+    end
     return x, y
 end
 
 # Householder reflection:  x .= c*x + s*y,  y .= conj(s)*x − c*y  (LinearAlgebra.reflect!)
-function LinearAlgebra.reflect!(x::AbstractHaloArray, y::AbstractHaloArray, c, s)
-    xnew = c .* x .+ s .* y
-    y .= conj(s) .* x .- c .* y        # still the old `x` here
-    x .= xnew
+function LinearAlgebra.reflect!(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray, c, s)
+    @inbounds for tile in 1:tile_count(x)
+        px = tile_parent(x, tile); py = tile_parent(y, tile)
+        for I in CartesianIndices(interior_range(x))
+            a = px[I]; b = py[I]
+            px[I] = c * a + s * b
+            py[I] = conj(s) * a - c * b
+        end
+    end
     return x, y
 end
+
+# Field collections: apply the single-array kernel field by field (also alloc-free).
+swap!(x::AbstractHaloCollection, y::AbstractHaloCollection) =
+    (foreach(swap!, eachfield(x), eachfield(y)); (x, y))
+LinearAlgebra.rotate!(x::AbstractHaloCollection, y::AbstractHaloCollection, c, s) =
+    (foreach((fx, fy) -> rotate!(fx, fy, c, s), eachfield(x), eachfield(y)); (x, y))
+LinearAlgebra.reflect!(x::AbstractHaloCollection, y::AbstractHaloCollection, c, s) =
+    (foreach((fx, fy) -> reflect!(fx, fy, c, s), eachfield(x), eachfield(y)); (x, y))

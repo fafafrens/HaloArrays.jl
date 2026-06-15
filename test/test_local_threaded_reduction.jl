@@ -166,5 +166,19 @@ using LinearAlgebra: dot, norm
         @test all(≈(c * 2.0 - s * 1.0), interior_view(ty, 2))
         swap!(tx, ty)
         @test all(≈(c * 2.0 - s * 1.0), interior_view(tx, 1))
+
+        # field collection: delegators apply the single-array kernel per field
+        cx = LocalMultiHaloArray((; u = mk([1.0, 2, 3, 4]), v = mk([5.0, 6, 7, 8])))
+        cy = LocalMultiHaloArray((; u = mk([10.0, 20, 30, 40]), v = mk([50.0, 60, 70, 80])))
+        rotate!(cx, cy, c, s)
+        @test collect(interior_view(cx.u)) ≈ c .* [1.0, 2, 3, 4] .+ s .* [10.0, 20, 30, 40]
+        @test collect(interior_view(cy.v)) ≈ c .* [50.0, 60, 70, 80] .- s .* [5.0, 6, 7, 8]
+
+        # allocation-free: the in-place kernels touch no temporary vector
+        x = mk([1.0, 2, 3, 4]); y = mk([10.0, 20, 30, 40])
+        rotate!(x, y, c, s)                  # warm up / compile
+        @test @allocated(rotate!(x, y, c, s)) == 0
+        @test @allocated(swap!(x, y)) == 0
+        @test @allocated(reflect!(x, y, c, s)) == 0
     end
 end
