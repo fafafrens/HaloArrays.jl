@@ -54,13 +54,13 @@ LinearAlgebra.axpby!(s::Number, x::AbstractHaloArray, t::Number, y::AbstractHalo
 # Both outputs depend on both old inputs, so each cell is updated through scalar
 # locals in a single fused pass: no temporary vector, no extra traversal.
 #
-# A single-tile kernel does the cell math on one raw `tile_parent` array over
+# A single-tile kernel does the cell math on one raw padded array over
 # `interior_range` (so no scalar-getindex on the halo array itself). The
-# per-backend methods just choose how to drive the tiles: a serial loop for
-# single arrays (Local/MPI = one tile), and `tile_foreach` for a
-# ThreadedHaloArray so the tiles split across threads — matching the threaded
-# broadcast that already backs axpy!/lmul!/… Collections delegate per field, so
-# each field picks its own (serial or threaded) driver.
+# per-backend methods just choose how to drive the tiles: a non-threaded array
+# (Local/MPI) is one block, so its method runs the kernel straight on `parent`;
+# a ThreadedHaloArray drives its tiles with `tile_foreach` so they split across
+# threads — matching the threaded broadcast that already backs axpy!/lmul!/…
+# Collections delegate per field, so each field picks its own driver.
 
 @inline function _swap_tile!(px, py, rng)
     @inbounds for I in CartesianIndices(rng)
@@ -94,26 +94,17 @@ backend and is MPI-safe (each rank/tile swaps its own cells). On a
 [`ThreadedHaloArray`](@ref) the tiles are processed in parallel.
 """
 function swap!(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray)
-    rng = interior_range(x)
-    for tile in 1:tile_count(x)
-        _swap_tile!(tile_parent(x, tile), tile_parent(y, tile), rng)
-    end
+    _swap_tile!(parent(x), parent(y), interior_range(x))   # one block (Local/MPI)
     return x, y
 end
 
 function LinearAlgebra.rotate!(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray, c, s)
-    rng = interior_range(x)
-    for tile in 1:tile_count(x)
-        _rotate_tile!(tile_parent(x, tile), tile_parent(y, tile), rng, c, s)
-    end
+    _rotate_tile!(parent(x), parent(y), interior_range(x), c, s)
     return x, y
 end
 
 function LinearAlgebra.reflect!(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray, c, s)
-    rng = interior_range(x)
-    for tile in 1:tile_count(x)
-        _reflect_tile!(tile_parent(x, tile), tile_parent(y, tile), rng, c, s)
-    end
+    _reflect_tile!(parent(x), parent(y), interior_range(x), c, s)
     return x, y
 end
 
