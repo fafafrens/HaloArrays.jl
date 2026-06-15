@@ -16,17 +16,96 @@ Shared interface (all subtypes must implement):
 """
 abstract type AbstractCartesianTopology{N} end
 
+"""
+    AbstractHaloArray{T,N} <: AbstractArray{T,N}
+
+Root of the halo-array type hierarchy: an `N`-dimensional array of `T` whose
+storage carries ghost (halo) cells around an interior region. All halo arrays —
+single backends and field collections alike — subtype this and present the
+ghost-free interior through the standard `AbstractArray` interface, so generic
+code (`broadcast`, `sum`, `similar`, …) sees only the owned data.
+
+Hierarchy:
+- [`AbstractSingleHaloArray`](@ref) — one field per array
+  - [`AbstractDistributedHaloArray`](@ref) — MPI-backed (`HaloArray`)
+  - [`AbstractSerialHaloArray`](@ref) — single-process (`LocalHaloArray`, `ThreadedHaloArray`)
+- [`AbstractHaloCollection`](@ref) — a bundle of same-geometry fields
+"""
 abstract type AbstractHaloArray{T,N} <: AbstractArray{T,N} end
 
+"""
+    AbstractSingleHaloArray{T,N} <: AbstractHaloArray{T,N}
+
+A halo array holding a single field in one backing `data` array (accessible via
+`parent`). Supertype of the serial ([`AbstractSerialHaloArray`](@ref)) and
+distributed ([`AbstractDistributedHaloArray`](@ref)) backends, as opposed to the
+multi-field [`AbstractHaloCollection`](@ref).
+"""
 abstract type AbstractSingleHaloArray{T,N} <: AbstractHaloArray{T,N} end
+
+"""
+    AbstractDistributedHaloArray{T,N} <: AbstractSingleHaloArray{T,N}
+
+A halo array whose interior is distributed across MPI ranks via a Cartesian
+topology; each rank owns a local block and exchanges ghost cells with its
+neighbors during [`synchronize_halo!`](@ref). The concrete subtype is
+`HaloArray`.
+"""
 abstract type AbstractDistributedHaloArray{T,N} <: AbstractSingleHaloArray{T,N} end
+
+"""
+    AbstractSerialHaloArray{T,N} <: AbstractSingleHaloArray{T,N}
+
+A halo array living entirely in one process: `LocalHaloArray` (a single padded
+block) or `ThreadedHaloArray` (a shared-memory tiling). Serial backends are
+always [`isactive`](@ref) and have no communicator (`get_comm` returns
+`nothing`).
+"""
 abstract type AbstractSerialHaloArray{T,N} <: AbstractSingleHaloArray{T,N} end
 
+"""
+    AbstractHaloCollection{T,N,S} <: AbstractHaloArray{T,N}
+
+A bundle of same-geometry halo fields exposed as one `N`-dimensional array over
+`S` spatial dimensions (so `N - S` index dimensions select the field). The
+concrete type is `FieldCollection`, with the exported aliases `MultiHaloArray`
+(fields in a `NamedTuple`, accessed by name) and `ArrayOfHaloArray` (fields in
+an `AbstractArray`, accessed by index).
+"""
 abstract type AbstractHaloCollection{T,N,S} <: AbstractHaloArray{T,N} end
 
+"""
+    AbstractHaloBackend
+
+Supertype of the singleton backend traits returned by [`halo_backend`](@ref):
+[`MPIHaloBackend`](@ref), [`LocalHaloBackend`](@ref), and
+[`ThreadedHaloBackend`](@ref). Dispatch on these to provide MPI-, local-, or
+threaded-specific implementations while still accepting collection wrappers.
+"""
 abstract type AbstractHaloBackend end
+
+"""
+    MPIHaloBackend() <: AbstractHaloBackend
+
+Backend trait for distributed `HaloArray`s. Returned by
+[`halo_backend`](@ref) for MPI-backed storage.
+"""
 struct MPIHaloBackend <: AbstractHaloBackend end
+
+"""
+    LocalHaloBackend() <: AbstractHaloBackend
+
+Backend trait for single-process `LocalHaloArray` storage. Returned by
+[`halo_backend`](@ref).
+"""
 struct LocalHaloBackend <: AbstractHaloBackend end
+
+"""
+    ThreadedHaloBackend() <: AbstractHaloBackend
+
+Backend trait for shared-memory, tiled `ThreadedHaloArray` storage. Returned by
+[`halo_backend`](@ref).
+"""
 struct ThreadedHaloBackend <: AbstractHaloBackend end
 
 """
@@ -45,7 +124,23 @@ function halo_backend end
 @inline Base.parent(halo::AbstractSingleHaloArray) = halo.data
 
 # Serial backends (local + threaded) are always active and have no communicator.
+"""
+    isactive(x) -> Bool
+
+Whether this rank participates in the halo array / collection `x`. Always `true`
+for serial backends; for a distributed `HaloArray` it is `false` on ranks that
+fall outside the Cartesian topology (e.g. when the communicator has more ranks
+than the decomposition uses), letting collective code skip inactive ranks.
+"""
 @inline isactive(::AbstractSerialHaloArray) = true
+
+"""
+    get_comm(x) -> MPI.Comm or nothing
+
+The MPI communicator backing `x`, or `nothing` for serial (local/threaded)
+backends. For a distributed `HaloArray` this is the Cartesian communicator of
+its topology.
+"""
 @inline get_comm(::AbstractSerialHaloArray) = nothing
 
 # Storage geometry for contiguous single arrays (one padded `data` array).

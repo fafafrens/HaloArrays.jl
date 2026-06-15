@@ -259,6 +259,16 @@ function append_haloarray!(group::HDF5.Group, halo::MaybeHaloArray)
     return append_haloarray!(group, getdata(halo))
 end
 
+"""
+    append_haloarray_to_file!(file, dataset_name, halo)
+
+Append the interior data of `halo` to an HDF5 file (the `.h5` suffix is added to
+`file`), creating it on first write and growing an extendable `dataset_name`
+dataset by one slab per call — the idiom for streaming successive timesteps to a
+single dataset. For a distributed `HaloArray` each rank writes its own block
+collectively (parallel HDF5). See also [`gather_and_save_haloarray`](@ref) for
+gathering to a single dense array on the root rank instead.
+"""
 function append_haloarray_to_file!(file::String, dataset_name::String, halo::AbstractHaloArray)
     file *= ".h5"
     comm = _hdf5_comm(halo)

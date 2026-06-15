@@ -75,6 +75,15 @@ Base.propertynames(mha::MultiHaloArray) = keys(getfield(mha, :arrays))
 
 # size/axes/eachindex/length, n_field, interior/global/storage size, and
 # interior_axes come from AbstractHaloCollection (field_shape prefix + _spatial_*).
+"""
+    field_shape(c) -> Dims
+
+The shape of the field index of a halo collection `c`: the sizes of the index
+dimensions that select a field, leaving the spatial dimensions out. For a
+`MultiHaloArray` of `n` named fields this is `(n,)`; for an `ArrayOfHaloArray` it
+is the `size` of the backing field array (e.g. `(4, 2)` for a `4×2` grid of
+fields). `prod(field_shape(c))` is the number of fields.
+"""
 @inline field_shape(mha::MultiHaloArray) = (length(mha.arrays),)
 # parent (the field NamedTuple) and field_storages (the storage NamedTuple) are
 # container-generic in field_collection.jl.

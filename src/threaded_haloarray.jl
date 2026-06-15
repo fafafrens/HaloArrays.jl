@@ -57,6 +57,15 @@ end
 @inline is_root(::ThreadedCartesianTopology; root::Integer=0) = true
 @inline tile_count(topology::ThreadedCartesianTopology) = prod(topology.dims)
 @inline tile_coordinates(topology::ThreadedCartesianTopology, tile_id::Integer) = topology.tile_coords[tile_id]
+"""
+    neighbor_tile_id(x, tile_id, dim, side) -> Int
+
+The id of the tile adjacent to tile `tile_id` along dimension `dim` on the given
+`side` (`1` = lower, `2` = upper), or `0` when there is no neighbor (a
+non-periodic domain edge). Used to route shared-memory halo copies in a
+[`ThreadedHaloArray`](@ref); `x` may be the threaded topology, the threaded halo
+array, or an array of fields sharing one topology.
+"""
 @inline neighbor_tile_id(topology::ThreadedCartesianTopology, tile_id::Integer, dim::Integer, side::Integer) =
     topology.neighbors[tile_id][dim][side]
 

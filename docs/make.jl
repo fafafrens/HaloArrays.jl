@@ -25,8 +25,8 @@ makedocs(
             ],
         ],
     ],
-    checkdocs = :none,   # the package has many internal helpers with docstrings
-    warnonly = true,     # don't fail the build on missing @ref targets
+    checkdocs = :exports,           # every exported symbol must carry a docstring
+    warnonly = [:cross_references], # missing @ref targets warn; everything else (incl. missing docs) fails
 )
 
 deploydocs(

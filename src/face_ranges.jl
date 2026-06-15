@@ -156,6 +156,14 @@ adjacent to the upper ghost layer, spanning the full transverse extent. Pair eac
 get_right_face(ranges::FaceRanges) = ranges.right_face
 get_right_face(ranges::FaceRanges, dim::Int) = ranges.right_face[dim]
 get_right_face(ranges::FaceRanges, ::Dim{D}) where {D} = get_right_face(ranges, D)
+"""
+    get_unit_vector(ranges[, dim])
+
+The `CartesianIndex` unit step along dimension `dim` for these `ranges` (with no
+argument, the tuple of unit steps for every dimension). Add it to a lower-face
+index `IL` to reach the cell across the face, `IL + get_unit_vector(ranges, dim)`.
+`dim` may be an `Int` or a `Dim{D}`.
+"""
 get_unit_vector(ranges::FaceRanges) = ranges.unit_vector
 get_unit_vector(ranges::FaceRanges, dim::Int) = ranges.unit_vector[dim]
 get_unit_vector(ranges::FaceRanges, ::Dim{D}) where {D} = get_unit_vector(ranges, D)

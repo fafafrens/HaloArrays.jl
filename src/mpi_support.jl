@@ -468,6 +468,16 @@ function Base.all(f::F, u::HaloArray) where {F<:Function}
     MPI.Allreduce(all(f, interior_view(u)) :: Bool, &, get_comm(u))
 end
 
+"""
+    mapreduce_haloarray_dims(f, op, u, dims) -> HaloArray
+
+Map `f` over the interior cells of halo array `u` and reduce with `op` along the
+spatial dimensions in `dims`, returning a halo array of the reduced shape. For a
+distributed `HaloArray` the reduction is collective across the topology
+(combining partial results with `op` over the ranks that span the reduced
+dimensions), so the result is globally correct on every rank. This backs the
+`dims`-keyword forms of `sum`/`prod`/`maximum`/… on halo arrays.
+"""
 function mapreduce_haloarray_dims(f, op, ha::HaloArray{T,N,A,Halo}, dims) where {T,N,A,Halo}
     topo           = ha.topology
     root_coord     = 0
