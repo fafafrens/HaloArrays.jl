@@ -4,6 +4,52 @@ using StaticArrays
     ntuple(j -> j == dim ? (i:i) : Colon(), Val(N))
 
 # ============================================================
+# Ghost-fill kernels (one source of truth for the index math)
+#
+# Each takes the ghost slab to fill and the interior to read from, both as
+# already-resolved views, plus the compile-time `Side`/`Dim`. The single-array
+# and threaded backends differ only in *which* views they pass (whole-array vs
+# per-tile), so they all delegate to these.
+# ============================================================
+
+# Mirror the interior into the ghost layer. `scale = 1` → Reflecting (keep sign),
+# `scale = -1` → Antireflecting (flip sign). The source index is the mirror of
+# the ghost index about the wall.
+@inline function _reflect_into!(halo_region, interior_region, ::Side{S}, ::Dim{dim}, h, scale) where {S,dim}
+    N = ndims(halo_region)
+    n = size(interior_region, dim)
+    for i in 1:size(halo_region, dim)
+        src_i = S == 1 ? h - i + 1 : n - (i - 1)
+        @views halo_region[_slice_index(Val(N), dim, i)...] .=
+               scale .* interior_region[_slice_index(Val(N), dim, src_i)...]
+    end
+    return nothing
+end
+
+# Zero-gradient: copy the nearest interior edge cell into every ghost cell.
+@inline function _repeating_into!(halo_region, interior_region, ::Side{S}, ::Dim{dim}) where {S,dim}
+    N = ndims(halo_region)
+    edge_i = S == 1 ? 1 : size(interior_region, dim)
+    edge = @view interior_region[_slice_index(Val(N), dim, edge_i)...]
+    for i in 1:size(halo_region, dim)
+        @views halo_region[_slice_index(Val(N), dim, i)...] .= edge
+    end
+    return nothing
+end
+
+# Wrap the opposite interior edge into the ghost layer (single-process periodic).
+@inline function _periodic_into!(halo_region, interior_region, ::Side{S}, ::Dim{dim}, h) where {S,dim}
+    N = ndims(halo_region)
+    n = size(interior_region, dim)
+    for i in 1:size(halo_region, dim)
+        src_i = S == 1 ? n - h + i : i
+        @views halo_region[_slice_index(Val(N), dim, i)...] .=
+               interior_region[_slice_index(Val(N), dim, src_i)...]
+    end
+    return nothing
+end
+
+# ============================================================
 # HaloArray top-level dispatcher
 # Only applies BC on faces with no MPI neighbour (physical boundary).
 # ============================================================
@@ -34,8 +80,7 @@ edges), so it is safe to call on a decomposed grid. The condition per
 [`Periodic`](@ref), [`Reflecting`](@ref), [`Repeating`](@ref),
 [`Antireflecting`](@ref), [`NoBoundaryCondition`](@ref).
 """
-function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,BCondition}) where {
-        T,N,A,Halo,B,BCondition}
+function boundary_condition!(halo::AbstractSingleHaloArray{T,N}) where {T,N}
     ntuple(Val(N)) do D
         ntuple(Val(2)) do S
             boundary_condition!(halo, Side(S), Dim(D))
@@ -45,21 +90,12 @@ function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,BCondition}) where {
 end
 
 # ============================================================
-# LocalHaloArray top-level dispatcher
+# LocalHaloArray per-face dispatcher (no MPI neighbour check needed)
 # ============================================================
 
 function boundary_condition!(halo::LocalHaloArray, s::Side{side}, dim::Dim{d}) where {side,d}
     mode = halo.boundary_condition[d][side]
     boundary_condition!(halo, s, dim, mode)
-    return nothing
-end
-
-function boundary_condition!(halo::LocalHaloArray{T,N}) where {T,N}
-    ntuple(Val(N)) do D
-        ntuple(Val(2)) do S
-            boundary_condition!(halo, Side(S), Dim(D))
-        end
-    end
     return nothing
 end
 
@@ -72,76 +108,22 @@ end
 # dispatch, so the body is identical for both types.
 # ============================================================
 
-# ---- Reflecting / Antireflecting ------------------------------
-# Mirror the interior into the ghost layer. Reflecting keeps the sign
-# (`scale = 1`), Antireflecting flips it (`scale = -1`); the source index is the
-# mirror of the ghost index about the wall, which is all that differs by side.
-# `S` and `scale` are compile-time, so this inlines to the same code as the
-# hand-written per-side methods.
-@inline function _reflect_bc!(halo::AbstractSingleHaloArray, ::Side{S}, ::Dim{dim}, scale) where {S,dim}
-    N = ndims(halo)
-    h = halo_width(halo)
-    interior_region = interior_view(halo)
-    halo_region     = get_recv_view(Side(S), Dim(dim), halo)
-    n = size(interior_region, dim)
-    for i in 1:size(halo_region, dim)
-        src_i = S == 1 ? h - i + 1 : n - (i - 1)
-        @views halo_region[_slice_index(Val(N), dim, i)...] .=
-               scale .* interior_region[_slice_index(Val(N), dim, src_i)...]
-    end
-    return nothing
-end
-
+# ---- Reflecting / Antireflecting / Repeating ------------------
+# Delegate to the shared kernels with the whole-array views. `S`/`scale` are
+# compile-time, so these inline to the same code as a hand-written per-side method.
 @inline boundary_condition!(halo::AbstractSingleHaloArray, s::Side, d::Dim, ::Reflecting) =
-    _reflect_bc!(halo, s, d, 1)
+    _reflect_into!(get_recv_view(s, d, halo), interior_view(halo), s, d, halo_width(halo), 1)
 @inline boundary_condition!(halo::AbstractSingleHaloArray, s::Side, d::Dim, ::Antireflecting) =
-    _reflect_bc!(halo, s, d, -1)
-
-# ---- Repeating ------------------------------------------------
-# Zero-gradient: copy the nearest interior edge cell into every ghost cell.
-@inline function boundary_condition!(halo::AbstractSingleHaloArray,
-        ::Side{S}, ::Dim{dim}, ::Repeating) where {S,dim}
-    N = ndims(halo)
-    interior_region = interior_view(halo)
-    halo_region     = get_recv_view(Side(S), Dim(dim), halo)
-    edge_i = S == 1 ? 1 : size(interior_region, dim)
-    edge = @view interior_region[_slice_index(Val(N), dim, edge_i)...]
-    for i in 1:size(halo_region, dim)
-        @views halo_region[_slice_index(Val(N), dim, i)...] .= edge
-    end
-    return nothing
-end
+    _reflect_into!(get_recv_view(s, d, halo), interior_view(halo), s, d, halo_width(halo), -1)
+@inline boundary_condition!(halo::AbstractSingleHaloArray, s::Side, d::Dim, ::Repeating) =
+    _repeating_into!(get_recv_view(s, d, halo), interior_view(halo), s, d)
 
 # ---- Periodic -------------------------------------------------
 # HaloArray: MPI exchange fills halos → no-op here.
-# LocalHaloArray: must physically wrap the interior data.
-
+# LocalHaloArray: must physically wrap the interior data (both sides in one method).
 boundary_condition!(::HaloArray, ::Side, ::Dim, ::Periodic) = nothing
-
-function boundary_condition!(halo::LocalHaloArray, s::Side{1}, d::Dim{dim}, ::Periodic) where {dim}
-    N = ndims(halo)
-    h = halo_width(halo)
-    interior_region = interior_view(halo)
-    halo_region     = get_recv_view(s, d, halo)
-    n = size(interior_region, dim)
-    for i in 1:size(halo_region, dim)
-        src_i = n - h + i
-        @views halo_region[_slice_index(Val(N), dim, i)...] .=
-               interior_region[_slice_index(Val(N), dim, src_i)...]
-    end
-    return nothing
-end
-
-function boundary_condition!(halo::LocalHaloArray, s::Side{2}, d::Dim{dim}, ::Periodic) where {dim}
-    N = ndims(halo)
-    interior_region = interior_view(halo)
-    halo_region     = get_recv_view(s, d, halo)
-    for i in 1:size(halo_region, dim)
-        @views halo_region[_slice_index(Val(N), dim, i)...] .=
-               interior_region[_slice_index(Val(N), dim, i)...]
-    end
-    return nothing
-end
+@inline boundary_condition!(halo::LocalHaloArray, s::Side, d::Dim, ::Periodic) =
+    _periodic_into!(get_recv_view(s, d, halo), interior_view(halo), s, d, halo_width(halo))
 
 # ---- NoBoundaryCondition ----------------------------------------
 # Ghost cells are left unchanged; the user fills them via a custom function.
