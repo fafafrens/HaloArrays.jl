@@ -311,39 +311,16 @@ end
     return halo
 end
 
-@inline _threaded_exchange_dims!(halo::ThreadedHaloArray, tile_id::Integer, ::Val{0}) = halo
-@inline _threaded_boundary_dims!(halo::ThreadedHaloArray, tile_id::Integer, ::Val{0}) = halo
-@inline _threaded_synchronize_dims!(halo::ThreadedHaloArray, tile_id::Integer, ::Val{0}) = halo
-
-@inline function _threaded_exchange_dims!(halo::ThreadedHaloArray, tile_id::Integer, ::Val{D}) where {D}
-    _threaded_exchange_dims!(halo, tile_id, Val(D - 1))
-    _threaded_exchange_side!(halo, tile_id, Dim(D), Side(1))
-    _threaded_exchange_side!(halo, tile_id, Dim(D), Side(2))
-    return halo
-end
-
-@inline function _threaded_boundary_dims!(halo::ThreadedHaloArray, tile_id::Integer, ::Val{D}) where {D}
-    _threaded_boundary_dims!(halo, tile_id, Val(D - 1))
-    _threaded_boundary_side!(halo, tile_id, Dim(D), Side(1))
-    _threaded_boundary_side!(halo, tile_id, Dim(D), Side(2))
-    return halo
-end
-
-@inline function _threaded_synchronize_dims!(halo::ThreadedHaloArray, tile_id::Integer, ::Val{D}) where {D}
-    _threaded_synchronize_dims!(halo, tile_id, Val(D - 1))
-    _threaded_synchronize_side!(halo, tile_id, Dim(D), Side(1))
-    _threaded_synchronize_side!(halo, tile_id, Dim(D), Side(2))
-    return halo
-end
-
+# Per-tile work: iterate every (Dim, Side) face via the shared `_foreach_face`
+# primitive (closure-free, allocation-safe), passing the tile id through.
 @inline _threaded_exchange_tile!(halo::ThreadedHaloArray{T,N}, tile_id::Integer) where {T,N} =
-    _threaded_exchange_dims!(halo, tile_id, Val(N))
+    _foreach_face(_threaded_exchange_side!, halo, tile_id, Val(N))
 
 @inline _threaded_boundary_tile!(halo::ThreadedHaloArray{T,N}, tile_id::Integer) where {T,N} =
-    _threaded_boundary_dims!(halo, tile_id, Val(N))
+    _foreach_face(_threaded_boundary_side!, halo, tile_id, Val(N))
 
 @inline _threaded_synchronize_tile!(halo::ThreadedHaloArray{T,N}, tile_id::Integer) where {T,N} =
-    _threaded_synchronize_dims!(halo, tile_id, Val(N))
+    _foreach_face(_threaded_synchronize_side!, halo, tile_id, Val(N))
 
 function halo_exchange!(halo::ThreadedHaloArray)
     @inbounds for tile_id in eachindex(parent(halo))

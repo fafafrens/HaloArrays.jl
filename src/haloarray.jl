@@ -41,6 +41,28 @@ operations on a specific axis. See [`Side`](@ref).
 struct Dim{D}; end
 @inline Dim(d::Int) = Dim{d}()
 
+# Apply `f` to every `(Dim, Side)` face of an `N`-dimensional halo array,
+# unrolled at compile time by recursing on the dimension count. State is passed
+# positionally (no closure) and `f` is a named function (a singleton), so this
+# stays type-stable and allocation-free on every Julia version — the single
+# face-iteration primitive shared by the boundary, halo-exchange, and threaded
+# paths (replacing the per-site `ntuple(Val(N)) do D … end` / hand-rolled
+# recursions). Two arities: whole-array `f(x, Dim, Side)` and per-tile
+# `f(x, tile, Dim, Side)`.
+@inline _foreach_face(f::F, x, ::Val{0}) where {F} = nothing
+@inline function _foreach_face(f::F, x, ::Val{D}) where {F,D}
+    _foreach_face(f, x, Val(D - 1))
+    f(x, Dim(D), Side(1)); f(x, Dim(D), Side(2))
+    return nothing
+end
+
+@inline _foreach_face(f::F, x, tile, ::Val{0}) where {F} = nothing
+@inline function _foreach_face(f::F, x, tile, ::Val{D}) where {F,D}
+    _foreach_face(f, x, tile, Val(D - 1))
+    f(x, tile, Dim(D), Side(1)); f(x, tile, Dim(D), Side(2))
+    return nothing
+end
+
 # HaloArray type params:
 #   T           element type
 #   N           spatial dimensions

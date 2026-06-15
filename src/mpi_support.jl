@@ -276,116 +276,99 @@ end
 
 # ============================================================
 # Halo exchange
+#
+# Face iteration goes through the shared `_foreach_face` primitive (one
+# compile-time-unrolled, closure-free recursion — see haloarray.jl), replacing a
+# per-variant `ntuple(Val(N)) do D … end`. Each variant supplies a thin
+# `(halo, Dim, Side)` adapter that pulls its request/buffer state from `halo` and
+# delegates to the per-face helpers above; the MPI calls + `GC.@preserve` logic
+# in those helpers is unchanged.
 # ============================================================
 
-function halo_exchange_waitall!(halo::HaloArray{T,N}) where {T,N}
-    comm      = halo.topology.cart_comm
-    recv_reqs = halo.comm_state.recv_reqs_flat
-    send_reqs = halo.comm_state.send_reqs_flat
+@inline _face_pack_post_flat_safe!(halo, ::Dim{D}, ::Side{S}) where {D,S} =
+    _pack_post_flat_safe!(halo, halo.comm_state.recv_reqs_flat, halo.comm_state.send_reqs_flat,
+        halo.receive_bufs, halo.send_bufs, halo.topology.cart_comm, Val(D), Val(S))
+
+@inline _face_unpack!(halo, ::Dim{D}, ::Side{S}) where {D,S} =
+    _copy_from_recv_buf!(halo.receive_bufs, halo, Val(D), Val(S))
+
+@inline _face_pack_post_flat_unsafe!(halo, ::Dim{D}, ::Side{S}) where {D,S} =
+    _pack_post_flat_unsafe!(halo, (halo.comm_state.unsafe_recv_reqs, halo.receive_bufs),
+        (halo.comm_state.unsafe_send_reqs, halo.send_bufs), halo.topology.cart_comm, Val(D), Val(S))
+
+@inline _face_pack_post_vv_unsafe!(halo, ::Dim{D}, ::Side{S}) where {D,S} =
+    _pack_post_vv_unsafe!(halo, (halo.comm_state.unsafe_recv_reqs_vv, halo.receive_bufs),
+        (halo.comm_state.unsafe_send_reqs_vv, halo.send_bufs), halo.topology.cart_comm, Val(D), Val(S))
+
+@inline _face_wait_unpack_vv_unsafe!(halo, ::Dim{D}, ::Side{S}) where {D,S} =
+    _wait_unpack_vv_unsafe!(halo, (halo.comm_state.unsafe_recv_reqs_vv, halo.receive_bufs),
+        halo.comm_state.unsafe_send_reqs_vv, Val(D), Val(S))
+
+# safe async: the two whose per-face body was previously inline in the do-block.
+@inline function _face_post_vv_safe!(halo, ::Dim{D}, ::Side{S}) where {D,S}
+    topo   = halo.topology
+    nbrank = topo.neighbors[D][S]
+    nbrank == MPI.PROC_NULL && return nothing
+    comm      = topo.cart_comm
+    recv_reqs = halo.comm_state.recv_reqs
+    send_reqs = halo.comm_state.send_reqs
     recv_bufs = halo.receive_bufs
     send_bufs = halo.send_bufs
-    ntuple(Val(N)) do D
-        ntuple(Val(2)) do S
-            _pack_post_flat_safe!(halo, recv_reqs, send_reqs, recv_bufs, send_bufs, comm, Val(D), Val(S))
-        end
-    end
-    MPI.Waitall(recv_reqs)
-    ntuple(Val(N)) do D
-        ntuple(Val(2)) do S
-            _copy_from_recv_buf!(recv_bufs, halo, Val(D), Val(S))
-        end
-    end
-    MPI.Waitall(send_reqs)
+    _copy_to_send_buf!(send_bufs, halo, Val(D), Val(S))
+    recv_reqs[D][S] = MPI.Irecv!(recv_bufs[D][S], comm, recv_reqs[D][S];
+        source=nbrank, tag=tag_recv(Val(D), Val(S)))
+    send_reqs[D][S] = MPI.Isend(send_bufs[D][S], comm, send_reqs[D][S];
+        dest=nbrank, tag=tag_send(Val(D), Val(S)))
+    return nothing
+end
+
+@inline function _face_finish_vv_safe!(halo, ::Dim{D}, ::Side{S}) where {D,S}
+    halo.topology.neighbors[D][S] == MPI.PROC_NULL && return nothing
+    recv_reqs = halo.comm_state.recv_reqs
+    send_reqs = halo.comm_state.send_reqs
+    MPI.Wait(recv_reqs[D][S])
+    _copy_from_recv_buf!(halo.receive_bufs, halo, Val(D), Val(S))
+    MPI.Wait(send_reqs[D][S])
+    return nothing
+end
+
+function halo_exchange_waitall!(halo::HaloArray{T,N}) where {T,N}
+    _foreach_face(_face_pack_post_flat_safe!, halo, Val(N))
+    MPI.Waitall(halo.comm_state.recv_reqs_flat)
+    _foreach_face(_face_unpack!, halo, Val(N))
+    MPI.Waitall(halo.comm_state.send_reqs_flat)
     return nothing
 end
 
 function halo_exchange_waitall_unsafe!(halo::HaloArray{T,N}) where {T,N}
-    comm       = halo.topology.cart_comm
-    recv_bufs  = halo.receive_bufs
-    send_bufs  = halo.send_bufs
-    recv_state = (halo.comm_state.unsafe_recv_reqs, recv_bufs)
-    send_state = (halo.comm_state.unsafe_send_reqs, send_bufs)
-    ntuple(Val(N)) do D
-        ntuple(Val(2)) do S
-            _pack_post_flat_unsafe!(halo, recv_state, send_state, comm, Val(D), Val(S))
-        end
-    end
-    recv_reqs = halo.comm_state.unsafe_recv_reqs
-    send_reqs = halo.comm_state.unsafe_send_reqs
-    GC.@preserve recv_state MPI.Waitall(recv_reqs)
-    ntuple(Val(N)) do D
-        ntuple(Val(2)) do S
-            _copy_from_recv_buf!(recv_bufs, halo, Val(D), Val(S))
-        end
-    end
-    GC.@preserve send_state MPI.Waitall(send_reqs)
+    recv_state = (halo.comm_state.unsafe_recv_reqs, halo.receive_bufs)
+    send_state = (halo.comm_state.unsafe_send_reqs, halo.send_bufs)
+    _foreach_face(_face_pack_post_flat_unsafe!, halo, Val(N))
+    GC.@preserve recv_state MPI.Waitall(halo.comm_state.unsafe_recv_reqs)
+    _foreach_face(_face_unpack!, halo, Val(N))
+    GC.@preserve send_state MPI.Waitall(halo.comm_state.unsafe_send_reqs)
     return nothing
 end
 
 function start_halo_exchange_async_unsafe!(halo::HaloArray{T,N}) where {T,N}
-    comm       = halo.topology.cart_comm
-    recv_bufs  = halo.receive_bufs
-    send_bufs  = halo.send_bufs
-    recv_state = (halo.comm_state.unsafe_recv_reqs_vv, recv_bufs)
-    send_state = (halo.comm_state.unsafe_send_reqs_vv, send_bufs)
-    ntuple(Val(N)) do D
-        ntuple(Val(2)) do S
-            _pack_post_vv_unsafe!(halo, recv_state, send_state, comm, Val(D), Val(S))
-        end
-    end
+    _foreach_face(_face_pack_post_vv_unsafe!, halo, Val(N))
     return nothing
 end
 
 function end_halo_exchange_async_wait_unsafe!(halo::HaloArray{T,N}) where {T,N}
-    recv_bufs  = halo.receive_bufs
-    recv_state = (halo.comm_state.unsafe_recv_reqs_vv, recv_bufs)
-    send_state = halo.comm_state.unsafe_send_reqs_vv
-    ntuple(Val(N)) do D
-        ntuple(Val(2)) do S
-            _wait_unpack_vv_unsafe!(halo, recv_state, send_state, Val(D), Val(S))
-        end
-    end
+    _foreach_face(_face_wait_unpack_vv_unsafe!, halo, Val(N))
     return nothing
 end
 
 # ---- safe (non-unsafe-request) async helpers --------------------------
 
 function _start_halo_exchange_safe!(halo::HaloArray{T,N}) where {T,N}
-    comm      = halo.topology.cart_comm
-    topo      = halo.topology
-    recv_reqs = halo.comm_state.recv_reqs
-    send_reqs = halo.comm_state.send_reqs
-    recv_bufs = halo.receive_bufs
-    send_bufs = halo.send_bufs
-    ntuple(Val(N)) do D
-        ntuple(Val(2)) do S
-            nbrank = topo.neighbors[D][S]
-            nbrank == MPI.PROC_NULL && return nothing
-            _copy_to_send_buf!(send_bufs, halo, Val(D), Val(S))
-            recv_reqs[D][S] = MPI.Irecv!(recv_bufs[D][S], comm, recv_reqs[D][S];
-                source=nbrank, tag=tag_recv(Val(D), Val(S)))
-            send_reqs[D][S] = MPI.Isend(send_bufs[D][S], comm, send_reqs[D][S];
-                dest=nbrank, tag=tag_send(Val(D), Val(S)))
-            return nothing
-        end
-    end
+    _foreach_face(_face_post_vv_safe!, halo, Val(N))
     return nothing
 end
 
 function _finish_halo_exchange_safe!(halo::HaloArray{T,N}) where {T,N}
-    topo      = halo.topology
-    recv_reqs = halo.comm_state.recv_reqs
-    send_reqs = halo.comm_state.send_reqs
-    recv_bufs = halo.receive_bufs
-    ntuple(Val(N)) do D
-        ntuple(Val(2)) do S
-            topo.neighbors[D][S] == MPI.PROC_NULL && return nothing
-            MPI.Wait(recv_reqs[D][S])
-            _copy_from_recv_buf!(recv_bufs, halo, Val(D), Val(S))
-            MPI.Wait(send_reqs[D][S])
-            return nothing
-        end
-    end
+    _foreach_face(_face_finish_vv_safe!, halo, Val(N))
     return nothing
 end
 
