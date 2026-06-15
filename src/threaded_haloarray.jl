@@ -375,97 +375,16 @@ function boundary_condition!(halo::ThreadedHaloArray, tile_id::Integer, side::Si
     return nothing
 end
 
-function boundary_condition!(halo::ThreadedHaloArray{T,N,A,H,Topo,BCondition}, tile_id::Integer,
-        s::Side{1}, d::Dim{dim}, mode::Reflecting) where {T,N,A,H,Topo,BCondition,dim}
-    h = halo_width(halo)
-    interior_region = interior_view(halo, tile_id)
-    halo_region = get_recv_view(s, d, halo, tile_id)
-
-    for i in 1:size(halo_region, dim)
-        src_i = h - i + 1
-        mirror_idx = _slice_index(Val(N), dim, src_i)
-        dst_idx = _slice_index(Val(N), dim, i)
-        @views halo_region[dst_idx...] .= interior_region[mirror_idx...]
-    end
-    return nothing
-end
-
-function boundary_condition!(halo::ThreadedHaloArray{T,N,A,H,Topo,BCondition}, tile_id::Integer,
-        s::Side{2}, d::Dim{dim}, mode::Reflecting) where {T,N,A,H,Topo,BCondition,dim}
-    interior_region = interior_view(halo, tile_id)
-    halo_region = get_recv_view(s, d, halo, tile_id)
-    n = size(interior_region, dim)
-
-    for i in 1:size(halo_region, dim)
-        src_i = n - (i - 1)
-        mirror_idx = _slice_index(Val(N), dim, src_i)
-        dst_idx = _slice_index(Val(N), dim, i)
-        @views halo_region[dst_idx...] .= interior_region[mirror_idx...]
-    end
-    return nothing
-end
-
-function boundary_condition!(halo::ThreadedHaloArray{T,N,A,H,Topo,BCondition}, tile_id::Integer,
-        s::Side{1}, d::Dim{dim}, mode::Antireflecting) where {T,N,A,H,Topo,BCondition,dim}
-    h = halo_width(halo)
-    interior_region = interior_view(halo, tile_id)
-    halo_region = get_recv_view(s, d, halo, tile_id)
-
-    for i in 1:size(halo_region, dim)
-        src_i = h - i + 1
-        mirror_idx = _slice_index(Val(N), dim, src_i)
-        dst_idx = _slice_index(Val(N), dim, i)
-        @views halo_region[dst_idx...] .= .-interior_region[mirror_idx...]
-    end
-    return nothing
-end
-
-function boundary_condition!(halo::ThreadedHaloArray{T,N,A,H,Topo,BCondition}, tile_id::Integer,
-        s::Side{2}, d::Dim{dim}, mode::Antireflecting) where {T,N,A,H,Topo,BCondition,dim}
-    interior_region = interior_view(halo, tile_id)
-    halo_region = get_recv_view(s, d, halo, tile_id)
-    n = size(interior_region, dim)
-
-    for i in 1:size(halo_region, dim)
-        src_i = n - (i - 1)
-        mirror_idx = _slice_index(Val(N), dim, src_i)
-        dst_idx = _slice_index(Val(N), dim, i)
-        @views halo_region[dst_idx...] .= .-interior_region[mirror_idx...]
-    end
-    return nothing
-end
-
-function boundary_condition!(halo::ThreadedHaloArray{T,N,A,H,Topo,BCondition}, tile_id::Integer,
-        s::Side{1}, d::Dim{dim}, mode::Repeating) where {T,N,A,H,Topo,BCondition,dim}
-    interior_region = interior_view(halo, tile_id)
-    halo_region = get_recv_view(s, d, halo, tile_id)
-    edge_idx = _slice_index(Val(N), dim, 1)
-    boundary_slice = @view interior_region[edge_idx...]
-
-    for i in 1:size(halo_region, dim)
-        halo_idx = _slice_index(Val(N), dim, i)
-        @views halo_region[halo_idx...] .= boundary_slice
-    end
-    return nothing
-end
-
-function boundary_condition!(halo::ThreadedHaloArray{T,N,A,H,Topo,BCondition}, tile_id::Integer,
-        s::Side{2}, d::Dim{dim}, mode::Repeating) where {T,N,A,H,Topo,BCondition,dim}
-    interior_region = interior_view(halo, tile_id)
-    halo_region = get_recv_view(s, d, halo, tile_id)
-    edge_idx = _slice_index(Val(N), dim, size(interior_region, dim))
-    boundary_slice = @view interior_region[edge_idx...]
-
-    for i in 1:size(halo_region, dim)
-        halo_idx = _slice_index(Val(N), dim, i)
-        @views halo_region[halo_idx...] .= boundary_slice
-    end
-    return nothing
-end
-
-function boundary_condition!(halo::ThreadedHaloArray, tile_id::Integer, s::Side, d::Dim, mode::Periodic)
-    return nothing
-end
+# Per-tile BC: delegate to the shared ghost-fill kernels (boundary.jl) with the
+# tile-aware views — the same code the single-array backends use, only the views
+# differ. Periodic is a no-op (the inter-tile exchange already wraps the edges).
+@inline boundary_condition!(h::ThreadedHaloArray, t::Integer, s::Side, d::Dim, ::Reflecting) =
+    _reflect_into!(get_recv_view(s, d, h, t), interior_view(h, t), s, d, halo_width(h), 1)
+@inline boundary_condition!(h::ThreadedHaloArray, t::Integer, s::Side, d::Dim, ::Antireflecting) =
+    _reflect_into!(get_recv_view(s, d, h, t), interior_view(h, t), s, d, halo_width(h), -1)
+@inline boundary_condition!(h::ThreadedHaloArray, t::Integer, s::Side, d::Dim, ::Repeating) =
+    _repeating_into!(get_recv_view(s, d, h, t), interior_view(h, t), s, d)
+boundary_condition!(::ThreadedHaloArray, ::Integer, ::Side, ::Dim, ::Periodic) = nothing
 
 function boundary_condition!(halo::ThreadedHaloArray)
     @inbounds for tile_id in eachindex(parent(halo))
