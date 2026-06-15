@@ -280,9 +280,10 @@ end
 # Face iteration goes through the shared `_foreach_face` primitive (one
 # compile-time-unrolled, closure-free recursion — see haloarray.jl), replacing a
 # per-variant `ntuple(Val(N)) do D … end`. Each variant supplies a thin
-# `(halo, Dim, Side)` adapter that pulls its request/buffer state from `halo` and
-# delegates to the per-face helpers above; the MPI calls + `GC.@preserve` logic
-# in those helpers is unchanged.
+# `(halo, Dim, Side)` adapter that pulls its request/buffer state from `halo`;
+# most delegate to the per-face helpers above (whose MPI calls + `GC.@preserve`
+# logic are unchanged), while the two safe-async adapters carry their — formerly
+# inline — body directly (there was no extracted helper for that path).
 # ============================================================
 
 @inline _post_face_waitall!(halo, ::Dim{D}, ::Side{S}) where {D,S} =
