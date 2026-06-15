@@ -88,15 +88,17 @@ julia --project=examples examples/finite_volume/advection_diffeq_1d.jl
 
 `stiff_reaction_diffusion_implicit_1d.jl` shows an **implicit** SciML solve with
 autodiff Jacobians using the `HaloArray` *as the ODE state* — matrix-free
-(`concrete_jac=false`). The key point: pick a `similar`-based linear solver, not
-the `KrylovJL_*` wrappers (which allocate work vectors as `S(undef, n)` and can't
-construct a geometry-carrying `HaloArray`). The example runs two routes:
-`SimpleGMRES()`, and **Krylov.jl** itself via its `KrylovConstructor` workspace
-wired in with a `LinearSolveFunction` (`IterativeSolversJL_CG` also works, for
-symmetric/SPD operators).
+(`concrete_jac=false`), with Krylov.jl wired in through `KrylovConstructor` (a
+`similar`-based workspace) via a `LinearSolveFunction`. It runs both the **Local**
+and **Threaded** backends; the `*_mpi_1d.jl` companion runs the same solve on a
+**distributed** `HaloArray` (and checks it stays collective + matches serial).
+The key point: pick a `similar`-based linear solver, *not* the `KrylovJL_*`
+wrappers (they allocate work vectors as `S(undef, n)`, which a geometry-carrying
+`HaloArray` has no constructor for).
 
 ```bash
 julia --project=examples examples/finite_volume/stiff_reaction_diffusion_implicit_1d.jl
+mpiexec -n 4 julia --project=examples examples/finite_volume/stiff_reaction_diffusion_implicit_mpi_1d.jl
 ```
 
 `acoustics_characteristic_1d.jl` demonstrates a **coupled** boundary condition:
