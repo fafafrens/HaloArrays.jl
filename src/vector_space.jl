@@ -54,11 +54,35 @@ LinearAlgebra.axpby!(s::Number, x::AbstractHaloArray, t::Number, y::AbstractHalo
 # Both outputs depend on both old inputs, so each cell is updated through scalar
 # locals in a single fused pass: no temporary vector, no extra traversal.
 #
-# The kernels loop over storage tiles exactly like the unified RHS — `tile_count`
-# is 1 for Local/MPI (the whole padded block / this rank's block) and many for a
-# ThreadedHaloArray — and index the raw `tile_parent` array over `interior_range`
-# (so no scalar-getindex on the halo array itself). Collections delegate per
-# field, reusing the single-array kernel.
+# A single-tile kernel does the cell math on one raw `tile_parent` array over
+# `interior_range` (so no scalar-getindex on the halo array itself). The
+# per-backend methods just choose how to drive the tiles: a serial loop for
+# single arrays (Local/MPI = one tile), and `tile_foreach` for a
+# ThreadedHaloArray so the tiles split across threads — matching the threaded
+# broadcast that already backs axpy!/lmul!/… Collections delegate per field, so
+# each field picks its own (serial or threaded) driver.
+
+@inline function _swap_tile!(px, py, rng)
+    @inbounds for I in CartesianIndices(rng)
+        px[I], py[I] = py[I], px[I]
+    end
+end
+# Givens rotation:  x .= c*x + s*y,  y .= -conj(s)*x + c*y
+@inline function _rotate_tile!(px, py, rng, c, s)
+    @inbounds for I in CartesianIndices(rng)
+        a = px[I]; b = py[I]
+        px[I] = c * a + s * b
+        py[I] = c * b - conj(s) * a
+    end
+end
+# Householder reflection:  x .= c*x + s*y,  y .= conj(s)*x − c*y
+@inline function _reflect_tile!(px, py, rng, c, s)
+    @inbounds for I in CartesianIndices(rng)
+        a = px[I]; b = py[I]
+        px[I] = c * a + s * b
+        py[I] = conj(s) * a - c * b
+    end
+end
 
 """
     swap!(x, y) -> (x, y)
@@ -66,45 +90,56 @@ LinearAlgebra.axpby!(s::Number, x::AbstractHaloArray, t::Number, y::AbstractHalo
 Swap the interior contents of two halo arrays in place (BLAS-1 `swap`), with no
 temporary allocation. Ghost cells are left as-is (re-filled by the next
 [`synchronize_halo!`](@ref)). `x` and `y` must share geometry; works on any
-backend and is MPI-safe (each rank/tile swaps its own cells).
+backend and is MPI-safe (each rank/tile swaps its own cells). On a
+[`ThreadedHaloArray`](@ref) the tiles are processed in parallel.
 """
 function swap!(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray)
-    @inbounds for tile in 1:tile_count(x)
-        px = tile_parent(x, tile); py = tile_parent(y, tile)
-        for I in CartesianIndices(interior_range(x))
-            px[I], py[I] = py[I], px[I]
-        end
+    rng = interior_range(x)
+    for tile in 1:tile_count(x)
+        _swap_tile!(tile_parent(x, tile), tile_parent(y, tile), rng)
     end
     return x, y
 end
 
-# Givens rotation:  x .= c*x + s*y,  y .= -conj(s)*x + c*y   (LinearAlgebra.rotate!)
 function LinearAlgebra.rotate!(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray, c, s)
-    @inbounds for tile in 1:tile_count(x)
-        px = tile_parent(x, tile); py = tile_parent(y, tile)
-        for I in CartesianIndices(interior_range(x))
-            a = px[I]; b = py[I]
-            px[I] = c * a + s * b
-            py[I] = c * b - conj(s) * a
-        end
+    rng = interior_range(x)
+    for tile in 1:tile_count(x)
+        _rotate_tile!(tile_parent(x, tile), tile_parent(y, tile), rng, c, s)
     end
     return x, y
 end
 
-# Householder reflection:  x .= c*x + s*y,  y .= conj(s)*x − c*y  (LinearAlgebra.reflect!)
 function LinearAlgebra.reflect!(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray, c, s)
-    @inbounds for tile in 1:tile_count(x)
-        px = tile_parent(x, tile); py = tile_parent(y, tile)
-        for I in CartesianIndices(interior_range(x))
-            a = px[I]; b = py[I]
-            px[I] = c * a + s * b
-            py[I] = conj(s) * a - c * b
-        end
+    rng = interior_range(x)
+    for tile in 1:tile_count(x)
+        _reflect_tile!(tile_parent(x, tile), tile_parent(y, tile), rng, c, s)
     end
     return x, y
 end
 
-# Field collections: apply the single-array kernel field by field (also alloc-free).
+# ThreadedHaloArray: split the tiles across threads (as the threaded broadcast does).
+function swap!(x::ThreadedHaloArray, y::ThreadedHaloArray)
+    rng = interior_range(x)
+    tile_foreach(thread_backend(x), t -> _swap_tile!(tile_parent(x, t), tile_parent(y, t), rng),
+        eachindex(parent(x)); scheduler=:static)
+    return x, y
+end
+
+function LinearAlgebra.rotate!(x::ThreadedHaloArray, y::ThreadedHaloArray, c, s)
+    rng = interior_range(x)
+    tile_foreach(thread_backend(x), t -> _rotate_tile!(tile_parent(x, t), tile_parent(y, t), rng, c, s),
+        eachindex(parent(x)); scheduler=:static)
+    return x, y
+end
+
+function LinearAlgebra.reflect!(x::ThreadedHaloArray, y::ThreadedHaloArray, c, s)
+    rng = interior_range(x)
+    tile_foreach(thread_backend(x), t -> _reflect_tile!(tile_parent(x, t), tile_parent(y, t), rng, c, s),
+        eachindex(parent(x)); scheduler=:static)
+    return x, y
+end
+
+# Field collections: apply the per-field method (each field picks serial/threaded).
 swap!(x::AbstractHaloCollection, y::AbstractHaloCollection) =
     (foreach(swap!, eachfield(x), eachfield(y)); (x, y))
 LinearAlgebra.rotate!(x::AbstractHaloCollection, y::AbstractHaloCollection, c, s) =
