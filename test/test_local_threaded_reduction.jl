@@ -129,4 +129,42 @@ using LinearAlgebra: dot, norm
         axpy!(3.0, tx, ty)
         @test all(==(5.0), interior_view(ty, 1)) && all(==(5.0), interior_view(ty, 2))
     end
+
+    @testset "swap! + Givens/Householder (swap!/rotate!/reflect!)" begin
+        # Complete the BLAS-1 surface (SSWAP, SROT). All elementwise → must agree
+        # cell-for-cell with the same op on the collected interior vectors.
+        mk(v) = (a = LocalHaloArray(Float64, (4,), 1; boundary_condition=:periodic);
+                 interior_view(a) .= v; a)
+
+        # swap!
+        x = mk([1.0, 2, 3, 4]); y = mk([10.0, 20, 30, 40])
+        swap!(x, y)
+        @test collect(interior_view(x)) == [10.0, 20, 30, 40]
+        @test collect(interior_view(y)) == [1.0, 2, 3, 4]
+
+        # rotate! / reflect! vs the LinearAlgebra reference on plain vectors
+        c, s = 0.6, 0.8                                   # c^2 + s^2 = 1
+        for op in (rotate!, reflect!)
+            x = mk([1.0, 2, 3, 4]); y = mk([10.0, 20, 30, 40])
+            xr = collect(interior_view(x)); yr = collect(interior_view(y))
+            op(x, y, c, s); op(xr, yr, c, s)
+            @test collect(interior_view(x)) ≈ xr
+            @test collect(interior_view(y)) ≈ yr
+        end
+        # rotate! is an isometry: it preserves the (global) norm of the pair
+        x = mk([1.0, 2, 3, 4]); y = mk([10.0, 20, 30, 40])
+        n0 = sqrt(norm(x)^2 + norm(y)^2)
+        rotate!(x, y, c, s)
+        @test sqrt(norm(x)^2 + norm(y)^2) ≈ n0
+
+        # threaded backend
+        tx = ThreadedHaloArray(Float64, (3,), 1; dims=(2,), boundary_condition=:repeating)
+        ty = similar(tx)
+        for t in 1:tile_count(tx); interior_view(tx, t) .= 1.0; interior_view(ty, t) .= 2.0; end
+        rotate!(tx, ty, c, s)
+        @test all(≈(c * 1.0 + s * 2.0), interior_view(tx, 1))
+        @test all(≈(c * 2.0 - s * 1.0), interior_view(ty, 2))
+        swap!(tx, ty)
+        @test all(≈(c * 2.0 - s * 1.0), interior_view(tx, 1))
+    end
 end

@@ -133,7 +133,8 @@ export halo_exchange!,
     synchronize_halo!,
     synchronize_halo_threads!,
     get_send_view,
-    get_recv_view
+    get_recv_view,
+    swap!
 
 # Reductions and gather
 export mapreduce_haloarray_dims,
