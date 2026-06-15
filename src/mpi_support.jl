@@ -285,27 +285,27 @@ end
 # in those helpers is unchanged.
 # ============================================================
 
-@inline _face_pack_post_flat_safe!(halo, ::Dim{D}, ::Side{S}) where {D,S} =
+@inline _post_face_waitall!(halo, ::Dim{D}, ::Side{S}) where {D,S} =
     _pack_post_flat_safe!(halo, halo.comm_state.recv_reqs_flat, halo.comm_state.send_reqs_flat,
         halo.receive_bufs, halo.send_bufs, halo.topology.cart_comm, Val(D), Val(S))
 
-@inline _face_unpack!(halo, ::Dim{D}, ::Side{S}) where {D,S} =
+@inline _unpack_face!(halo, ::Dim{D}, ::Side{S}) where {D,S} =
     _copy_from_recv_buf!(halo.receive_bufs, halo, Val(D), Val(S))
 
-@inline _face_pack_post_flat_unsafe!(halo, ::Dim{D}, ::Side{S}) where {D,S} =
+@inline _post_face_waitall_unsafe!(halo, ::Dim{D}, ::Side{S}) where {D,S} =
     _pack_post_flat_unsafe!(halo, (halo.comm_state.unsafe_recv_reqs, halo.receive_bufs),
         (halo.comm_state.unsafe_send_reqs, halo.send_bufs), halo.topology.cart_comm, Val(D), Val(S))
 
-@inline _face_pack_post_vv_unsafe!(halo, ::Dim{D}, ::Side{S}) where {D,S} =
+@inline _post_face_async_unsafe!(halo, ::Dim{D}, ::Side{S}) where {D,S} =
     _pack_post_vv_unsafe!(halo, (halo.comm_state.unsafe_recv_reqs_vv, halo.receive_bufs),
         (halo.comm_state.unsafe_send_reqs_vv, halo.send_bufs), halo.topology.cart_comm, Val(D), Val(S))
 
-@inline _face_wait_unpack_vv_unsafe!(halo, ::Dim{D}, ::Side{S}) where {D,S} =
+@inline _finish_face_async_unsafe!(halo, ::Dim{D}, ::Side{S}) where {D,S} =
     _wait_unpack_vv_unsafe!(halo, (halo.comm_state.unsafe_recv_reqs_vv, halo.receive_bufs),
         halo.comm_state.unsafe_send_reqs_vv, Val(D), Val(S))
 
 # safe async: the two whose per-face body was previously inline in the do-block.
-@inline function _face_post_vv_safe!(halo, ::Dim{D}, ::Side{S}) where {D,S}
+@inline function _post_face_async_safe!(halo, ::Dim{D}, ::Side{S}) where {D,S}
     topo   = halo.topology
     nbrank = topo.neighbors[D][S]
     nbrank == MPI.PROC_NULL && return nothing
@@ -322,7 +322,7 @@ end
     return nothing
 end
 
-@inline function _face_finish_vv_safe!(halo, ::Dim{D}, ::Side{S}) where {D,S}
+@inline function _finish_face_async_safe!(halo, ::Dim{D}, ::Side{S}) where {D,S}
     halo.topology.neighbors[D][S] == MPI.PROC_NULL && return nothing
     recv_reqs = halo.comm_state.recv_reqs
     send_reqs = halo.comm_state.send_reqs
@@ -333,9 +333,9 @@ end
 end
 
 function halo_exchange_waitall!(halo::HaloArray{T,N}) where {T,N}
-    _foreach_face(_face_pack_post_flat_safe!, halo, Val(N))
+    _foreach_face(_post_face_waitall!, halo, Val(N))
     MPI.Waitall(halo.comm_state.recv_reqs_flat)
-    _foreach_face(_face_unpack!, halo, Val(N))
+    _foreach_face(_unpack_face!, halo, Val(N))
     MPI.Waitall(halo.comm_state.send_reqs_flat)
     return nothing
 end
@@ -343,32 +343,32 @@ end
 function halo_exchange_waitall_unsafe!(halo::HaloArray{T,N}) where {T,N}
     recv_state = (halo.comm_state.unsafe_recv_reqs, halo.receive_bufs)
     send_state = (halo.comm_state.unsafe_send_reqs, halo.send_bufs)
-    _foreach_face(_face_pack_post_flat_unsafe!, halo, Val(N))
+    _foreach_face(_post_face_waitall_unsafe!, halo, Val(N))
     GC.@preserve recv_state MPI.Waitall(halo.comm_state.unsafe_recv_reqs)
-    _foreach_face(_face_unpack!, halo, Val(N))
+    _foreach_face(_unpack_face!, halo, Val(N))
     GC.@preserve send_state MPI.Waitall(halo.comm_state.unsafe_send_reqs)
     return nothing
 end
 
 function start_halo_exchange_async_unsafe!(halo::HaloArray{T,N}) where {T,N}
-    _foreach_face(_face_pack_post_vv_unsafe!, halo, Val(N))
+    _foreach_face(_post_face_async_unsafe!, halo, Val(N))
     return nothing
 end
 
 function end_halo_exchange_async_wait_unsafe!(halo::HaloArray{T,N}) where {T,N}
-    _foreach_face(_face_wait_unpack_vv_unsafe!, halo, Val(N))
+    _foreach_face(_finish_face_async_unsafe!, halo, Val(N))
     return nothing
 end
 
 # ---- safe (non-unsafe-request) async helpers --------------------------
 
 function _start_halo_exchange_safe!(halo::HaloArray{T,N}) where {T,N}
-    _foreach_face(_face_post_vv_safe!, halo, Val(N))
+    _foreach_face(_post_face_async_safe!, halo, Val(N))
     return nothing
 end
 
 function _finish_halo_exchange_safe!(halo::HaloArray{T,N}) where {T,N}
-    _foreach_face(_face_finish_vv_safe!, halo, Val(N))
+    _foreach_face(_finish_face_async_safe!, halo, Val(N))
     return nothing
 end
 
