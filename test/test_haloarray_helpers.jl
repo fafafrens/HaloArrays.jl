@@ -694,4 +694,12 @@ end
         @test collect(interior_view(x)) == [1.0, 2.0, 3.0, 4.0]
     end
 
+    @testset "non-tiled arrays are a one-tile decomposition" begin
+        # tile_count/tile_parent degenerate so a per-tile kernel
+        # (`for t in 1:tile_count(u); tile_parent(u, t)`) is backend-agnostic.
+        u = LocalHaloArray(Float64, (5,), 1; boundary_condition=:periodic)
+        @test tile_count(u) == 1
+        @test tile_parent(u, 1) === parent(u)
+    end
+
 end

@@ -38,11 +38,15 @@ function krylov_gmres_bridge(A, b, u, p, isfresh, Pl, Pr, cacheval; kwargs...)
     return u
 end
 
+# Identical to the serial example's RHS — `tile_count` is 1 for a distributed
+# HaloArray (this rank's local block), so the same per-tile loop applies.
 function rhs!(du, u, p, t)
     synchronize_halo!(u)             # the MPI halo exchange (also on Duals)
-    s = parent(u); d = parent(du)
-    @inbounds for I in CartesianIndices(interior_range(u))
-        d[I] = D * (s[I - E1] - 2s[I] + s[I + E1]) * DX2INV + R * s[I] * (1 - s[I])
+    for tile in 1:tile_count(u)
+        s = tile_parent(u, tile); d = tile_parent(du, tile)
+        @inbounds for I in CartesianIndices(interior_range(u))
+            d[I] = D * (s[I - E1] - 2s[I] + s[I + E1]) * DX2INV + R * s[I] * (1 - s[I])
+        end
     end
     return nothing
 end

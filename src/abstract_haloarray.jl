@@ -103,6 +103,14 @@ function interior_to_global_index end
 function global_to_storage_index end
 function is_root end
 
+# A non-tiled single array is a 1-tile decomposition: its sole "tile" is the
+# whole padded storage (for a distributed HaloArray, this rank's local block).
+# This makes per-tile kernels backend-agnostic — the same `for t in 1:tile_count(u);
+# s = tile_parent(u, t); …` loop runs on a LocalHaloArray/HaloArray (one tile) and
+# a ThreadedHaloArray (many tiles, which overrides these two methods).
+@inline tile_count(::AbstractSingleHaloArray) = 1
+@inline tile_parent(halo::AbstractSingleHaloArray, ::Integer) = parent(halo)
+
 @inline halo_width(arr::AbstractArray{<:AbstractSingleHaloArray}) = halo_width(first(arr))
 @inline tile_count(arr::AbstractArray{<:AbstractSingleHaloArray}) = tile_count(first(arr))
 @inline tile_size(arr::AbstractArray{<:AbstractSingleHaloArray}) = tile_size(first(arr))

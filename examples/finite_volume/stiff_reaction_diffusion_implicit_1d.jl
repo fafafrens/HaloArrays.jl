@@ -13,9 +13,10 @@
 #     wrappers do NOT work here — they allocate via `S(undef, n)`, which a
 #     geometry-carrying HaloArray has no constructor for.
 #
-# Only the state constructor and the RHS's iteration change between backends;
-# the solver, the bridge, and the physics are identical. This file runs the
-# Local and Threaded backends; the distributed (MPI) version is the companion
+# Only the state *constructor* changes between backends — the RHS is
+# backend-agnostic (it loops over storage tiles: one for Local/MPI, many for
+# Threaded), and the solver, bridge, and physics are identical. This file runs
+# the Local and Threaded backends; the distributed (MPI) version is the companion
 # `stiff_reaction_diffusion_implicit_mpi_1d.jl`.
 
 using HaloArrays
@@ -39,19 +40,12 @@ function krylov_gmres_bridge(A, b, u, p, isfresh, Pl, Pr, cacheval; kwargs...)
     return u
 end
 
-# RHS for a single padded array (LocalHaloArray / distributed HaloArray).
+# Backend-agnostic RHS. Loop over the storage tiles — `tile_count` is 1 for a
+# LocalHaloArray or a distributed HaloArray (its sole tile is the whole padded
+# block / this rank's block) and many for a ThreadedHaloArray — and apply the
+# stencil to each tile's padded array. `synchronize_halo!` fills ghosts (also on
+# the ForwardDiff Duals during the Jacobian-vector products).
 function rhs!(du, u, p, t)
-    dx2inv = p
-    synchronize_halo!(u)
-    s = parent(u); d = parent(du)
-    @inbounds for I in CartesianIndices(interior_range(u))
-        d[I] = D * (s[I - E1] - 2s[I] + s[I + E1]) * dx2inv + R * s[I] * (1 - s[I])
-    end
-    return nothing
-end
-
-# RHS for a ThreadedHaloArray: tiled storage, so loop per tile.
-function rhs_tiled!(du, u, p, t)
     dx2inv = p
     synchronize_halo!(u)
     for tile in 1:tile_count(u)
@@ -89,7 +83,7 @@ function main()
     gnx = ntiles * tile
     u_threaded = ThreadedHaloArray(Float64, (tile,), 1; dims = (ntiles,), boundary_condition = :periodic)
     fill_from_global_indices!(I -> ic((I[1] - 0.5) / gnx), u_threaded)
-    solve_stiff(u_threaded, rhs_tiled!; nx = gnx, label = "ThreadedHaloArray $(ntiles)x$(tile)")
+    solve_stiff(u_threaded, rhs!; nx = gnx, label = "ThreadedHaloArray $(ntiles)x$(tile)")
     return nothing
 end
 
