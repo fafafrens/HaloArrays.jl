@@ -29,6 +29,7 @@ include("halo_exchange.jl")
 include("gather.jl")
 include("reduction.jl")
 include("vector_space.jl")
+include("linearsolve.jl")
 include("mpi_support.jl")
 include("save_hdf5.jl")
 
@@ -134,7 +135,8 @@ export halo_exchange!,
     synchronize_halo_threads!,
     get_send_view,
     get_recv_view,
-    swap!
+    swap!,
+    HaloKrylov
 
 # Reductions and gather
 export mapreduce_haloarray_dims,
