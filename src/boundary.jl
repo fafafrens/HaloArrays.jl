@@ -10,13 +10,18 @@ using StaticArrays
 # already-resolved views, plus the compile-time `Side`/`Dim`. The single-array
 # and threaded backends differ only in *which* views they pass (whole-array vs
 # per-tile), so they all delegate to these.
+#
+# `N` is captured as a type parameter (from the ghost-slab view), so `Val(N)` is
+# a static-parameter splat with no runtime→`Val` conversion — guaranteeing the
+# `_slice_index` calls stay type-stable and allocation-free on every Julia
+# version (rather than relying on `Val(ndims(x))` constant-folding).
 # ============================================================
 
 # Mirror the interior into the ghost layer. `scale = 1` → Reflecting (keep sign),
 # `scale = -1` → Antireflecting (flip sign). The source index is the mirror of
 # the ghost index about the wall.
-@inline function _reflect_into!(halo_region, interior_region, ::Side{S}, ::Dim{dim}, h, scale) where {S,dim}
-    N = ndims(halo_region)
+@inline function _reflect_into!(halo_region::AbstractArray{<:Any,N}, interior_region,
+        ::Side{S}, ::Dim{dim}, h, scale) where {N,S,dim}
     n = size(interior_region, dim)
     for i in 1:size(halo_region, dim)
         src_i = S == 1 ? h - i + 1 : n - (i - 1)
@@ -27,8 +32,8 @@ using StaticArrays
 end
 
 # Zero-gradient: copy the nearest interior edge cell into every ghost cell.
-@inline function _repeating_into!(halo_region, interior_region, ::Side{S}, ::Dim{dim}) where {S,dim}
-    N = ndims(halo_region)
+@inline function _repeating_into!(halo_region::AbstractArray{<:Any,N}, interior_region,
+        ::Side{S}, ::Dim{dim}) where {N,S,dim}
     edge_i = S == 1 ? 1 : size(interior_region, dim)
     edge = @view interior_region[_slice_index(Val(N), dim, edge_i)...]
     for i in 1:size(halo_region, dim)
@@ -38,8 +43,8 @@ end
 end
 
 # Wrap the opposite interior edge into the ghost layer (single-process periodic).
-@inline function _periodic_into!(halo_region, interior_region, ::Side{S}, ::Dim{dim}, h) where {S,dim}
-    N = ndims(halo_region)
+@inline function _periodic_into!(halo_region::AbstractArray{<:Any,N}, interior_region,
+        ::Side{S}, ::Dim{dim}, h) where {N,S,dim}
     n = size(interior_region, dim)
     for i in 1:size(halo_region, dim)
         src_i = S == 1 ? n - h + i : i
