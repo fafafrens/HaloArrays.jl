@@ -174,11 +174,20 @@ using LinearAlgebra: dot, norm
         @test collect(interior_view(cx.u)) ≈ c .* [1.0, 2, 3, 4] .+ s .* [10.0, 20, 30, 40]
         @test collect(interior_view(cy.v)) ≈ c .* [50.0, 60, 70, 80] .- s .* [5.0, 6, 7, 8]
 
-        # allocation-free: the in-place kernels touch no temporary vector
-        x = mk([1.0, 2, 3, 4]); y = mk([10.0, 20, 30, 40])
-        rotate!(x, y, c, s)                  # warm up / compile
-        @test @allocated(rotate!(x, y, c, s)) == 0
-        @test @allocated(swap!(x, y)) == 0
-        @test @allocated(reflect!(x, y, c, s)) == 0
+        # No temporary vector: the per-call allocation is independent of the
+        # vector length (0 on recent Julia, a small constant on some). A regression
+        # to a temp-vector form would scale with N — that's what this guards. (An
+        # exact `== 0` is too brittle across Julia versions.)
+        function alloc_per_call(op!, n)
+            a = LocalHaloArray(Float64, (n,), 1; boundary_condition=:periodic)
+            b = LocalHaloArray(Float64, (n,), 1; boundary_condition=:periodic)
+            op!(a, b)                        # warm up / compile
+            return @allocated op!(a, b)
+        end
+        @test alloc_per_call((a, b) -> rotate!(a, b, c, s), 8) ==
+              alloc_per_call((a, b) -> rotate!(a, b, c, s), 800)
+        @test alloc_per_call(swap!, 8) == alloc_per_call(swap!, 800)
+        @test alloc_per_call((a, b) -> reflect!(a, b, c, s), 8) ==
+              alloc_per_call((a, b) -> reflect!(a, b, c, s), 800)
     end
 end
