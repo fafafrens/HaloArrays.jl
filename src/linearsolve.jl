@@ -4,42 +4,42 @@
 # an optional dependency.
 
 """
-    HaloKrylov(method::Symbol; kwargs...) -> LinearSolve algorithm
+    HaloKrylov(method::Symbol; kwargs...) -> KrylovJL
 
-A LinearSolve-compatible iterative solver that runs any Krylov.jl `method`
-directly on a halo array as the solution vector — matrix-free, no marshalling to
-a plain `Vector`. Pass it as the `linsolve` of an implicit SciML integrator or a
-`LinearProblem`:
+A LinearSolve-compatible iterative solver that runs a Krylov.jl `method` directly
+on a halo array as the solution vector — matrix-free, no marshalling to a plain
+`Vector`. A thin, symbol-keyed alias for `LinearSolve.KrylovJL`, so it plugs in as
+the `linsolve` of an implicit SciML integrator or a `LinearProblem`:
 
 ```julia
 using HaloArrays, LinearSolve, Krylov, OrdinaryDiffEq
 solve(prob, FBDF(linsolve = HaloKrylov(:gmres), concrete_jac = false))
 ```
 
-It allocates Krylov's work vectors with `Krylov.KrylovConstructor` (i.e. via
-`similar`), which is what lets a geometry-carrying halo array be the solver
-vector — unlike LinearSolve's stock `KrylovJL_*` wrappers, which allocate with
-`S(undef, n)` and have no such constructor for a halo array.
+The enabling piece is a method this extension adds to `LinearSolve.init_cacheval`
+for halo-array operands: it builds Krylov's workspace with
+`Krylov.KrylovConstructor` (i.e. via `similar`) instead of `S(undef, n)`, which is
+what a geometry-carrying halo array has no constructor for. Because it hooks
+LinearSolve's own cache path, **the stock `KrylovJL_*` algorithms work on a halo
+array too** — e.g. `linsolve = KrylovJL_GMRES()` — and the Krylov workspace is
+built once and **cached/reused** across solves by LinearSolve's `solve!`.
+`HaloKrylov(:method)` is just the convenient way to reach methods without a named
+`KrylovJL_*` wrapper.
 
-`method` is any Krylov.jl solver symbol. The square-system, matrix-free methods
-that allocate all their work vectors up front (so they need only the operator's
-mat-vec) work directly on a halo array:
+Supported `method`s (matrix-free, all work vectors allocated up front):
 
-    :gmres :dqgmres :diom :fom :cg :car :bicgstab :cgs
-    :minres :minres_qlp :symmlq :cg_lanczos :minares
+    :gmres :dqgmres :diom :fom :cg :bicgstab :cgs
+    :minres :minres_qlp :symmlq :minares
 
-Not supported: `:fgmres`, `:qmr`, `:bilq` allocate extra vectors mid-solve via
-`S(undef, n)`, which a geometry-carrying halo array has no constructor for (the
-same limitation as `KrylovJL_*`); and `:cr` requires an SPD operator (it rejects
-an indefinite Newton `W`). Transpose/rectangular methods (`:lsqr`, `:lsmr`, …)
-additionally require an adjoint or second operator. `kwargs` are forwarded to the
-Krylov solver (e.g. `atol`, `rtol`, `itmax`).
+Unsupported, with a helpful error: `:fgmres`, `:qmr`, `:bilq` allocate extra
+vectors mid-solve via `S(undef, n)` (the geometry-array wall); `:car` and
+`:cg_lanczos` aren't wrapped by LinearSolve's `KrylovJL`. `kwargs` are forwarded
+to `KrylovJL` / the Krylov solver (e.g. `atol`, `rtol`, `itmax`, `gmres_restart`).
 
 !!! note
     Defined only when both `LinearSolve` and `Krylov` are loaded (a package
-    extension). Without them, this throws a `MethodError`.
-
-Requires the global reductions and BLAS-1 ops in [vector_space.jl](@ref) — `dot`,
-`norm`, `axpy!`, … — which make the solve correct (and collective under MPI).
+    extension); without them this throws a `MethodError`. The solve relies on the
+    global reductions and BLAS-1 ops in `vector_space.jl` (`dot`, `norm`,
+    `axpy!`, …), which also make it correct and collective under MPI.
 """
 function HaloKrylov end

@@ -5,12 +5,14 @@ using Krylov
 using OrdinaryDiffEq
 using LinearAlgebra
 
-# Exercises the HaloArraysLinearSolveExt: `HaloKrylov(:method)` as the linear
-# solver of an implicit (matrix-free) SciML integrator, with the HaloArray itself
-# as the ODE state. A stiff Fisher–KPP reaction–diffusion problem; every working
-# method must reach the same solution as a high-accuracy explicit reference.
+# Exercises HaloArraysLinearSolveExt: the `init_cacheval` override that lets
+# LinearSolve's KrylovJL build its workspace via `KrylovConstructor` on a halo
+# array (so the stock `KrylovJL_*` algorithms — and `HaloKrylov(:method)` — solve
+# matrix-free with the HaloArray itself as the ODE state). Stiff Fisher–KPP
+# reaction–diffusion; every supported method must match a high-accuracy explicit
+# reference.
 
-@testset "HaloKrylov LinearSolve extension" begin
+@testset "HaloKrylov / KrylovJL LinearSolve extension" begin
     @test !isnothing(Base.get_extension(HaloArrays, :HaloArraysLinearSolveExt))
 
     Dc, Rc, E1 = 1.0, 8.0, CartesianIndex(1)
@@ -32,18 +34,32 @@ using LinearAlgebra
     fill_from_global_indices!(I -> ic((I[1] - 0.5) / nx), u0)
     prob = ODEProblem(rhs!, u0, (0.0, 0.2), inv((1.0 / nx)^2))
     ref = solve(prob, Tsit5(); reltol = 1e-10, abstol = 1e-10, save_everystep = false)
+    solves(alg) = solve(prob, FBDF(linsolve = alg, concrete_jac = false);
+                        reltol = 1e-7, abstol = 1e-7, save_everystep = false)
 
-    # The matrix-free, up-front-allocating methods that work on a halo array.
-    @testset "$m" for m in (:gmres, :bicgstab, :cg, :minres, :cgs, :dqgmres, :car, :cg_lanczos)
-        sol = solve(prob, FBDF(linsolve = HaloKrylov(m), concrete_jac = false);
-                    reltol = 1e-7, abstol = 1e-7, save_everystep = false)
+    # Stock KrylovJL_* work directly on a halo array (via the init_cacheval override).
+    @testset "$(nameof(typeof(alg)))-$i" for (i, alg) in enumerate((
+            KrylovJL_GMRES(), KrylovJL_CG(), KrylovJL_BICGSTAB(), KrylovJL_MINRES()))
+        sol = solves(alg)
         @test sol.retcode == ReturnCode.Success
         @test maximum(abs, sol.u[end] - ref.u[end]) < 1e-5
     end
 
-    # Forwarded solver kwargs are accepted.
-    sol = solve(prob, FBDF(linsolve = HaloKrylov(:gmres; atol = 1e-10, rtol = 1e-8),
-                           concrete_jac = false);
-                reltol = 1e-7, abstol = 1e-7, save_everystep = false)
-    @test sol.retcode == ReturnCode.Success
+    # HaloKrylov(:method) — symbol alias for KrylovJL, incl. methods without a
+    # named KrylovJL_* wrapper.
+    @testset "HaloKrylov(:$m)" for m in (:gmres, :cg, :bicgstab, :minres, :dqgmres,
+                                         :diom, :fom, :cgs, :minares, :minres_qlp, :symmlq)
+        @test HaloKrylov(m) isa KrylovJL
+        sol = solves(HaloKrylov(m))
+        @test sol.retcode == ReturnCode.Success
+        @test maximum(abs, sol.u[end] - ref.u[end]) < 1e-5
+    end
+
+    # Forwarded kwargs reach KrylovJL / the Krylov solver.
+    @test solves(HaloKrylov(:gmres; atol = 1e-10, rtol = 1e-8)).retcode == ReturnCode.Success
+
+    # Unsupported methods fail fast with a helpful error (not deep in the solve).
+    @test_throws ArgumentError HaloKrylov(:car)
+    @test_throws ArgumentError HaloKrylov(:fgmres)
+    @test_throws ArgumentError HaloKrylov(:cg_lanczos)
 end
