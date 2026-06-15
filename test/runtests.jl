@@ -48,6 +48,13 @@ include_test(name) = include(joinpath(@__DIR__, name))
         include_test("test_local_threaded_reduction.jl")
         include_test("test_svector_eltype.jl")
         include_test("test_hdf5_local_threaded.jl")
+        # LinearSolve/Krylov extension: available under Pkg.test, skipped on a
+        # bare --project=. run (same as Aqua).
+        if all(p -> Base.find_package(p) !== nothing, ("LinearSolve", "Krylov", "OrdinaryDiffEq"))
+            include_test("test_linearsolve_ext.jl")
+        else
+            @info "Skipping LinearSolve extension tests (LinearSolve/Krylov/OrdinaryDiffEq not in this environment; run via Pkg.test)"
+        end
     else
         @info "Skipping unit tests (set HALOARRAYS_RUN_UNIT_TESTS=true to enable)"
     end
