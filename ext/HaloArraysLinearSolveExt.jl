@@ -150,26 +150,26 @@ struct GMRESWorkspace{TV,TH,TG,TC,TW}
     V::TV; H::TH; g::TG; cs::TC; sn::TG; w::TW; Ax::TW
 end
 function _gmres_workspace(b; restart)
-    T = float(real(eltype(b))); m = restart
-    GMRESWorkspace([similar(b) for _ in 1:m+1], zeros(T, m + 1, m), zeros(T, m + 1),
-                   zeros(T, m), zeros(T, m), similar(b), similar(b))
+    K = float(eltype(b)); T = real(K); m = restart   # Hessenberg/g/sn in the element field
+    GMRESWorkspace([similar(b) for _ in 1:m+1], zeros(K, m + 1, m), zeros(K, m + 1),
+                   zeros(T, m), zeros(K, m), similar(b), similar(b))
 end
 
+# Givens rotation [c s; -conj(s) c] that zeros `b`; `c` is real. Correct for both
+# real and complex scalars (so GMRES converges on complex systems too).
 @inline function _givens(a, b)
-    b == 0 && return (one(a), zero(a))
-    if abs(b) > abs(a)
-        τ = a / b; s = inv(sqrt(1 + τ^2)); return (s * τ, s)
-    else
-        τ = b / a; c = inv(sqrt(1 + τ^2)); return (c, c * τ)
-    end
+    iszero(b) && return (one(real(a)), zero(a))
+    iszero(a) && return (zero(real(a)), one(a))
+    ρ = hypot(abs(a), abs(b))
+    return (abs(a) / ρ, (a / abs(a)) * conj(b) / ρ)
 end
 
 function _gmres!(x, A, b, work::GMRESWorkspace; abstol, reltol, maxiter)
     V, H, g, cs, sn, w, Ax = work.V, work.H, work.g, work.cs, work.sn, work.w, work.Ax
-    T = float(real(eltype(b))); m = length(cs)
+    T = real(float(eltype(b))); m = length(cs)
     thr = _threshold(b, abstol, reltol)
     res = norm(b); total = 0
-    for _cycle in 1:cld(maxiter, m)
+    while total < maxiter
         mul!(Ax, A, x)
         r = V[1]; copyto!(r, b); r .-= Ax           # residual in V[1]
         β = norm(r); res = β
@@ -177,38 +177,40 @@ function _gmres!(x, A, b, work::GMRESWorkspace; abstol, reltol, maxiter)
         V[1] .*= inv(β)
         fill!(g, 0); g[1] = β
         k = 0
-        for j in 1:m
+        inner = min(m, maxiter - total)             # never exceed the iteration budget
+        for j in 1:inner
             k = j; total += 1
             mul!(w, A, V[j])
             for i in 1:j                            # modified Gram-Schmidt
-                H[i, j] = real(dot(V[i], w))
+                H[i, j] = dot(V[i], w)              # conjugate inner product (complex-safe)
                 w .-= H[i, j] .* V[i]
             end
-            H[j+1, j] = norm(w)
-            H[j+1, j] > eps(T) && (V[j+1] .= w .* inv(H[j+1, j]))
+            hnext = norm(w)                         # real; H is the (possibly complex) field
+            H[j+1, j] = hnext
+            happy = hnext ≤ eps(T)                  # the next Arnoldi vector can't be formed
+            happy || (V[j+1] .= w .* inv(hnext))
             for i in 1:j-1                          # apply previous Givens rotations
                 τ         =  cs[i] * H[i, j] + sn[i] * H[i+1, j]
-                H[i+1, j] = -sn[i] * H[i, j] + cs[i] * H[i+1, j]
+                H[i+1, j] = -conj(sn[i]) * H[i, j] + cs[i] * H[i+1, j]
                 H[i, j]   = τ
             end
             cs[j], sn[j] = _givens(H[j, j], H[j+1, j])
             H[j, j]   = cs[j] * H[j, j] + sn[j] * H[j+1, j]
             H[j+1, j] = 0
-            g[j+1] = -sn[j] * g[j]
+            g[j+1] = -conj(sn[j]) * g[j]
             g[j]   =  cs[j] * g[j]
             res = abs(g[j+1])
-            res ≤ thr && break
+            (res ≤ thr || happy) && break           # stop on convergence or happy breakdown
         end
-        y = zeros(T, k)                             # back-substitution H[1:k,1:k] y = g[1:k]
+        # back-substitution H[1:k,1:k] y = g[1:k], solved in place into g (no allocation)
         for i in k:-1:1
-            acc = g[i]
             for l in i+1:k
-                acc -= H[i, l] * y[l]
+                g[i] -= H[i, l] * g[l]
             end
-            y[i] = acc / H[i, i]
+            g[i] /= H[i, i]
         end
         for i in 1:k
-            x .+= y[i] .* V[i]
+            x .+= g[i] .* V[i]
         end
         res ≤ thr && break
     end
@@ -224,9 +226,12 @@ struct HaloGMRESAlg    <: LinearSolve.AbstractKrylovSubspaceMethod
     restart::Int
 end
 
-HaloArrays.HaloCG()              = HaloCGAlg()
-HaloArrays.HaloBiCGStab()        = HaloBiCGStabAlg()
-HaloArrays.HaloGMRES(; restart=30) = HaloGMRESAlg(restart)
+HaloArrays.HaloCG()       = HaloCGAlg()
+HaloArrays.HaloBiCGStab() = HaloBiCGStabAlg()
+function HaloArrays.HaloGMRES(; restart = 30)
+    restart ≥ 1 || throw(ArgumentError("HaloGMRES: `restart` must be ≥ 1, got $restart"))
+    return HaloGMRESAlg(restart)
+end
 
 LinearSolve.init_cacheval(::HaloCGAlg, A, b, u, Pl, Pr, maxiters, abstol, reltol, verbose, assump) =
     _cg_workspace(b)

@@ -101,3 +101,30 @@ end
         @test maximum(abs, interior_view(sol.u) .- interior_view(uex)) < 1e-4
     end
 end
+
+@testset "HaloGMRES robustness" begin
+    @test_throws ArgumentError HaloGMRES(restart = 0)
+    @test_throws ArgumentError HaloGMRES(restart = -3)
+
+    # Reach the internal solver to check the numerical edge cases directly.
+    ext = Base.get_extension(HaloArrays, :HaloArraysLinearSolveExt)
+    run_gmres(x, A, b; restart = length(b), maxiter = 10 * length(b)) =
+        ext._gmres!(x, A, b, ext._gmres_workspace(b; restart = restart);
+                    abstol = 0.0, reltol = 1e-10, maxiter = maxiter)
+
+    # Complex system: the Hessenberg/Givens stay in the complex field — A = i,
+    # b = 1 must give x = -i (a real-truncating GMRES would record H[1,1] = 0).
+    x1 = ComplexF64[0]; run_gmres(x1, fill(im, 1, 1), ComplexF64[1]; restart = 1)
+    @test x1[1] ≈ -im
+
+    # Happy breakdown: an exact 3-dimensional Krylov space converges (and stops)
+    # without using an un-formed basis vector.
+    A = Diagonal([1.0, 2, 3, 4, 5]); b = [1.0, 1, 1, 0, 0]
+    x = zeros(5); _, iters, _, conv = run_gmres(x, A, b; restart = 5, maxiter = 20)
+    @test conv && iters == 3 && x ≈ A \ b
+
+    # Iteration budget: maxiter = 1 must perform at most one Arnoldi step
+    # (not a full restart cycle of `restart` matvecs).
+    xb = zeros(8); _, itb, _, _ = run_gmres(xb, randn(8, 8) + 8I, randn(8); restart = 30, maxiter = 1)
+    @test itb ≤ 1
+end
