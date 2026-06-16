@@ -431,7 +431,7 @@ for (func, commutative) in [:mapreduce => true, :mapfoldl => false, :mapfoldr =>
             "which returns the reduced array on its sub-topology."))
         comm   = get_comm(halo)
         ups    = map(interior_view, (halo, etc...))
-        rlocal = $func(f, op, ups...; kws...)
+        rlocal = _reduce_views($func, f, op, ups; kws...)   # no O(N) materialization for 2+ inputs
         op_mpi = MPI.Op(op, typeof(rlocal); iscommutative=$commutative)
         MPI.Allreduce(rlocal, op_mpi, comm)
     end

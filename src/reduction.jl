@@ -1,11 +1,20 @@
 # mapreduce / any / all for HaloArray (MPI) live in mpi_support.jl
 
+# Reduce over one or more already-resolved interior views. With a single view we
+# forward straight to Base's (efficient) reduction; with two or more we reduce
+# over a lazy `zip` rather than `reducer(f, op, A, B)` — Base's multi-iterator
+# `mapreduce` materializes `map(f, A, B)` into a full interior-sized array
+# (O(N) allocation per call). `reducer` is `mapreduce`/`mapfoldl`/`mapfoldr`.
+@inline function _reduce_views(reducer::R, f::F, op::OP, views::Tuple; kws...) where {R,F,OP}
+    return length(views) == 1 ? reducer(f, op, views[1]; kws...) :
+                                reducer(t -> f(t...), op, zip(views...); kws...)
+end
+
 for func in (:mapreduce, :mapfoldl, :mapfoldr)
     @eval function Base.$func(
             f::F, op::OP, halo::LocalHaloArray, etc::Vararg{LocalHaloArray}; kws...,
         ) where {F<:Function, OP}
-        interiors = map(interior_view, (halo, etc...))
-        return $func(f, op, interiors...; kws...)
+        return _reduce_views($func, f, op, map(interior_view, (halo, etc...)); kws...)
     end
 
     @eval function Base.$func(
@@ -20,7 +29,7 @@ for func in (:mapreduce, :mapfoldl, :mapfoldr)
         ) where {F<:Function, OP}
         # Reduce each tile (serially, with the user's kwargs), then combine the
         # per-tile results with `op` across tiles via the array's thread backend.
-        per_tile(tile_id) = $func(f, op, map(h -> interior_view(h, tile_id), (halo, etc...))...; kws...)
+        per_tile(tile_id) = _reduce_views($func, f, op, map(h -> interior_view(h, tile_id), (halo, etc...)); kws...)
         return tile_mapreduce(thread_backend(halo), per_tile, op, 1:tile_count(halo); scheduler=:static)
     end
 
