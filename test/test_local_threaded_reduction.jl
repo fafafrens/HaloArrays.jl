@@ -42,6 +42,16 @@ using LinearAlgebra: dot, norm
     @test sum(local_fields) == 110
     @test maximum(local_fields) == 40
     @test minimum(local_fields) == 1
+    # `norm` on a collection combines per-field norms (each already global); it must
+    # NOT fall through to Base's generic `norm`, which iterates the collection's
+    # scalar AbstractArray interface and allocates O(N) per call (Krylov hot path).
+    @test norm(local_fields) ≈ sqrt(sum(abs2, [1, 2, 3, 4, 10, 20, 30, 40]))   # √3030
+    @test norm(local_fields, Inf) == 40
+    @test norm(local_fields, 1) == sum(abs, [1, 2, 3, 4, 10, 20, 30, 40])
+    norm_alloc(n) = (a = LocalHaloArray(Float64, (n,), 1; boundary_condition=:periodic);
+                     b = similar(a); fill!(a, 1.0); fill!(b, 2.0);
+                     c = MultiHaloArray((; a, b)); norm(c); @allocated norm(c))
+    @test norm_alloc(16) == norm_alloc(16_000)
     @test mapfoldl(identity, +, local_fields) == 110
     @test mapfoldr(identity, +, local_fields) == 110
     @test all(x -> x > 0, local_fields)

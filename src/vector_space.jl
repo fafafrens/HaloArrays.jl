@@ -34,6 +34,22 @@ function LinearAlgebra.norm(halo::AbstractSingleHaloArray, p::Real=2)
     end
 end
 
+# Collections: combine the per-field norms (each field already does its own global
+# reduction — MPI Allreduce / tile combine). Forwarding per field avoids Base's
+# generic `norm`, which iterates the collection through its scalar `AbstractArray`
+# interface and allocates O(N) every call (a hot-path leak in any Krylov solve on a
+# collection state). Mirrors the per-field `dot` below. ‖x‖₂ = √Σ_f ‖x_f‖²,
+# ‖x‖_∞ = maxₚ ‖x_f‖_∞, ‖x‖_p = (Σ_f ‖x_f‖_p^p)^{1/p}.
+function LinearAlgebra.norm(x::AbstractHaloCollection, p::Real=2)
+    if p == 2
+        return sqrt(sum(f -> norm(f, 2)^2, eachfield(x)))
+    elseif p == Inf
+        return maximum(f -> norm(f, Inf), eachfield(x))
+    else
+        return sum(f -> norm(f, p)^p, eachfield(x))^(1/p)
+    end
+end
+
 # ---- inner product (global reduction) ---------------------------------------
 # ⟨x,y⟩ = Σ conj(xᵢ)·yᵢ over interior cells. Forward to the *interior* dot per
 # backend rather than the two-argument `mapreduce(dot, +, x, y)`: Base's
@@ -48,7 +64,15 @@ LinearAlgebra.dot(x::ThreadedHaloArray, y::ThreadedHaloArray) =
         t -> dot(interior_view(x, t), interior_view(y, t)), +, 1:tile_count(x); scheduler=:static)
 LinearAlgebra.dot(x::AbstractHaloCollection, y::AbstractHaloCollection) =
     sum(fxy -> dot(fxy[1], fxy[2]), zip(eachfield(x), eachfield(y)))
-# Fallback for any other halo-array type (e.g. MaybeHaloArray).
+# MaybeHaloArray: forward to the inner array (its own dot/norm already do the right
+# global reduction); an inactive value contributes nothing. Without these, `dot`
+# hits the two-arg-mapreduce fallback below and `norm` hits Base's generic path —
+# both O(N) per call (the same hot-path leak fixed for collections above).
+LinearAlgebra.dot(x::MaybeHaloArray, y::MaybeHaloArray) =
+    isactive(x) ? LinearAlgebra.dot(getdata(x), getdata(y)) : zero(eltype(x))
+LinearAlgebra.norm(m::MaybeHaloArray, p::Real=2) =
+    isactive(m) ? LinearAlgebra.norm(getdata(m), p) : zero(real(eltype(m)))
+# Fallback for any other halo-array type.
 LinearAlgebra.dot(x::AbstractHaloArray, y::AbstractHaloArray) = mapreduce(LinearAlgebra.dot, +, x, y)
 
 # ---- in-place BLAS-1 updates (elementwise, via interior-only broadcast) ------
