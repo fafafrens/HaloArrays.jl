@@ -35,10 +35,20 @@ function LinearAlgebra.norm(halo::AbstractSingleHaloArray, p::Real=2)
 end
 
 # ---- inner product (global reduction) ---------------------------------------
-# ⟨x,y⟩ = Σ conj(xᵢ)·yᵢ over interior cells. The two-argument `mapreduce`
-# inherits the correct global semantics on every backend (MPI Allreduce, threaded
-# tile reduction, per-field for collections); it overrides the generic
-# AbstractArray `dot`, which would only reduce locally (silently wrong across ranks).
+# ⟨x,y⟩ = Σ conj(xᵢ)·yᵢ over interior cells. Forward to the *interior* dot per
+# backend rather than the two-argument `mapreduce(dot, +, x, y)`: Base's
+# multi-iterator `mapreduce` materializes `map(dot, …)` into a full interior-sized
+# array, allocating O(N) every call — and `dot` is in every Krylov inner loop.
+# The interior dot is allocation-free (BLAS-backed for contiguous storage) and
+# globally correct (MPI Allreduce; per-tile / per-field combine).
+LinearAlgebra.dot(x::LocalHaloArray, y::LocalHaloArray) =
+    dot(interior_view(x), interior_view(y))
+LinearAlgebra.dot(x::ThreadedHaloArray, y::ThreadedHaloArray) =
+    tile_mapreduce(thread_backend(x),
+        t -> dot(interior_view(x, t), interior_view(y, t)), +, 1:tile_count(x); scheduler=:static)
+LinearAlgebra.dot(x::AbstractHaloCollection, y::AbstractHaloCollection) =
+    sum(fxy -> dot(fxy[1], fxy[2]), zip(eachfield(x), eachfield(y)))
+# Fallback for any other halo-array type (e.g. MaybeHaloArray).
 LinearAlgebra.dot(x::AbstractHaloArray, y::AbstractHaloArray) = mapreduce(LinearAlgebra.dot, +, x, y)
 
 # ---- in-place BLAS-1 updates (elementwise, via interior-only broadcast) ------

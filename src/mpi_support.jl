@@ -452,6 +452,13 @@ function Base.all(f::F, u::HaloArray) where {F<:Function}
     MPI.Allreduce(all(f, interior_view(u)) :: Bool, &, get_comm(u))
 end
 
+# Global inner product: this rank's interior dot, then Allreduce. Forwarding to
+# the interior dot avoids Base's materializing two-argument mapreduce (see
+# vector_space.jl); the dot stays in every Krylov inner loop, so this matters.
+function LinearAlgebra.dot(x::HaloArray, y::HaloArray)
+    return MPI.Allreduce(LinearAlgebra.dot(interior_view(x), interior_view(y)), +, get_comm(x))
+end
+
 """
     mapreduce_haloarray_dims(f, op, u, dims) -> HaloArray
 

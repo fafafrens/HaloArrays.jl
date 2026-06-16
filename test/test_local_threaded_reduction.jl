@@ -15,6 +15,14 @@ using LinearAlgebra: dot, norm
     @test dot(local_u, local_v) == dot([1, 2, 3, 4], [10, 20, 30, 40])   # 300
     @test dot(local_u, local_u) == sum(abs2, interior_view(local_u))
     @test sum(abs2, local_u) == 30
+
+    # `dot` forwards to the interior dot, so its allocation must NOT scale with
+    # the interior size (the old `mapreduce(dot, +, x, y)` materialized a full
+    # interior-sized array — O(N) per call, in every Krylov inner loop).
+    dot_alloc(n) = (a = LocalHaloArray(Float64, (n,), 1; boundary_condition=:periodic);
+                    b = similar(a); fill!(a, 1.0); fill!(b, 2.0);
+                    dot(a, b); @allocated dot(a, b))
+    @test dot_alloc(16) == dot_alloc(16_000)
     @test maximum(local_u) == 4
     @test minimum(local_u) == 1
     @test mapfoldl(abs2, +, local_u) == 30
