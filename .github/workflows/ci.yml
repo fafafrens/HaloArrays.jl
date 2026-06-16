@@ -16,11 +16,11 @@ jobs:
         julia-version: ['1.10', '1.12']
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v2
+      - uses: actions/checkout@v5
+      - uses: julia-actions/setup-julia@v3
         with:
           version: ${{ matrix.julia-version }}
-      - uses: julia-actions/cache@v2
+      - uses: julia-actions/cache@v3
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
         env:
@@ -35,11 +35,11 @@ jobs:
         threads: [2, 4]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v2
+      - uses: actions/checkout@v5
+      - uses: julia-actions/setup-julia@v3
         with:
           version: '1.12'
-      - uses: julia-actions/cache@v2
+      - uses: julia-actions/cache@v3
       - uses: julia-actions/julia-buildpkg@v1
       # Runs the unit suite multithreaded so the ThreadBackend trait, the
       # threaded reductions, and the Polyester extension are exercised in CI.
@@ -53,11 +53,11 @@ jobs:
     name: Example smoke tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v2
+      - uses: actions/checkout@v5
+      - uses: julia-actions/setup-julia@v3
         with:
           version: '1.12'
-      - uses: julia-actions/cache@v2
+      - uses: julia-actions/cache@v3
       - uses: julia-actions/julia-buildpkg@v1
       # Runs every CPU example's full driver in a throwaway module so a runtime
       # regression in an example fails CI instead of rotting silently. Threaded
@@ -77,11 +77,11 @@ jobs:
         np: [2, 4]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v2
+      - uses: actions/checkout@v5
+      - uses: julia-actions/setup-julia@v3
         with:
           version: '1.12'
-      - uses: julia-actions/cache@v2
+      - uses: julia-actions/cache@v3
       - name: Configure MPI provider
         shell: julia --color=yes --project=. {0}
         run: |
