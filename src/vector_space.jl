@@ -24,14 +24,33 @@ Base.:*(halo::AbstractSingleHaloArray, x::Number) = halo .* x
 Base.:*(x::Number, halo::AbstractSingleHaloArray) = x .* halo
 
 # ---- norm (global reduction) ------------------------------------------------
-function LinearAlgebra.norm(halo::AbstractSingleHaloArray, p::Real=2)
-    if p == 2
-        return sqrt(mapreduce(abs2, +, halo))
-    elseif p == Inf
-        return mapreduce(abs, max, halo)
-    else
-        return mapreduce(x -> abs(x)^p, +, halo)^(1/p)
-    end
+# The 2-norm (the Krylov hot path) is its own branch-free method; the general-`p`
+# method carries the `p == Inf` / else dispatch and reuses the 2-norm for p == 2.
+LinearAlgebra.norm(halo::AbstractSingleHaloArray) = sqrt(mapreduce(abs2, +, halo))
+function LinearAlgebra.norm(halo::AbstractSingleHaloArray, p::Real)
+    p == 2   && return norm(halo)
+    p == Inf && return mapreduce(abs, max, halo)
+    return mapreduce(x -> abs(x)^p, +, halo)^(1 / p)
+end
+# Fast 2-norm: contiguous-aware Σ|·|² over the parent (see `_interior_acc`) instead
+# of `mapreduce(abs2, +, strided interior_view)`. The general-p method above still
+# routes p == 2 here via `norm(halo)` (dynamic dispatch picks the concrete type).
+LinearAlgebra.norm(u::LocalHaloArray) = sqrt(_interior_acc(abs2, parent(u), interior_range(u)))
+LinearAlgebra.norm(u::ThreadedHaloArray) = sqrt(tile_mapreduce(thread_backend(u),
+    t -> _interior_acc(abs2, tile_parent(u, t), interior_range(u, t)), +,
+    1:tile_count(u); scheduler=:static))
+
+# Collections: combine the per-field norms (each field already does its own global
+# reduction — MPI Allreduce / tile combine). Forwarding per field avoids Base's
+# generic `norm`, which iterates the collection through its scalar `AbstractArray`
+# interface and allocates O(N) every call (a hot-path leak in any Krylov solve on a
+# collection state). Mirrors the per-field `dot` below. ‖x‖₂ = √Σ_f ‖x_f‖²,
+# ‖x‖_∞ = maxₚ ‖x_f‖_∞, ‖x‖_p = (Σ_f ‖x_f‖_p^p)^{1/p}.
+LinearAlgebra.norm(x::AbstractHaloCollection) = sqrt(sum(f -> norm(f)^2, eachfield(x)))
+function LinearAlgebra.norm(x::AbstractHaloCollection, p::Real)
+    p == 2   && return norm(x)
+    p == Inf && return maximum(f -> norm(f, Inf), eachfield(x))
+    return sum(f -> norm(f, p)^p, eachfield(x))^(1 / p)
 end
 
 # ---- inner product (global reduction) ---------------------------------------
@@ -42,13 +61,24 @@ end
 # The interior dot is allocation-free (BLAS-backed for contiguous storage) and
 # globally correct (MPI Allreduce; per-tile / per-field combine).
 LinearAlgebra.dot(x::LocalHaloArray, y::LocalHaloArray) =
-    dot(interior_view(x), interior_view(y))
+    _interior_dot(parent(x), parent(y), interior_range(x))
 LinearAlgebra.dot(x::ThreadedHaloArray, y::ThreadedHaloArray) =
     tile_mapreduce(thread_backend(x),
-        t -> dot(interior_view(x, t), interior_view(y, t)), +, 1:tile_count(x); scheduler=:static)
+        t -> _interior_dot(tile_parent(x, t), tile_parent(y, t), interior_range(x, t)), +,
+        1:tile_count(x); scheduler=:static)
 LinearAlgebra.dot(x::AbstractHaloCollection, y::AbstractHaloCollection) =
     sum(fxy -> dot(fxy[1], fxy[2]), zip(eachfield(x), eachfield(y)))
-# Fallback for any other halo-array type (e.g. MaybeHaloArray).
+# MaybeHaloArray: forward to the inner array (its own dot/norm already do the right
+# global reduction); an inactive value contributes nothing. Without these, `dot`
+# hits the two-arg-mapreduce fallback below and `norm` hits Base's generic path —
+# both O(N) per call (the same hot-path leak fixed for collections above).
+LinearAlgebra.dot(x::MaybeHaloArray, y::MaybeHaloArray) =
+    isactive(x) ? LinearAlgebra.dot(getdata(x), getdata(y)) : zero(eltype(x))
+LinearAlgebra.norm(m::MaybeHaloArray) =
+    isactive(m) ? LinearAlgebra.norm(getdata(m)) : zero(real(eltype(m)))
+LinearAlgebra.norm(m::MaybeHaloArray, p::Real) =
+    isactive(m) ? LinearAlgebra.norm(getdata(m), p) : zero(real(eltype(m)))
+# Fallback for any other halo-array type.
 LinearAlgebra.dot(x::AbstractHaloArray, y::AbstractHaloArray) = mapreduce(LinearAlgebra.dot, +, x, y)
 
 # ---- in-place BLAS-1 updates (elementwise, via interior-only broadcast) ------

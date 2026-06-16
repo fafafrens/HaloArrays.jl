@@ -42,6 +42,16 @@ using LinearAlgebra: dot, norm
     @test sum(local_fields) == 110
     @test maximum(local_fields) == 40
     @test minimum(local_fields) == 1
+    # `norm` on a collection combines per-field norms (each already global); it must
+    # NOT fall through to Base's generic `norm`, which iterates the collection's
+    # scalar AbstractArray interface and allocates O(N) per call (Krylov hot path).
+    @test norm(local_fields) ≈ sqrt(sum(abs2, [1, 2, 3, 4, 10, 20, 30, 40]))   # √3030
+    @test norm(local_fields, Inf) == 40
+    @test norm(local_fields, 1) == sum(abs, [1, 2, 3, 4, 10, 20, 30, 40])
+    norm_alloc(n) = (a = LocalHaloArray(Float64, (n,), 1; boundary_condition=:periodic);
+                     b = similar(a); fill!(a, 1.0); fill!(b, 2.0);
+                     c = MultiHaloArray((; a, b)); norm(c); @allocated norm(c))
+    @test norm_alloc(16) == norm_alloc(16_000)
     @test mapfoldl(identity, +, local_fields) == 110
     @test mapfoldr(identity, +, local_fields) == 110
     @test all(x -> x > 0, local_fields)
@@ -197,5 +207,27 @@ using LinearAlgebra: dot, norm
         @test alloc_per_call(swap!, 8) == alloc_per_call(swap!, 800)
         @test alloc_per_call((a, b) -> reflect!(a, b, c, s), 8) ==
               alloc_per_call((a, b) -> reflect!(a, b, c, s), 800)
+    end
+
+    @testset "contiguous-aware interior sum/dot/norm (SIMD over padded parent)" begin
+        # sum/dot/norm reduce over the raw `parent` (looping trailing cartesian
+        # indices, @simd on the contiguous leading dim) instead of the strided
+        # interior_view — ~5× faster. This guards the `p[i, J]` index logic across
+        # shapes/eltypes the 1-D Int tests above don't cover: non-square 2-D, 3-D,
+        # and complex (dot conjugates the first argument).
+        for (T, dims) in ((Float64, (31, 17)), (Float64, (8, 9, 10)),
+                          (Float64, (50,)), (ComplexF64, (16, 16)))
+            u = LocalHaloArray(T, dims, 1; boundary_condition=:periodic)
+            v = LocalHaloArray(T, dims, 1; boundary_condition=:periodic)
+            interior_view(u) .= rand(T, dims)
+            interior_view(v) .= rand(T, dims)
+            iu = vec(collect(interior_view(u)))
+            iv = vec(collect(interior_view(v)))
+            @test sum(u)    ≈ sum(iu)
+            @test dot(u, v) ≈ dot(iu, iv)          # conj(iu)·iv reference
+            @test norm(u)   ≈ norm(iu)
+            @test norm(u, 1)   ≈ norm(iu, 1)
+            @test norm(u, Inf) ≈ norm(iu, Inf)
+        end
     end
 end
