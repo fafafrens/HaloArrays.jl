@@ -66,10 +66,14 @@ for func in (:mapreduce, :mapfoldl, :mapfoldr)
     @eval function Base.$func(
             f::F, op::OP, halo::AbstractHaloCollection, etc::Vararg{AbstractHaloCollection}; kws...,
         ) where {F<:Function, OP}
-        all_fields = map(eachfield, (halo, etc...))
-        per_field_results = map(eachindex(eachfield(halo))) do idx
-            $func(f, op, map(fields -> fields[idx], all_fields)...; kws...)
-        end
+        # Reduce each field across the inputs, then combine the per-field results.
+        # `map` over `eachfield` directly (multi-iterator): a MultiHaloArray's
+        # fields are a Tuple → the results stay a Tuple (no allocation); an
+        # ArrayOfHaloArray's are an Array → a small O(#fields) results array
+        # (irreducible without regressing the tuple case — `zip` of tuples is
+        # type-unstable). `kws` (e.g. `init`) apply once, at the combine.
+        per_field_results = map((fields...) -> $func(f, op, fields...),
+                                map(eachfield, (halo, etc...))...)
         return reduce(op, per_field_results; kws...)
     end
 
