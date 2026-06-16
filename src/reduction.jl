@@ -19,7 +19,8 @@ end
 # per-rank/per-tile local reduction); MPI/threaded wrap them with Allreduce / tile
 # combine. Only the `+`-accumulating ops live here — `@simd` reassociates, which
 # matches `sum`/`norm`/`dot` semantics but not order-sensitive folds or max/min.
-@inline function _interior_acc(f::F, p::AbstractArray, rng::Tuple) where {F}
+# Fast CPU path — a dense `Array` parent: @simd over the contiguous leading dim.
+@inline function _interior_acc(f::F, p::Array, rng::Tuple) where {F}
     inner = rng[1]
     outer = CartesianIndices(Base.tail(rng))
     s = zero(typeof(f(zero(eltype(p)))))
@@ -30,7 +31,7 @@ end
     end
     return s
 end
-@inline function _interior_dot(px::AbstractArray, py::AbstractArray, rng::Tuple)
+@inline function _interior_dot(px::Array, py::Array, rng::Tuple)
     inner = rng[1]
     outer = CartesianIndices(Base.tail(rng))
     s = zero(promote_type(eltype(px), eltype(py)))
@@ -41,6 +42,14 @@ end
     end
     return s
 end
+# Generic fallback — GPU (CuArray/MtlArray/…) or any non-dense parent: reduce over
+# the interior *view* so the array type's own (GPU) kernels run. The scalar-indexed
+# @simd loop above would throw under `allowscalar(false)` or crawl on a GPUArray;
+# this preserves the original, device-agnostic behaviour for those parents.
+@inline _interior_acc(f::F, p::AbstractArray, rng::Tuple) where {F} =
+    mapreduce(f, +, @view p[rng...])
+@inline _interior_dot(px::AbstractArray, py::AbstractArray, rng::Tuple) =
+    LinearAlgebra.dot(@view(px[rng...]), @view(py[rng...]))
 
 for func in (:mapreduce, :mapfoldl, :mapfoldr)
     @eval function Base.$func(
