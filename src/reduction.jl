@@ -10,6 +10,38 @@
                                 reducer(t -> f(t...), op, zip(views...); kws...)
 end
 
+# ---- contiguous-aware interior sum-reductions (the Krylov hot path) ----------
+# `interior_view` is a *strided* SubArray (halo padding separates columns), and
+# Base's `mapreduce`/`dot` don't SIMD strided arrays — they fall to per-element
+# cartesian iteration, ~5–9× slower than contiguous. These kernels reduce over the
+# raw `parent` directly: loop the trailing cartesian indices, `@simd` the
+# contiguous leading dimension. Used by `sum`/`norm`/`dot` on every backend (the
+# per-rank/per-tile local reduction); MPI/threaded wrap them with Allreduce / tile
+# combine. Only the `+`-accumulating ops live here — `@simd` reassociates, which
+# matches `sum`/`norm`/`dot` semantics but not order-sensitive folds or max/min.
+@inline function _interior_acc(f::F, p::AbstractArray, rng::Tuple) where {F}
+    inner = rng[1]
+    outer = CartesianIndices(Base.tail(rng))
+    s = zero(typeof(f(zero(eltype(p)))))
+    @inbounds for J in outer
+        @simd for i in inner
+            s += f(p[i, J])
+        end
+    end
+    return s
+end
+@inline function _interior_dot(px::AbstractArray, py::AbstractArray, rng::Tuple)
+    inner = rng[1]
+    outer = CartesianIndices(Base.tail(rng))
+    s = zero(promote_type(eltype(px), eltype(py)))
+    @inbounds for J in outer
+        @simd for i in inner
+            s += conj(px[i, J]) * py[i, J]
+        end
+    end
+    return s
+end
+
 for func in (:mapreduce, :mapfoldl, :mapfoldr)
     @eval function Base.$func(
             f::F, op::OP, halo::LocalHaloArray, etc::Vararg{LocalHaloArray}; kws...,
@@ -124,6 +156,13 @@ Base.sum(halo::AbstractHaloArray) = mapreduce(identity, +, halo)
 Base.sum(f::F, halo::AbstractHaloArray) where {F<:Function} = mapreduce(f, +, halo)
 Base.maximum(halo::AbstractHaloArray) = mapreduce(identity, max, halo)
 Base.minimum(halo::AbstractHaloArray) = mapreduce(identity, min, halo)
+
+# Fast `sum` (no-arg): contiguous-aware interior reduction (see `_interior_acc`).
+# `sum(f, ...)` and max/min keep the generic mapreduce path above.
+Base.sum(u::LocalHaloArray) = _interior_acc(identity, parent(u), interior_range(u))
+Base.sum(u::ThreadedHaloArray) = tile_mapreduce(thread_backend(u),
+    t -> _interior_acc(identity, tile_parent(u, t), interior_range(u, t)), +,
+    1:tile_count(u); scheduler=:static)
 
 # dot, norm, and the in-place BLAS-1 ops (rmul!/lmul!/axpy!/axpby!) — all built
 # on the mapreduce/broadcast above — live in vector_space.jl.

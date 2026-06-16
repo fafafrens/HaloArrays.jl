@@ -208,4 +208,26 @@ using LinearAlgebra: dot, norm
         @test alloc_per_call((a, b) -> reflect!(a, b, c, s), 8) ==
               alloc_per_call((a, b) -> reflect!(a, b, c, s), 800)
     end
+
+    @testset "contiguous-aware interior sum/dot/norm (SIMD over padded parent)" begin
+        # sum/dot/norm reduce over the raw `parent` (looping trailing cartesian
+        # indices, @simd on the contiguous leading dim) instead of the strided
+        # interior_view — ~5× faster. This guards the `p[i, J]` index logic across
+        # shapes/eltypes the 1-D Int tests above don't cover: non-square 2-D, 3-D,
+        # and complex (dot conjugates the first argument).
+        for (T, dims) in ((Float64, (31, 17)), (Float64, (8, 9, 10)),
+                          (Float64, (50,)), (ComplexF64, (16, 16)))
+            u = LocalHaloArray(T, dims, 1; boundary_condition=:periodic)
+            v = LocalHaloArray(T, dims, 1; boundary_condition=:periodic)
+            interior_view(u) .= rand(T, dims)
+            interior_view(v) .= rand(T, dims)
+            iu = vec(collect(interior_view(u)))
+            iv = vec(collect(interior_view(v)))
+            @test sum(u)    ≈ sum(iu)
+            @test dot(u, v) ≈ dot(iu, iv)          # conj(iu)·iv reference
+            @test norm(u)   ≈ norm(iu)
+            @test norm(u, 1)   ≈ norm(iu, 1)
+            @test norm(u, Inf) ≈ norm(iu, Inf)
+        end
+    end
 end

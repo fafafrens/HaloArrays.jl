@@ -32,6 +32,13 @@ function LinearAlgebra.norm(halo::AbstractSingleHaloArray, p::Real)
     p == Inf && return mapreduce(abs, max, halo)
     return mapreduce(x -> abs(x)^p, +, halo)^(1 / p)
 end
+# Fast 2-norm: contiguous-aware Σ|·|² over the parent (see `_interior_acc`) instead
+# of `mapreduce(abs2, +, strided interior_view)`. The general-p method above still
+# routes p == 2 here via `norm(halo)` (dynamic dispatch picks the concrete type).
+LinearAlgebra.norm(u::LocalHaloArray) = sqrt(_interior_acc(abs2, parent(u), interior_range(u)))
+LinearAlgebra.norm(u::ThreadedHaloArray) = sqrt(tile_mapreduce(thread_backend(u),
+    t -> _interior_acc(abs2, tile_parent(u, t), interior_range(u, t)), +,
+    1:tile_count(u); scheduler=:static))
 
 # Collections: combine the per-field norms (each field already does its own global
 # reduction — MPI Allreduce / tile combine). Forwarding per field avoids Base's
@@ -54,10 +61,11 @@ end
 # The interior dot is allocation-free (BLAS-backed for contiguous storage) and
 # globally correct (MPI Allreduce; per-tile / per-field combine).
 LinearAlgebra.dot(x::LocalHaloArray, y::LocalHaloArray) =
-    dot(interior_view(x), interior_view(y))
+    _interior_dot(parent(x), parent(y), interior_range(x))
 LinearAlgebra.dot(x::ThreadedHaloArray, y::ThreadedHaloArray) =
     tile_mapreduce(thread_backend(x),
-        t -> dot(interior_view(x, t), interior_view(y, t)), +, 1:tile_count(x); scheduler=:static)
+        t -> _interior_dot(tile_parent(x, t), tile_parent(y, t), interior_range(x, t)), +,
+        1:tile_count(x); scheduler=:static)
 LinearAlgebra.dot(x::AbstractHaloCollection, y::AbstractHaloCollection) =
     sum(fxy -> dot(fxy[1], fxy[2]), zip(eachfield(x), eachfield(y)))
 # MaybeHaloArray: forward to the inner array (its own dot/norm already do the right
