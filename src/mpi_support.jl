@@ -431,7 +431,7 @@ for (func, commutative) in [:mapreduce => true, :mapfoldl => false, :mapfoldr =>
             "which returns the reduced array on its sub-topology."))
         comm   = get_comm(halo)
         ups    = map(interior_view, (halo, etc...))
-        rlocal = $func(f, op, ups...; kws...)
+        rlocal = _reduce_views($func, f, op, ups; kws...)   # no O(N) materialization for 2+ inputs
         op_mpi = MPI.Op(op, typeof(rlocal); iscommutative=$commutative)
         MPI.Allreduce(rlocal, op_mpi, comm)
     end
@@ -450,6 +450,13 @@ end
 
 function Base.all(f::F, u::HaloArray) where {F<:Function}
     MPI.Allreduce(all(f, interior_view(u)) :: Bool, &, get_comm(u))
+end
+
+# Global inner product: this rank's interior dot, then Allreduce. Forwarding to
+# the interior dot avoids Base's materializing two-argument mapreduce (see
+# vector_space.jl); the dot stays in every Krylov inner loop, so this matters.
+function LinearAlgebra.dot(x::HaloArray, y::HaloArray)
+    return MPI.Allreduce(LinearAlgebra.dot(interior_view(x), interior_view(y)), +, get_comm(x))
 end
 
 """
