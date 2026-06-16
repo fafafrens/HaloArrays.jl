@@ -24,14 +24,13 @@ Base.:*(halo::AbstractSingleHaloArray, x::Number) = halo .* x
 Base.:*(x::Number, halo::AbstractSingleHaloArray) = x .* halo
 
 # ---- norm (global reduction) ------------------------------------------------
-function LinearAlgebra.norm(halo::AbstractSingleHaloArray, p::Real=2)
-    if p == 2
-        return sqrt(mapreduce(abs2, +, halo))
-    elseif p == Inf
-        return mapreduce(abs, max, halo)
-    else
-        return mapreduce(x -> abs(x)^p, +, halo)^(1/p)
-    end
+# The 2-norm (the Krylov hot path) is its own branch-free method; the general-`p`
+# method carries the `p == Inf` / else dispatch and reuses the 2-norm for p == 2.
+LinearAlgebra.norm(halo::AbstractSingleHaloArray) = sqrt(mapreduce(abs2, +, halo))
+function LinearAlgebra.norm(halo::AbstractSingleHaloArray, p::Real)
+    p == 2   && return norm(halo)
+    p == Inf && return mapreduce(abs, max, halo)
+    return mapreduce(x -> abs(x)^p, +, halo)^(1 / p)
 end
 
 # Collections: combine the per-field norms (each field already does its own global
@@ -40,14 +39,11 @@ end
 # interface and allocates O(N) every call (a hot-path leak in any Krylov solve on a
 # collection state). Mirrors the per-field `dot` below. ‖x‖₂ = √Σ_f ‖x_f‖²,
 # ‖x‖_∞ = maxₚ ‖x_f‖_∞, ‖x‖_p = (Σ_f ‖x_f‖_p^p)^{1/p}.
-function LinearAlgebra.norm(x::AbstractHaloCollection, p::Real=2)
-    if p == 2
-        return sqrt(sum(f -> norm(f, 2)^2, eachfield(x)))
-    elseif p == Inf
-        return maximum(f -> norm(f, Inf), eachfield(x))
-    else
-        return sum(f -> norm(f, p)^p, eachfield(x))^(1/p)
-    end
+LinearAlgebra.norm(x::AbstractHaloCollection) = sqrt(sum(f -> norm(f)^2, eachfield(x)))
+function LinearAlgebra.norm(x::AbstractHaloCollection, p::Real)
+    p == 2   && return norm(x)
+    p == Inf && return maximum(f -> norm(f, Inf), eachfield(x))
+    return sum(f -> norm(f, p)^p, eachfield(x))^(1 / p)
 end
 
 # ---- inner product (global reduction) ---------------------------------------
@@ -70,7 +66,9 @@ LinearAlgebra.dot(x::AbstractHaloCollection, y::AbstractHaloCollection) =
 # both O(N) per call (the same hot-path leak fixed for collections above).
 LinearAlgebra.dot(x::MaybeHaloArray, y::MaybeHaloArray) =
     isactive(x) ? LinearAlgebra.dot(getdata(x), getdata(y)) : zero(eltype(x))
-LinearAlgebra.norm(m::MaybeHaloArray, p::Real=2) =
+LinearAlgebra.norm(m::MaybeHaloArray) =
+    isactive(m) ? LinearAlgebra.norm(getdata(m)) : zero(real(eltype(m)))
+LinearAlgebra.norm(m::MaybeHaloArray, p::Real) =
     isactive(m) ? LinearAlgebra.norm(getdata(m), p) : zero(real(eltype(m)))
 # Fallback for any other halo-array type.
 LinearAlgebra.dot(x::AbstractHaloArray, y::AbstractHaloArray) = mapreduce(LinearAlgebra.dot, +, x, y)
