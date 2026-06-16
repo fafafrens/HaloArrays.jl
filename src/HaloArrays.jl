@@ -136,7 +136,11 @@ export halo_exchange!,
     get_send_view,
     get_recv_view,
     swap!,
-    HaloKrylov
+    HaloKrylov,
+    HaloCG,
+    HaloBiCGStab,
+    HaloMINRES,
+    HaloGMRES
 
 # Reductions and gather
 export mapreduce_haloarray_dims,

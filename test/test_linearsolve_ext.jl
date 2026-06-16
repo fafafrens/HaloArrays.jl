@@ -63,3 +63,78 @@ using LinearAlgebra
     @test_throws ArgumentError HaloKrylov(:fgmres)
     @test_throws ArgumentError HaloKrylov(:cg_lanczos)
 end
+
+# Matrix-free -∇² (SPD, homogeneous Dirichlet) on a 2-D halo array, as a
+# SciMLOperators.FunctionOperator (re-exported by LinearSolve — no extra dep).
+function _neg_laplacian!(y, x, _u, p, _t)
+    synchronize_halo!(x)
+    xd = parent(x); yd = parent(y)
+    ex = CartesianIndex(1, 0); ey = CartesianIndex(0, 1)
+    @inbounds for I in CartesianIndices(interior_range(x))
+        lap = (xd[I + ex] - 2xd[I] + xd[I - ex]) + (xd[I + ey] - 2xd[I] + xd[I - ey])
+        yd[I] = -lap * p.inv_h2
+    end
+    return y
+end
+
+@testset "Coordinate-free LinearSolve solvers on an N-D halo array" begin
+    # 2-D Dirichlet Poisson with a manufactured solution u = x(1-x)y(1-y).
+    n = 48; h = 1.0 / n; ctr(i) = (i - 0.5) * h
+    dir = ((Antireflecting(), Antireflecting()), (Antireflecting(), Antireflecting()))
+    uex = LocalHaloArray(Float64, (n, n), 1; boundary_condition = dir)
+    fill_from_global_indices!(uex) do I
+        cx, cy = ctr(I[1]), ctr(I[2]); cx * (1 - cx) * cy * (1 - cy)
+    end
+
+    @testset "$name" for (name, alg) in (
+            ("HaloCG", HaloCG()), ("HaloMINRES", HaloMINRES()),
+            ("HaloBiCGStab", HaloBiCGStab()), ("HaloGMRES", HaloGMRES(restart = 50)))
+        rhs = LocalHaloArray(Float64, (n, n), 1; boundary_condition = dir)
+        fill_from_global_indices!(rhs) do I
+            cx, cy = ctr(I[1]), ctr(I[2]); 2 * (cx * (1 - cx) + cy * (1 - cy))
+        end
+        L = FunctionOperator(_neg_laplacian!, similar(rhs), similar(rhs);
+            islinear = true, isconstant = true, issymmetric = true, isposdef = true,
+            p = (inv_h2 = 1.0 / h^2,))
+        sol = solve(LinearProblem(L, rhs; u0 = zero(rhs)), alg; reltol = 1e-10)
+        @test sol.retcode == ReturnCode.Success
+        # error is the O(h²) discretisation error, not the solver tolerance
+        @test maximum(abs, interior_view(sol.u) .- interior_view(uex)) < 1e-4
+    end
+end
+
+@testset "HaloGMRES robustness" begin
+    @test_throws ArgumentError HaloGMRES(restart = 0)
+    @test_throws ArgumentError HaloGMRES(restart = -3)
+
+    # Reach the internal solver to check the numerical edge cases directly.
+    ext = Base.get_extension(HaloArrays, :HaloArraysLinearSolveExt)
+    run_gmres(x, A, b; restart = length(b), maxiter = 10 * length(b)) =
+        ext._gmres!(x, A, b, ext._gmres_workspace(b; restart = restart);
+                    abstol = 0.0, reltol = 1e-10, maxiter = maxiter)
+
+    # Complex system: the Hessenberg/Givens stay in the complex field — A = i,
+    # b = 1 must give x = -i (a real-truncating GMRES would record H[1,1] = 0).
+    x1 = ComplexF64[0]; run_gmres(x1, fill(im, 1, 1), ComplexF64[1]; restart = 1)
+    @test x1[1] ≈ -im
+
+    # Happy breakdown: an exact 3-dimensional Krylov space converges (and stops)
+    # without using an un-formed basis vector.
+    A = Diagonal([1.0, 2, 3, 4, 5]); b = [1.0, 1, 1, 0, 0]
+    x = zeros(5); _, iters, _, conv = run_gmres(x, A, b; restart = 5, maxiter = 20)
+    @test conv && iters == 3 && x ≈ A \ b
+
+    # Iteration budget: maxiter = 1 must perform at most one Arnoldi step
+    # (not a full restart cycle of `restart` matvecs).
+    xb = zeros(8); _, itb, _, _ = run_gmres(xb, randn(8, 8) + 8I, randn(8); restart = 30, maxiter = 1)
+    @test itb ≤ 1
+end
+
+@testset "HaloMINRES on a symmetric indefinite system" begin
+    ext = Base.get_extension(HaloArrays, :HaloArraysLinearSolveExt)
+    n = 40; S = randn(n, n); A = Symmetric(S + S')   # eigenvalues straddle 0 → CG breaks down
+    b = randn(n); x = zeros(n)
+    _, _, _, conv = ext._minres!(x, A, b, ext._minres_workspace(b);
+                                 abstol = 0.0, reltol = 1e-10, maxiter = 5n)
+    @test conv && x ≈ A \ b
+end

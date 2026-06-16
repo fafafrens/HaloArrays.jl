@@ -31,13 +31,6 @@ const DX2INV = inv((1.0 / GNX)^2)
 
 ic(x) = 0.1 + 0.8 * exp(-50 * (x - 0.5)^2)
 
-function krylov_gmres_bridge(A, b, u, p, isfresh, Pl, Pr, cacheval; kwargs...)
-    ws = krylov_workspace(Val(:gmres), KrylovConstructor(b))
-    gmres!(ws, A, b)
-    copyto!(u, Krylov.solution(ws))
-    return u
-end
-
 # Identical to the serial example's RHS — `tile_count` is 1 for a distributed
 # HaloArray (this rank's local block), so the same per-tile loop applies.
 function rhs!(du, u, p, t)
@@ -51,7 +44,7 @@ function rhs!(du, u, p, t)
     return nothing
 end
 
-const ALG = FBDF(linsolve = LinearSolveFunction(krylov_gmres_bridge), concrete_jac = false)
+const ALG = FBDF(linsolve = HaloKrylov(:gmres), concrete_jac = false)
 
 function run_mpi()
     NR == 1 || @assert GNX % NR == 0 "global grid ($GNX) must divide the rank count ($NR)"
