@@ -139,6 +139,7 @@ export halo_exchange!,
     HaloKrylov,
     HaloCG,
     HaloBiCGStab,
+    HaloMINRES,
     HaloGMRES
 
 # Reductions and gather

@@ -47,6 +47,7 @@ function HaloKrylov end
 """
     HaloCG()
     HaloBiCGStab()
+    HaloMINRES()
     HaloGMRES(; restart = 30)
 
 LinearSolve algorithms for solving a linear system with a **halo array of any
@@ -64,7 +65,9 @@ unknown only through `similar`/`copy`/broadcast/`dot`/`norm`/`mul!`, so they run
 on a 2-D or 3-D halo array, and stay correct under MPI (`dot`/`norm` are global
 reductions). The Krylov workspace is built once and cached by LinearSolve.
 
-- `HaloCG` — Conjugate Gradient, for symmetric positive-definite `A`.
+- `HaloCG` — Conjugate Gradient, for symmetric/Hermitian positive-definite `A`.
+- `HaloMINRES` — MINRES, for symmetric/Hermitian `A` (including **indefinite**,
+  where `HaloCG` would break down).
 - `HaloBiCGStab` — BiCGStab, for general square `A`.
 - `HaloGMRES` — restarted GMRES (`restart` basis vectors), for general square `A`.
 
@@ -77,6 +80,8 @@ default initial guess flattens `b` to a 1-D vector, which a halo array can't be.
 """
 function HaloCG end
 function HaloBiCGStab end
+function HaloMINRES end
 function HaloGMRES end
 @doc (@doc HaloCG) HaloBiCGStab
+@doc (@doc HaloCG) HaloMINRES
 @doc (@doc HaloCG) HaloGMRES

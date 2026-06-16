@@ -217,17 +217,67 @@ function _gmres!(x, A, b, work::GMRESWorkspace; abstol, reltol, maxiter)
     return x, total, res, res ≤ thr
 end
 
+# ---- MINRES — symmetric / Hermitian (in)definite (Paige–Saunders) ----
+# The Lanczos tridiagonal is real symmetric even for a Hermitian operator, so all
+# scalars stay real; only the basis/solution vectors carry the element type.
+struct MINRESWorkspace{T}
+    v::T; y::T; r1::T; r2::T; w::T; w1::T; w2::T
+end
+_minres_workspace(b) =
+    MINRESWorkspace(similar(b), similar(b), similar(b), similar(b), similar(b), similar(b), similar(b))
+
+function _minres!(x, A, b, work::MINRESWorkspace; abstol, reltol, maxiter)
+    v, y, r1, r2, w, w1, w2 = work.v, work.y, work.r1, work.r2, work.w, work.w1, work.w2
+    T = real(float(eltype(b)))
+    mul!(y, A, x); r1 .= b .- y                 # r0 = b - A*x0
+    β = norm(r1)
+    thr = _threshold(b, abstol, reltol)
+    res = β
+    β ≤ thr && return x, 0, res, true
+    copyto!(y, r1); copyto!(r2, r1)
+    fill!(w, 0); fill!(w1, 0); fill!(w2, 0)
+    oldb = zero(T); dbar = zero(T); epsln = zero(T); phibar = β
+    cs = -one(T); sn = zero(T)
+    iters = 0
+    for k in 1:maxiter
+        iters = k
+        v .= y .* inv(β)                         # vₖ = yₖ / βₖ
+        mul!(y, A, v)
+        k ≥ 2 && (y .-= (β / oldb) .* r1)
+        α = real(dot(v, y))                      # real for a Hermitian operator
+        y .-= (α / β) .* r2
+        copyto!(r1, r2); copyto!(r2, y)
+        oldb = β; β = norm(r2)
+        oldeps = epsln                           # apply previous rotation to the tridiagonal
+        δ    = cs * dbar + sn * α
+        gbar = sn * dbar - cs * α
+        epsln = sn * β
+        dbar  = -cs * β
+        γ = max(hypot(gbar, β), eps(T))          # next plane rotation
+        cs = gbar / γ; sn = β / γ
+        φ = cs * phibar; phibar = sn * phibar
+        copyto!(w1, w2); copyto!(w2, w)          # solution direction + update
+        w .= (v .- oldeps .* w1 .- δ .* w2) .* inv(γ)
+        x .+= φ .* w
+        res = phibar
+        res ≤ thr && return x, iters, res, true
+    end
+    return x, iters, res, res ≤ thr
+end
+
 # ---- LinearSolve algorithm wiring ------------------------------------------
 # The exported entry points `HaloCG`/`HaloBiCGStab`/`HaloGMRES` (declared in the
 # core package) return these algorithm singletons.
 struct HaloCGAlg       <: LinearSolve.AbstractKrylovSubspaceMethod end
 struct HaloBiCGStabAlg <: LinearSolve.AbstractKrylovSubspaceMethod end
+struct HaloMINRESAlg   <: LinearSolve.AbstractKrylovSubspaceMethod end
 struct HaloGMRESAlg    <: LinearSolve.AbstractKrylovSubspaceMethod
     restart::Int
 end
 
 HaloArrays.HaloCG()       = HaloCGAlg()
 HaloArrays.HaloBiCGStab() = HaloBiCGStabAlg()
+HaloArrays.HaloMINRES()   = HaloMINRESAlg()
 function HaloArrays.HaloGMRES(; restart = 30)
     restart ≥ 1 || throw(ArgumentError("HaloGMRES: `restart` must be ≥ 1, got $restart"))
     return HaloGMRESAlg(restart)
@@ -237,6 +287,8 @@ LinearSolve.init_cacheval(::HaloCGAlg, A, b, u, Pl, Pr, maxiters, abstol, reltol
     _cg_workspace(b)
 LinearSolve.init_cacheval(::HaloBiCGStabAlg, A, b, u, Pl, Pr, maxiters, abstol, reltol, verbose, assump) =
     _bicgstab_workspace(b)
+LinearSolve.init_cacheval(::HaloMINRESAlg, A, b, u, Pl, Pr, maxiters, abstol, reltol, verbose, assump) =
+    _minres_workspace(b)
 LinearSolve.init_cacheval(alg::HaloGMRESAlg, A, b, u, Pl, Pr, maxiters, abstol, reltol, verbose, assump) =
     _gmres_workspace(b; restart = alg.restart)
 
@@ -244,6 +296,12 @@ _retcode(converged) = converged ? SciMLBase.ReturnCode.Success : SciMLBase.Retur
 
 function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::HaloCGAlg; kwargs...)
     x, iters, _res, conv = _cg!(cache.u, cache.A, cache.b, cache.cacheval;
+        abstol = cache.abstol, reltol = cache.reltol, maxiter = cache.maxiters)
+    return SciMLBase.build_linear_solution(alg, x, nothing, cache; retcode = _retcode(conv), iters = iters)
+end
+
+function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::HaloMINRESAlg; kwargs...)
+    x, iters, _res, conv = _minres!(cache.u, cache.A, cache.b, cache.cacheval;
         abstol = cache.abstol, reltol = cache.reltol, maxiter = cache.maxiters)
     return SciMLBase.build_linear_solution(alg, x, nothing, cache; retcode = _retcode(conv), iters = iters)
 end

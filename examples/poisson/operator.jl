@@ -133,6 +133,7 @@ println("=" ^ 66)
 let n = 64
     L, rhs, uex, _ = setup(n)
     for (name, alg) in (("HaloCG", HaloCG()),
+                        ("HaloMINRES", HaloMINRES()),
                         ("HaloBiCGStab", HaloBiCGStab()),
                         ("HaloGMRES(50)", HaloGMRES(restart = 50)))
         sol = solve(LinearProblem(L, rhs; u0 = zero(rhs)), alg; reltol = 1e-10)

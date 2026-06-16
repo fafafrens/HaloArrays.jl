@@ -87,7 +87,8 @@ end
     end
 
     @testset "$name" for (name, alg) in (
-            ("HaloCG", HaloCG()), ("HaloBiCGStab", HaloBiCGStab()), ("HaloGMRES", HaloGMRES(restart = 50)))
+            ("HaloCG", HaloCG()), ("HaloMINRES", HaloMINRES()),
+            ("HaloBiCGStab", HaloBiCGStab()), ("HaloGMRES", HaloGMRES(restart = 50)))
         rhs = LocalHaloArray(Float64, (n, n), 1; boundary_condition = dir)
         fill_from_global_indices!(rhs) do I
             cx, cy = ctr(I[1]), ctr(I[2]); 2 * (cx * (1 - cx) + cy * (1 - cy))
@@ -127,4 +128,13 @@ end
     # (not a full restart cycle of `restart` matvecs).
     xb = zeros(8); _, itb, _, _ = run_gmres(xb, randn(8, 8) + 8I, randn(8); restart = 30, maxiter = 1)
     @test itb ≤ 1
+end
+
+@testset "HaloMINRES on a symmetric indefinite system" begin
+    ext = Base.get_extension(HaloArrays, :HaloArraysLinearSolveExt)
+    n = 40; S = randn(n, n); A = Symmetric(S + S')   # eigenvalues straddle 0 → CG breaks down
+    b = randn(n); x = zeros(n)
+    _, _, _, conv = ext._minres!(x, A, b, ext._minres_workspace(b);
+                                 abstol = 0.0, reltol = 1e-10, maxiter = 5n)
+    @test conv && x ≈ A \ b
 end
