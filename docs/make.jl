@@ -14,6 +14,7 @@ makedocs(
     pages = [
         "Home" => "index.md",
         "Guide" => "guide.md",
+        "Linear & implicit solves" => "solvers.md",
         "Examples" => "examples.md",
         "API" => [
             "Essentials" => "api/essentials.md",

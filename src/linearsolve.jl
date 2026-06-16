@@ -43,3 +43,40 @@ to `KrylovJL` / the Krylov solver (e.g. `atol`, `rtol`, `itmax`, `gmres_restart`
     `axpy!`, …), which also make it correct and collective under MPI.
 """
 function HaloKrylov end
+
+"""
+    HaloCG()
+    HaloBiCGStab()
+    HaloGMRES(; restart = 30)
+
+LinearSolve algorithms for solving a linear system with a **halo array of any
+dimensionality** as the unknown — matrix-free, no marshalling to a flat vector.
+Pass as the `linsolve` of a `LinearProblem` or an implicit SciML integrator:
+
+```julia
+using HaloArrays, LinearSolve
+sol = solve(LinearProblem(A, b; u0 = zero(b)), HaloCG())   # b an N-D halo array
+```
+
+Unlike [`HaloKrylov`](@ref)/`KrylovJL_*` (which require a 1-D `b::AbstractVector`
+and so only handle 1-D states), these are **coordinate-free**: they touch the
+unknown only through `similar`/`copy`/broadcast/`dot`/`norm`/`mul!`, so they run
+on a 2-D or 3-D halo array, and stay correct under MPI (`dot`/`norm` are global
+reductions). The Krylov workspace is built once and cached by LinearSolve.
+
+- `HaloCG` — Conjugate Gradient, for symmetric positive-definite `A`.
+- `HaloBiCGStab` — BiCGStab, for general square `A`.
+- `HaloGMRES` — restarted GMRES (`restart` basis vectors), for general square `A`.
+
+For a `LinearProblem`, pass `u0` explicitly (e.g. `zero(b)`) — LinearSolve's
+default initial guess flattens `b` to a 1-D vector, which a halo array can't be.
+
+!!! note
+    Defined only when both `LinearSolve` and `Krylov` are loaded (a package
+    extension); without them this throws a `MethodError`.
+"""
+function HaloCG end
+function HaloBiCGStab end
+function HaloGMRES end
+@doc (@doc HaloCG) HaloBiCGStab
+@doc (@doc HaloCG) HaloGMRES

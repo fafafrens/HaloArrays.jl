@@ -63,3 +63,41 @@ using LinearAlgebra
     @test_throws ArgumentError HaloKrylov(:fgmres)
     @test_throws ArgumentError HaloKrylov(:cg_lanczos)
 end
+
+# Matrix-free -∇² (SPD, homogeneous Dirichlet) on a 2-D halo array, as a
+# SciMLOperators.FunctionOperator (re-exported by LinearSolve — no extra dep).
+function _neg_laplacian!(y, x, _u, p, _t)
+    synchronize_halo!(x)
+    xd = parent(x); yd = parent(y)
+    ex = CartesianIndex(1, 0); ey = CartesianIndex(0, 1)
+    @inbounds for I in CartesianIndices(interior_range(x))
+        lap = (xd[I + ex] - 2xd[I] + xd[I - ex]) + (xd[I + ey] - 2xd[I] + xd[I - ey])
+        yd[I] = -lap * p.inv_h2
+    end
+    return y
+end
+
+@testset "Coordinate-free LinearSolve solvers on an N-D halo array" begin
+    # 2-D Dirichlet Poisson with a manufactured solution u = x(1-x)y(1-y).
+    n = 48; h = 1.0 / n; ctr(i) = (i - 0.5) * h
+    dir = ((Antireflecting(), Antireflecting()), (Antireflecting(), Antireflecting()))
+    uex = LocalHaloArray(Float64, (n, n), 1; boundary_condition = dir)
+    fill_from_global_indices!(uex) do I
+        cx, cy = ctr(I[1]), ctr(I[2]); cx * (1 - cx) * cy * (1 - cy)
+    end
+
+    @testset "$name" for (name, alg) in (
+            ("HaloCG", HaloCG()), ("HaloBiCGStab", HaloBiCGStab()), ("HaloGMRES", HaloGMRES(restart = 50)))
+        rhs = LocalHaloArray(Float64, (n, n), 1; boundary_condition = dir)
+        fill_from_global_indices!(rhs) do I
+            cx, cy = ctr(I[1]), ctr(I[2]); 2 * (cx * (1 - cx) + cy * (1 - cy))
+        end
+        L = FunctionOperator(_neg_laplacian!, similar(rhs), similar(rhs);
+            islinear = true, isconstant = true, issymmetric = true, isposdef = true,
+            p = (inv_h2 = 1.0 / h^2,))
+        sol = solve(LinearProblem(L, rhs; u0 = zero(rhs)), alg; reltol = 1e-10)
+        @test sol.retcode == ReturnCode.Success
+        # error is the O(h²) discretisation error, not the solver tolerance
+        @test maximum(abs, interior_view(sol.u) .- interior_view(uex)) < 1e-4
+    end
+end

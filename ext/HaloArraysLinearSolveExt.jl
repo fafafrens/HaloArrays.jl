@@ -3,11 +3,21 @@ module HaloArraysLinearSolveExt
 using HaloArrays
 using LinearSolve
 using Krylov
+using LinearAlgebra: dot, norm, mul!
 
-# Krylov methods usable on a halo array: LinearSolve's KrylovJL machinery wraps
-# them, and they allocate all their work vectors up front (so they never hit the
-# `S(undef, n)` path mid-solve — see the docstring). The user-facing symbol maps
-# to Krylov's in-place solver `Krylov.<method>!`.
+const SciMLBase = LinearSolve.SciMLBase
+
+# ============================================================
+# Path 1 — KrylovJL on a *1-D* halo array (Krylov.jl, mature, cached)
+#
+# `HaloKrylov(:method)` is a thin KrylovJL alias; the init_cacheval override
+# below builds Krylov's workspace via KrylovConstructor (similar-based) instead
+# of `S(undef, n)`, so the stock `KrylovJL_*` work on a halo array too — and are
+# cached by LinearSolve's solve!. Krylov.jl requires `b::AbstractVector`, so this
+# path only applies to 1-D halo-array states (an N-D halo array is not a vector).
+# For N-D states use the coordinate-free solvers in Path 2.
+# ============================================================
+
 const _HALOKRYLOV_METHODS = (:gmres, :cg, :bicgstab, :minres, :dqgmres, :diom,
                              :fom, :cgs, :minares, :minres_qlp, :symmlq)
 
@@ -20,14 +30,6 @@ function HaloArrays.HaloKrylov(method::Symbol; kwargs...)
     return KrylovJL(; KrylovAlg = getproperty(Krylov, Symbol(method, :!)), kwargs...)
 end
 
-# Teach LinearSolve's KrylovJL to build its Krylov workspace via `KrylovConstructor`
-# (i.e. `similar(b)`) when the solver vector is a halo array. The stock path
-# allocates work vectors with `S(undef, n)`, which a geometry-carrying halo array
-# has no constructor for; KrylovConstructor sidesteps that. This mirrors
-# LinearSolve's own generic `init_cacheval` (and its `ArrayPartition`
-# specialization), swapping `KS(A, b)` → `KS(KrylovConstructor(b))`. LinearSolve's
-# `solve!` stores the returned workspace in `cache.cacheval`, so it is built once
-# and reused across solves — no per-solve workspace allocation.
 function LinearSolve.init_cacheval(alg::KrylovJL, A, b::AbstractHaloArray, u, Pl, Pr,
         maxiters::Int, abstol, reltol, verbose::Union{LinearSolve.LinearVerbosity, Bool},
         assumptions::LinearSolve.OperatorAssumptions; zeroinit = true)
@@ -52,6 +54,205 @@ function LinearSolve.init_cacheval(alg::KrylovJL, A, b::AbstractHaloArray, u, Pl
     end
     solver.x = u
     return solver
+end
+
+# ============================================================
+# Path 2 — coordinate-free solvers for *N-D* halo arrays
+#
+# Krylov.jl / SimpleGMRES model the unknown as a flat `AbstractVector`, so they
+# can't take an N-D halo array. These solvers (standard algorithms, Saad)
+# touch the unknown only through similar/copy/broadcast/dot/norm/mul!, so they
+# run on a halo array of any dimensionality — and stay MPI-collective, since
+# HaloArrays defines dot/norm as global reductions. Each is wrapped as a
+# LinearSolve algorithm: the workspace is built once in `init_cacheval` (cached
+# in `cache.cacheval`) and reused by `solve!`, which reports a proper retcode.
+# ============================================================
+
+@inline _threshold(b, abstol, reltol) =
+    max(abstol, reltol * max(norm(b), eps(float(real(eltype(b))))))
+
+# ---- Conjugate Gradient — symmetric positive-definite ----
+struct CGWorkspace{T}
+    Ap::T
+    r::T
+    p::T
+end
+_cg_workspace(b) = CGWorkspace(similar(b), similar(b), similar(b))
+
+function _cg!(x, A, b, w::CGWorkspace; abstol, reltol, maxiter)
+    Ap, r, p = w.Ap, w.r, w.p
+    mul!(Ap, A, x); copyto!(r, b); r .-= Ap        # r = b - A*x
+    copyto!(p, r)
+    rsold = real(dot(r, r))
+    thr = _threshold(b, abstol, reltol)
+    res = sqrt(rsold)
+    res ≤ thr && return x, 0, res, true
+    iters = 0
+    for k in 1:maxiter
+        iters = k
+        mul!(Ap, A, p)
+        α = rsold / real(dot(p, Ap))
+        x .+= α .* p
+        r .-= α .* Ap
+        rsnew = real(dot(r, r))
+        res = sqrt(rsnew)
+        res ≤ thr && return x, iters, res, true
+        p .= r .+ (rsnew / rsold) .* p
+        rsold = rsnew
+    end
+    return x, iters, res, res ≤ thr
+end
+
+# ---- BiCGStab — general square systems (short recurrence) ----
+struct BiCGStabWorkspace{T}
+    r::T; tmp::T; rhat::T; p::T; v::T; s::T; t::T
+end
+_bicgstab_workspace(b) =
+    BiCGStabWorkspace(similar(b), similar(b), similar(b), similar(b), similar(b), similar(b), similar(b))
+
+function _bicgstab!(x, A, b, w::BiCGStabWorkspace; abstol, reltol, maxiter)
+    r, tmp, rhat, p, v, s, t = w.r, w.tmp, w.rhat, w.p, w.v, w.s, w.t
+    copyto!(r, b); mul!(tmp, A, x); r .-= tmp       # r = b - A*x
+    copyto!(rhat, r)
+    fill!(p, 0); fill!(v, 0)
+    Tr = real(eltype(b))
+    ρ_old = α = ω = one(Tr)
+    thr = _threshold(b, abstol, reltol)
+    res = norm(r)
+    res ≤ thr && return x, 0, res, true
+    iters = 0
+    for k in 1:maxiter
+        iters = k
+        ρ = dot(rhat, r)
+        β = (ρ / ρ_old) * (α / ω)
+        p .-= ω .* v; p .*= β; p .+= r              # p = r + β(p - ω v)
+        mul!(v, A, p)
+        α = ρ / dot(rhat, v)
+        s .= r .- α .* v
+        res = norm(s)
+        if res ≤ thr
+            x .+= α .* p
+            return x, iters, res, true
+        end
+        mul!(t, A, s)
+        ω = dot(t, s) / dot(t, t)
+        x .+= α .* p; x .+= ω .* s
+        r .= s .- ω .* t
+        res = norm(r)
+        res ≤ thr && return x, iters, res, true
+        ρ_old = ρ
+    end
+    return x, iters, res, res ≤ thr
+end
+
+# ---- GMRES with restart — general square systems ----
+struct GMRESWorkspace{TV,TH,TG,TC,TW}
+    V::TV; H::TH; g::TG; cs::TC; sn::TG; w::TW; Ax::TW
+end
+function _gmres_workspace(b; restart)
+    T = float(real(eltype(b))); m = restart
+    GMRESWorkspace([similar(b) for _ in 1:m+1], zeros(T, m + 1, m), zeros(T, m + 1),
+                   zeros(T, m), zeros(T, m), similar(b), similar(b))
+end
+
+@inline function _givens(a, b)
+    b == 0 && return (one(a), zero(a))
+    if abs(b) > abs(a)
+        τ = a / b; s = inv(sqrt(1 + τ^2)); return (s * τ, s)
+    else
+        τ = b / a; c = inv(sqrt(1 + τ^2)); return (c, c * τ)
+    end
+end
+
+function _gmres!(x, A, b, work::GMRESWorkspace; abstol, reltol, maxiter)
+    V, H, g, cs, sn, w, Ax = work.V, work.H, work.g, work.cs, work.sn, work.w, work.Ax
+    T = float(real(eltype(b))); m = length(cs)
+    thr = _threshold(b, abstol, reltol)
+    res = norm(b); total = 0
+    for _cycle in 1:cld(maxiter, m)
+        mul!(Ax, A, x)
+        r = V[1]; copyto!(r, b); r .-= Ax           # residual in V[1]
+        β = norm(r); res = β
+        res ≤ thr && break
+        V[1] .*= inv(β)
+        fill!(g, 0); g[1] = β
+        k = 0
+        for j in 1:m
+            k = j; total += 1
+            mul!(w, A, V[j])
+            for i in 1:j                            # modified Gram-Schmidt
+                H[i, j] = real(dot(V[i], w))
+                w .-= H[i, j] .* V[i]
+            end
+            H[j+1, j] = norm(w)
+            H[j+1, j] > eps(T) && (V[j+1] .= w .* inv(H[j+1, j]))
+            for i in 1:j-1                          # apply previous Givens rotations
+                τ         =  cs[i] * H[i, j] + sn[i] * H[i+1, j]
+                H[i+1, j] = -sn[i] * H[i, j] + cs[i] * H[i+1, j]
+                H[i, j]   = τ
+            end
+            cs[j], sn[j] = _givens(H[j, j], H[j+1, j])
+            H[j, j]   = cs[j] * H[j, j] + sn[j] * H[j+1, j]
+            H[j+1, j] = 0
+            g[j+1] = -sn[j] * g[j]
+            g[j]   =  cs[j] * g[j]
+            res = abs(g[j+1])
+            res ≤ thr && break
+        end
+        y = zeros(T, k)                             # back-substitution H[1:k,1:k] y = g[1:k]
+        for i in k:-1:1
+            acc = g[i]
+            for l in i+1:k
+                acc -= H[i, l] * y[l]
+            end
+            y[i] = acc / H[i, i]
+        end
+        for i in 1:k
+            x .+= y[i] .* V[i]
+        end
+        res ≤ thr && break
+    end
+    return x, total, res, res ≤ thr
+end
+
+# ---- LinearSolve algorithm wiring ------------------------------------------
+# The exported entry points `HaloCG`/`HaloBiCGStab`/`HaloGMRES` (declared in the
+# core package) return these algorithm singletons.
+struct HaloCGAlg       <: LinearSolve.AbstractKrylovSubspaceMethod end
+struct HaloBiCGStabAlg <: LinearSolve.AbstractKrylovSubspaceMethod end
+struct HaloGMRESAlg    <: LinearSolve.AbstractKrylovSubspaceMethod
+    restart::Int
+end
+
+HaloArrays.HaloCG()              = HaloCGAlg()
+HaloArrays.HaloBiCGStab()        = HaloBiCGStabAlg()
+HaloArrays.HaloGMRES(; restart=30) = HaloGMRESAlg(restart)
+
+LinearSolve.init_cacheval(::HaloCGAlg, A, b, u, Pl, Pr, maxiters, abstol, reltol, verbose, assump) =
+    _cg_workspace(b)
+LinearSolve.init_cacheval(::HaloBiCGStabAlg, A, b, u, Pl, Pr, maxiters, abstol, reltol, verbose, assump) =
+    _bicgstab_workspace(b)
+LinearSolve.init_cacheval(alg::HaloGMRESAlg, A, b, u, Pl, Pr, maxiters, abstol, reltol, verbose, assump) =
+    _gmres_workspace(b; restart = alg.restart)
+
+_retcode(converged) = converged ? SciMLBase.ReturnCode.Success : SciMLBase.ReturnCode.MaxIters
+
+function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::HaloCGAlg; kwargs...)
+    x, iters, _res, conv = _cg!(cache.u, cache.A, cache.b, cache.cacheval;
+        abstol = cache.abstol, reltol = cache.reltol, maxiter = cache.maxiters)
+    return SciMLBase.build_linear_solution(alg, x, nothing, cache; retcode = _retcode(conv), iters = iters)
+end
+
+function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::HaloBiCGStabAlg; kwargs...)
+    x, iters, _res, conv = _bicgstab!(cache.u, cache.A, cache.b, cache.cacheval;
+        abstol = cache.abstol, reltol = cache.reltol, maxiter = cache.maxiters)
+    return SciMLBase.build_linear_solution(alg, x, nothing, cache; retcode = _retcode(conv), iters = iters)
+end
+
+function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::HaloGMRESAlg; kwargs...)
+    x, iters, _res, conv = _gmres!(cache.u, cache.A, cache.b, cache.cacheval;
+        abstol = cache.abstol, reltol = cache.reltol, maxiter = cache.maxiters)
+    return SciMLBase.build_linear_solution(alg, x, nothing, cache; retcode = _retcode(conv), iters = iters)
 end
 
 end # module

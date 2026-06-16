@@ -34,9 +34,10 @@
 using HaloArrays
 using SciMLOperators
 using LinearAlgebra: mul!
+using LinearSolve
 using Printf
 
-include("krylov_solvers.jl")        # cg!, bicgstab!, gmres!
+include("krylov_solvers.jl")        # cg!, bicgstab!, gmres! (hand-rolled, for §3–4)
 
 # ------------------------------------------------------------
 # 1. The operator: -∇² applied to a HaloArray
@@ -111,6 +112,32 @@ let n = 64
         err = maximum(abs, interior_view(u) .- interior_view(uex))
         @printf("  %-10s iters=%-4d  residual=%.2e  max|u-u_exact|=%.3e\n",
             name, iters, res, err)
+    end
+end
+
+# ------------------------------------------------------------
+# 5. The same operator through LinearSolve.jl — using the coordinate-free
+#    solvers HaloArrays ships (HaloCG / HaloBiCGStab / HaloGMRES).
+#
+# These work because the unknown is a *2-D* halo array: LinearSolve's KrylovJL_*
+# (and SimpleGMRES) model the unknown as a flat `AbstractVector`, which a
+# geometry-carrying N-D halo array is not. HaloCG/HaloBiCGStab/HaloGMRES are
+# coordinate-free (mul!/dot/norm/broadcast only), so they take the halo array
+# directly — and stay correct under MPI. Pass `u0` explicitly: LinearSolve's
+# default initial guess flattens `b`, which a halo array can't be.
+# ------------------------------------------------------------
+println()
+println("=" ^ 66)
+println("Same n=64 problem through LinearSolve (coordinate-free, N-D)")
+println("=" ^ 66)
+let n = 64
+    L, rhs, uex, _ = setup(n)
+    for (name, alg) in (("HaloCG", HaloCG()),
+                        ("HaloBiCGStab", HaloBiCGStab()),
+                        ("HaloGMRES(50)", HaloGMRES(restart = 50)))
+        sol = solve(LinearProblem(L, rhs; u0 = zero(rhs)), alg; reltol = 1e-10)
+        err = maximum(abs, interior_view(sol.u) .- interior_view(uex))
+        @printf("  %-14s retcode=%-8s  max|u-u_exact|=%.3e\n", name, sol.retcode, err)
     end
 end
 

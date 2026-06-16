@@ -8,15 +8,18 @@
 #   • The HaloArray is the SciML state directly (no marshalling to a Vector).
 #   • Implicit FBDF + `concrete_jac = false` ⇒ no dense Jacobian; the Newton/W
 #     system is solved by GMRES using only matrix-vector products.
-#   • The linear solver is Krylov.jl wired in through `KrylovConstructor`
-#     (allocates work vectors with `similar`). LinearSolve's `KrylovJL_*`
-#     wrappers do NOT work here — they allocate via `S(undef, n)`, which a
-#     geometry-carrying HaloArray has no constructor for.
+#   • The linear solver is `HaloKrylov(:gmres)` from HaloArrays' LinearSolve/Krylov
+#     extension — a `KrylovJL` whose workspace is built with `similar` (via
+#     `KrylovConstructor`), so the HaloArray can be the solver vector. (The stock
+#     `KrylovJL_*` allocate via `S(undef, n)`, which a geometry-carrying HaloArray
+#     has no constructor for; the extension fixes that.) The state here is 1-D —
+#     `HaloKrylov` needs that, since Krylov.jl requires `b::AbstractVector`. For
+#     a 2-D/3-D state use the coordinate-free `HaloCG`/`HaloGMRES`/`HaloBiCGStab`.
 #
 # Only the state *constructor* changes between backends — the RHS is
 # backend-agnostic (it loops over storage tiles: one for Local/MPI, many for
-# Threaded), and the solver, bridge, and physics are identical. This file runs
-# the Local and Threaded backends; the distributed (MPI) version is the companion
+# Threaded), and the solver and physics are identical. This file runs the Local
+# and Threaded backends; the distributed (MPI) version is the companion
 # `stiff_reaction_diffusion_implicit_mpi_1d.jl`.
 
 using HaloArrays
@@ -30,15 +33,6 @@ const R = 8.0
 const E1 = CartesianIndex(1)
 
 ic(x) = 0.1 + 0.8 * exp(-50 * (x - 0.5)^2)          # a localized bump
-
-# Matrix-free GMRES via Krylov.jl's KrylovConstructor (similar-based workspace),
-# so the HaloArray can be the solver vector. Plug as `linsolve = LinearSolveFunction(...)`.
-function krylov_gmres_bridge(A, b, u, p, isfresh, Pl, Pr, cacheval; kwargs...)
-    ws = krylov_workspace(Val(:gmres), KrylovConstructor(b))
-    gmres!(ws, A, b)
-    copyto!(u, Krylov.solution(ws))
-    return u
-end
 
 # Backend-agnostic RHS. Loop over the storage tiles — `tile_count` is 1 for a
 # LocalHaloArray or a distributed HaloArray (its sole tile is the whole padded
@@ -62,7 +56,10 @@ end
 # interior-only and works on any halo-array backend.
 function solve_stiff(u0, f!; nx, tend = 0.3, label)
     prob = ODEProblem(f!, u0, (0.0, tend), inv((1.0 / nx)^2))
-    alg = FBDF(linsolve = LinearSolveFunction(krylov_gmres_bridge), concrete_jac = false)
+    # `HaloKrylov(:gmres)` (the LinearSolve/Krylov extension) runs GMRES with the
+    # HaloArray itself as the solver vector — matrix-free, cached. `concrete_jac =
+    # false` keeps the Newton/W system matrix-free (Jacobian-vector products).
+    alg = FBDF(linsolve = HaloKrylov(:gmres), concrete_jac = false)
     sol = solve(prob, alg; reltol = 1e-7, abstol = 1e-7, save_everystep = false)
     ref = solve(prob, Tsit5(); reltol = 1e-10, abstol = 1e-10, save_everystep = false)
     err = maximum(abs, sol.u[end] - ref.u[end])
