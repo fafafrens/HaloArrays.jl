@@ -160,6 +160,20 @@ using LinearAlgebra: dot, norm
         @test collect(interior_view(x)) == [10.0, 20, 30, 40]
         @test collect(interior_view(y)) == [1.0, 2, 3, 4]
 
+        # MaybeHaloArray: BLAS-1 forwards to the inner array (completes the surface
+        # alongside dot/norm/axpy!). The wrappers alias the inner arrays, so the
+        # mutation is observable through them.
+        ax = mk([1.0, 2, 3, 4]); ay = mk([10.0, 20, 30, 40])
+        swap!(MaybeHaloArray(ax), MaybeHaloArray(ay))
+        @test collect(interior_view(ax)) == [10.0, 20, 30, 40]
+        @test collect(interior_view(ay)) == [1.0, 2, 3, 4]
+        bx = mk([1.0, 2, 3, 4]); by = mk([10.0, 20, 30, 40])
+        rotate!(MaybeHaloArray(bx), MaybeHaloArray(by), 0.6, 0.8)
+        @test collect(interior_view(bx)) ≈ 0.6 .* [1.0, 2, 3, 4] .+ 0.8 .* [10.0, 20, 30, 40]
+        cx = mk([1.0, 2, 3, 4]); cy = mk([10.0, 20, 30, 40])
+        reflect!(MaybeHaloArray(cx), MaybeHaloArray(cy), 0.6, 0.8)
+        @test collect(interior_view(cx)) ≈ 0.6 .* [1.0, 2, 3, 4] .+ 0.8 .* [10.0, 20, 30, 40]
+
         # rotate! / reflect! vs the LinearAlgebra reference on plain vectors
         c, s = 0.6, 0.8                                   # c^2 + s^2 = 1
         for op in (rotate!, reflect!)
