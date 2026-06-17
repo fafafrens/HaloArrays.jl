@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Eduardo Grossi"]
 
 [deps]
+Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
 HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 MPI = "da04e1cc-30fd-572f-bb4f-1f8673147195"
@@ -23,6 +24,7 @@ HaloArraysLinearSolveExt = ["LinearSolve", "Krylov"]
 HaloArraysPolyesterExt = "Polyester"
 
 [compat]
+Adapt = "4"
 Aqua = "0.8"
 DiffEqBase = "6, 7"
 HDF5 = "0.16, 0.17"
@@ -43,6 +45,7 @@ julia = "1.10"
 [extras]
 Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
 DiffEqBase = "2b5f629d-d688-5b77-993f-72d75c75574e"
+JLArrays = "27aeb0d3-9eb9-45fb-866b-73c2ecf80fcb"
 Krylov = "ba0b0d4f-ebba-5204-a429-3ac8c609bfb7"
 LinearSolve = "7ed4a6bd-45f5-4d41-b270-4a48e9bafcae"
 OrdinaryDiffEq = "1dea7af3-3e70-54e6-95c3-0bf5283fa5ed"
@@ -52,4 +55,4 @@ Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test", "OrdinaryDiffEq", "DiffEqBase", "LinearSolve", "Krylov", "Printf", "Polyester", "Random", "Aqua"]
+test = ["Test", "OrdinaryDiffEq", "DiffEqBase", "LinearSolve", "Krylov", "Printf", "Polyester", "Random", "Aqua", "JLArrays"]
