@@ -81,12 +81,72 @@ LinearAlgebra.norm(m::MaybeHaloArray, p::Real) =
 # Fallback for any other halo-array type.
 LinearAlgebra.dot(x::AbstractHaloArray, y::AbstractHaloArray) = mapreduce(LinearAlgebra.dot, +, x, y)
 
-# ---- in-place BLAS-1 updates (elementwise, via interior-only broadcast) ------
+# ---- in-place BLAS-1 updates (elementwise) -----------------------------------
+# Default path: the interior-only broadcast — correct on every backend (GPU
+# included) and for collections/Maybe. But the interior view is strided, so on a
+# dense CPU `Array` this broadcast vectorizes poorly (~1.7× slower than contiguous).
+# The single-array backends route through contiguous `@simd` kernels (below) that
+# dispatch on the parent type: dense `Array` → vectorized loop; anything else
+# (GPU) → the same broadcast, so device parents keep their on-device kernels. Same
+# split as the reductions (`_interior_acc`/`_interior_dot`). All elementwise, no
+# reduction ⇒ correct local-per-rank/tile (MPI-safe, no communication).
 LinearAlgebra.rmul!(x::AbstractHaloArray, s::Number) = (x .= x .* s)
 LinearAlgebra.lmul!(s::Number, x::AbstractHaloArray) = (x .= s .* x)
 LinearAlgebra.axpy!(s::Number, x::AbstractHaloArray, y::AbstractHaloArray) = (y .= y .+ s .* x)
 LinearAlgebra.axpby!(s::Number, x::AbstractHaloArray, t::Number, y::AbstractHaloArray) =
     (y .= s .* x .+ t .* y)
+
+# contiguous @simd over the leading (contiguous) dim of a dense Array parent …
+@inline function _interior_scal!(p::Array, rng::Tuple, s)
+    inner = rng[1]; outer = CartesianIndices(Base.tail(rng))
+    @inbounds for J in outer
+        @simd for i in inner; p[i, J] *= s; end
+    end
+end
+@inline function _interior_axpy!(py::Array, px::Array, rng::Tuple, s)
+    inner = rng[1]; outer = CartesianIndices(Base.tail(rng))
+    @inbounds for J in outer
+        @simd for i in inner; py[i, J] += s * px[i, J]; end
+    end
+end
+@inline function _interior_axpby!(py::Array, px::Array, rng::Tuple, s, t)
+    inner = rng[1]; outer = CartesianIndices(Base.tail(rng))
+    @inbounds for J in outer
+        @simd for i in inner; py[i, J] = s * px[i, J] + t * py[i, J]; end
+    end
+end
+# … and the GPU / non-dense fallback: broadcast over the interior view.
+@inline _interior_scal!(p::AbstractArray, rng::Tuple, s) = (@views p[rng...] .*= s; nothing)
+@inline _interior_axpy!(py::AbstractArray, px::AbstractArray, rng::Tuple, s) =
+    (@views py[rng...] .+= s .* px[rng...]; nothing)
+@inline _interior_axpby!(py::AbstractArray, px::AbstractArray, rng::Tuple, s, t) =
+    (@views py[rng...] .= s .* px[rng...] .+ t .* py[rng...]; nothing)
+
+# Single-block backends (LocalHaloArray, MPI HaloArray): one parent block.
+for HT in (:LocalHaloArray, :HaloArray)
+    @eval begin
+        LinearAlgebra.rmul!(x::$HT, s::Number) = (_interior_scal!(parent(x), interior_range(x), s); x)
+        LinearAlgebra.lmul!(s::Number, x::$HT) = (_interior_scal!(parent(x), interior_range(x), s); x)
+        LinearAlgebra.axpy!(s::Number, x::$HT, y::$HT) =
+            (_interior_axpy!(parent(y), parent(x), interior_range(x), s); y)
+        LinearAlgebra.axpby!(s::Number, x::$HT, t::Number, y::$HT) =
+            (_interior_axpby!(parent(y), parent(x), interior_range(x), s, t); y)
+    end
+end
+
+# ThreadedHaloArray: drive the per-tile kernels across the array's thread backend.
+LinearAlgebra.rmul!(x::ThreadedHaloArray, s::Number) =
+    (tile_foreach(thread_backend(x), t -> _interior_scal!(tile_parent(x, t), interior_range(x, t), s),
+        1:tile_count(x); scheduler=:static); x)
+LinearAlgebra.lmul!(s::Number, x::ThreadedHaloArray) =
+    (tile_foreach(thread_backend(x), t -> _interior_scal!(tile_parent(x, t), interior_range(x, t), s),
+        1:tile_count(x); scheduler=:static); x)
+LinearAlgebra.axpy!(s::Number, x::ThreadedHaloArray, y::ThreadedHaloArray) =
+    (tile_foreach(thread_backend(x), t -> _interior_axpy!(tile_parent(y, t), tile_parent(x, t), interior_range(x, t), s),
+        1:tile_count(x); scheduler=:static); y)
+LinearAlgebra.axpby!(s::Number, x::ThreadedHaloArray, t::Number, y::ThreadedHaloArray) =
+    (tile_foreach(thread_backend(x), tt -> _interior_axpby!(tile_parent(y, tt), tile_parent(x, tt), interior_range(x, tt), s, t),
+        1:tile_count(x); scheduler=:static); y)
 
 # ---- swap + Givens/Householder on two vectors (elementwise, MPI-safe) --------
 # These complete the BLAS-1 surface (SSWAP, SROT). Each mixes two whole vectors
