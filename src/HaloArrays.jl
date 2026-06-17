@@ -5,6 +5,7 @@ using HDF5
 using LinearAlgebra
 using OhMyThreads: tforeach, tmapreduce
 using StaticArrays
+import Adapt
 
 # Include library files
 include("abstract_haloarray.jl")
@@ -31,6 +32,7 @@ include("reduction.jl")
 include("vector_space.jl")
 include("linearsolve.jl")
 include("mpi_support.jl")
+include("adapt.jl")
 include("save_hdf5.jl")
 
 # Core types
