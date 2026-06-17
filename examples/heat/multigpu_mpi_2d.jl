@@ -7,8 +7,16 @@
 # HaloArrays makes this work by construction — the parent array type is generic,
 # and the MPI send/recv buffers are `similar(data, …)`, so a device parent gives
 # device buffers that are handed straight to `MPI.Isend`/`Irecv!` (no host
-# round-trip). The interior update below is a *broadcast* (no scalar indexing),
-# so the same code runs on CPU and GPU.
+# round-trip). The interior update is a single KernelAbstractions `@kernel` that
+# compiles for whatever backend the parent array lives on (CPU / CUDA / Metal /
+# ROCm via `get_backend`), so the same code runs everywhere.
+#
+# NB: `@index(Global, NTuple)` is hoisted to its own line *before* `cell_index`.
+# KA's CPU backend rewrites `@index` via an AST transform that only fires when the
+# macro is in a standalone/assignment position; nesting it inside a call
+# (`cell_index(region, @index(...))`) makes it compile for GPU but FAIL on the CPU
+# backend (no method for the 1-arg `__index_Global_Cartesian`). Hoisting keeps the
+# kernel runnable on both.
 #
 # REQUIREMENTS for the real GPU path:
 #   * A GPU-aware MPI (CUDA-aware / ROCm-aware) — the default MPICH/OpenMPI JLL is
@@ -29,8 +37,11 @@
 
 using HaloArrays
 using MPI
+using KernelAbstractions
 using LinearAlgebra: norm
 using Printf
+
+const KA = KernelAbstractions
 
 MPI.Init()
 const COMM = MPI.COMM_WORLD
@@ -85,16 +96,22 @@ unew = mk()
 gx, gy = LOCAL .* topo.dims
 fill_from_global_indices!(I -> sinpi(2I[1] / gx) * sinpi(2I[2] / gy), u)
 
-# ---- one diffusion step: exchange ghosts, then a broadcast 5-point Laplacian -
-# Broadcasting over shifted parent views is GPU-safe (no scalar getindex). The
-# inner range is the interior; ±1 reaches into the freshly-synced ghost layer.
-function step!(unew, u; dx2inv = 1.0)
+# ---- one diffusion step: exchange ghosts, then a portable KA 5-point Laplacian -
+# HaloArrays' CellKernelRegion + cell_index map the launch index to the padded
+# parent cell; ±1 reaches into the freshly-synced ghost layer.
+@kernel function heat_kernel!(out, s, dx2inv, region::CellKernelRegion{2})
+    J = @index(Global, NTuple)                        # hoisted (see header note)
+    i, j = cell_index(region, J)                      # (i, j) into the padded parent
+    @inbounds out[i, j] = s[i, j] + dx2inv *
+        (s[i-1, j] + s[i+1, j] + s[i, j-1] + s[i, j+1] - 4 * s[i, j])
+end
+
+function step!(unew, u, kernel!, backend; dx2inv)
     synchronize_halo!(u)                              # GPU↔GPU (or rank↔rank) exchange
-    s  = parent(u); d = parent(unew)
-    ix = (HALO + 1):(HALO + LOCAL[1])
-    iy = (HALO + 1):(HALO + LOCAL[2])
-    @views @. d[ix, iy] = s[ix, iy] + dx2inv * (
-        s[ix .- 1, iy] + s[ix .+ 1, iy] + s[ix, iy .- 1] + s[ix, iy .+ 1] - 4 * s[ix, iy])
+    region = get_interior_cell_region(CellRanges(u))
+    any(==(0), region.size) && return nothing
+    kernel!(parent(unew), parent(u), dx2inv, region; ndrange = region.size)
+    KA.synchronize(backend)
     return nothing
 end
 
@@ -102,9 +119,11 @@ end
 # Wrapped in a function: a top-level `for` would make the ping-pong swap (`u, unew
 # = unew, u`) loop-local and also reduce performance under global scope.
 function run!(u, unew, nstep, dt)
+    backend = KA.get_backend(parent(u))               # CPU / CUDA / Metal / ROC
+    kernel! = heat_kernel!(backend)
     MPI.Barrier(COMM); t0 = time()
     for _ in 1:nstep
-        step!(unew, u; dx2inv = dt)
+        step!(unew, u, kernel!, backend; dx2inv = dt)
         u, unew = unew, u                             # ping-pong buffers
     end
     MPI.Barrier(COMM)
