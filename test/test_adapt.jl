@@ -53,4 +53,37 @@ MPI.Initialized() || MPI.Init()
         @test tile_parent(td, 2) isa JLArray
         @test norm(td) ≈ norm(t)
     end
+
+    @testset "BLAS-1 on a device parent (Array-gated kernels fall back correctly)" begin
+        using LinearAlgebra: axpy!, axpby!, rmul!, lmul!, rotate!, reflect!
+        mk(v) = (u = LocalHaloArray(Float64, (5,), 1; boundary_condition=:periodic);
+                 interior_view(u) .= v; u)
+        c, s = 0.6, 0.8
+        # each op on JLArray must match the same op on the host array (the scalar
+        # kernels are Array-gated; device parents take the broadcast fallback).
+        for (host_op, dev_setup) in (
+                (x -> rmul!(x, 2.0),                  () -> (mk([1.0,2,3,4,5]),)),
+                (x -> lmul!(3.0, x),                  () -> (mk([1.0,2,3,4,5]),)),
+            )
+            hx, = dev_setup(); host_op(hx)
+            gx, = dev_setup(); gx = adapt(JLArray, gx); host_op(gx)
+            @test Array(interior_view(gx)) ≈ collect(interior_view(hx))
+        end
+        # two-array ops
+        for op in (axpy!, axpby!)
+            args = op === axpy! ? (2.0,) : (2.0, 0.5)
+            hx, hy = mk([1.0,2,3,4,5]), mk([10.0,20,30,40,50])
+            op === axpy! ? axpy!(2.0, hx, hy) : axpby!(2.0, hx, 0.5, hy)
+            gx, gy = adapt(JLArray, mk([1.0,2,3,4,5])), adapt(JLArray, mk([10.0,20,30,40,50]))
+            op === axpy! ? axpy!(2.0, gx, gy) : axpby!(2.0, gx, 0.5, gy)
+            @test Array(interior_view(gy)) ≈ collect(interior_view(hy))
+        end
+        # swap! / rotate! / reflect! (in-place two-output; device path uses one temp)
+        for op! in (swap!, (a,b)->rotate!(a,b,c,s), (a,b)->reflect!(a,b,c,s))
+            hx, hy = mk([1.0,2,3,4,5]), mk([10.0,20,30,40,50]); op!(hx, hy)
+            gx, gy = adapt(JLArray, mk([1.0,2,3,4,5])), adapt(JLArray, mk([10.0,20,30,40,50])); op!(gx, gy)
+            @test Array(interior_view(gx)) ≈ collect(interior_view(hx))
+            @test Array(interior_view(gy)) ≈ collect(interior_view(hy))
+        end
+    end
 end
