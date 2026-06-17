@@ -69,6 +69,7 @@ include_test(name) = include(joinpath(@__DIR__, name))
             include_test("test_reduce_marray.jl")
             include_test("test_gather.jl")
             include_test("test_saving_hdf5.jl")
+            include_test("test_mpi_reduce_save.jl")
             # Distributed implicit solve (HaloKrylov) — available under Pkg.test.
             if all(p -> Base.find_package(p) !== nothing, ("LinearSolve", "Krylov", "OrdinaryDiffEq"))
                 include_test("test_mpi_implicit.jl")
