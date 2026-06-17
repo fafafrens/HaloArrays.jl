@@ -162,13 +162,18 @@ LinearAlgebra.axpby!(s::Number, x::ThreadedHaloArray, t::Number, y::ThreadedHalo
 # threads — matching the threaded broadcast that already backs axpy!/lmul!/…
 # Collections delegate per field, so each field picks its own driver.
 
-@inline function _swap_tile!(px, py, rng)
+# Dense Array parents (CPU): scalar fused pass — no temporary, both outputs from
+# the two scalar locals. Non-Array (GPU) parents take the broadcast fallbacks
+# below: each is an in-place two-output op, so it needs one temp (copy of old x);
+# scalar-indexing a GPUArray would error / crawl. Same Array-gating as the other
+# BLAS-1 ops; keeps the CPU path 0-alloc, the GPU path correct.
+@inline function _swap_tile!(px::Array, py::Array, rng)
     @inbounds for I in CartesianIndices(rng)
         px[I], py[I] = py[I], px[I]
     end
 end
 # Givens rotation:  x .= c*x + s*y,  y .= -conj(s)*x + c*y
-@inline function _rotate_tile!(px, py, rng, c, s)
+@inline function _rotate_tile!(px::Array, py::Array, rng, c, s)
     @inbounds for I in CartesianIndices(rng)
         a = px[I]; b = py[I]
         px[I] = c * a + s * b
@@ -176,12 +181,33 @@ end
     end
 end
 # Householder reflection:  x .= c*x + s*y,  y .= conj(s)*x − c*y
-@inline function _reflect_tile!(px, py, rng, c, s)
+@inline function _reflect_tile!(px::Array, py::Array, rng, c, s)
     @inbounds for I in CartesianIndices(rng)
         a = px[I]; b = py[I]
         px[I] = c * a + s * b
         py[I] = conj(s) * a - c * b
     end
+end
+
+# --- GPU / non-dense fallbacks: broadcast over the interior views (one temp) ---
+@inline function _swap_tile!(px::AbstractArray, py::AbstractArray, rng)
+    @views xi = px[rng...]; @views yi = py[rng...]
+    tmp = copy(xi); xi .= yi; yi .= tmp
+    return nothing
+end
+@inline function _rotate_tile!(px::AbstractArray, py::AbstractArray, rng, c, s)
+    @views xi = px[rng...]; @views yi = py[rng...]
+    a = copy(xi)                          # old x (both outputs need it)
+    @. xi = c * a + s * yi
+    @. yi = c * yi - conj(s) * a
+    return nothing
+end
+@inline function _reflect_tile!(px::AbstractArray, py::AbstractArray, rng, c, s)
+    @views xi = px[rng...]; @views yi = py[rng...]
+    a = copy(xi)
+    @. xi = c * a + s * yi
+    @. yi = conj(s) * a - c * yi
+    return nothing
 end
 
 """
