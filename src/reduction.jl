@@ -104,15 +104,20 @@ end
 # across the inputs, then reduce the per-field results. One definition covers any
 # AbstractHaloCollection (MultiHaloArray + ArrayOfHaloArray) via `eachfield`.
 for func in (:mapreduce, :mapfoldl, :mapfoldr)
+    # Single collection (the common case: sum/maximum/minimum/norm/…): fold over
+    # the fields directly. No intermediate results container — 0-alloc for BOTH the
+    # tuple-backed MultiHaloArray and the array-backed ArrayOfHaloArray (unlike a
+    # `map` over `eachfield`, which materializes a Vector for the array case). The
+    # field-combine op is `op` itself; `kws` (e.g. `init`) apply at that combine.
+    @eval Base.$func(f::F, op::OP, halo::AbstractHaloCollection; kws...) where {F<:Function, OP} =
+        $func(field -> $func(f, op, field), op, eachfield(halo); kws...)
+
+    # Two or more collections: combine the i-th field across inputs, then reduce.
+    # `map` over `eachfield` keeps the tuple case 0-alloc; the array case
+    # materializes O(#fields) (a `zip` of tuples would be type-unstable).
     @eval function Base.$func(
             f::F, op::OP, halo::AbstractHaloCollection, etc::Vararg{AbstractHaloCollection}; kws...,
         ) where {F<:Function, OP}
-        # Reduce each field across the inputs, then combine the per-field results.
-        # `map` over `eachfield` directly (multi-iterator): a MultiHaloArray's
-        # fields are a Tuple → the results stay a Tuple (no allocation); an
-        # ArrayOfHaloArray's are an Array → a small O(#fields) results array
-        # (irreducible without regressing the tuple case — `zip` of tuples is
-        # type-unstable). `kws` (e.g. `init`) apply once, at the combine.
         per_field_results = map((fields...) -> $func(f, op, fields...),
                                 map(eachfield, (halo, etc...))...)
         return reduce(op, per_field_results; kws...)

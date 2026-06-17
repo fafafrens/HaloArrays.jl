@@ -64,6 +64,14 @@ using LinearAlgebra: dot, norm
     @test minimum(local_array_fields) == 1
     @test all(x -> x > 0, local_array_fields)
     @test any(x -> x == 40, local_array_fields)
+    # Single-collection reductions fold over the fields directly (no intermediate
+    # results container), so allocation is independent of the field count for BOTH
+    # the array-backed ArrayOfHaloArray and the tuple-backed MultiHaloArray — the
+    # old `map(eachfield)` materialized an O(#fields) Vector for the array case.
+    aoha_alloc(n) = (fs = [LocalHaloArray(Float64, (8,), 1; boundary_condition=:periodic) for _ in 1:n];
+                     for a in fs; fill!(a, 1.0); end;
+                     c = ArrayOfHaloArray(fs); sum(c); @allocated sum(c))
+    @test aoha_alloc(2) == aoha_alloc(16)
 
     threaded_u = ThreadedHaloArray(Int, (3,), 1; dims=(2,), boundary_condition=:repeating)
     threaded_v = similar(threaded_u)
