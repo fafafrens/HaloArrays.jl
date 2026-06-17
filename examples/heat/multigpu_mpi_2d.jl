@@ -87,14 +87,17 @@ const FULL  = LOCAL .+ 2HALO             # padded storage (interior + ghosts)
 topo = CartesianTopology(COMM, (0, 0); periodic = (true, true))
 bc   = ((Periodic(), Periodic()), (Periodic(), Periodic()))
 
-# full padded array on the chosen device, wrapped as an MPI HaloArray
-mk() = HaloArray(to_device(zeros(T, FULL...)), HALO, topo, bc)
-u    = mk()
-unew = mk()
-
-# smooth global initial condition (set on each rank's interior via broadcast)
 gx, gy = LOCAL .* topo.dims
-fill_from_global_indices!(I -> sinpi(2I[1] / gx) * sinpi(2I[2] / gy), u)
+
+# Initial condition. `fill_from_global_indices!` is a scalar host loop (it writes
+# `parent[I] = f(global_I)` cell by cell), so it is NOT GPU-safe. Build the IC on a
+# host HaloArray of the same topology, then move its parent to the device and wrap
+# it — the cpu_vs_gpu_2d.jl pattern. Only this one-time setup is staged through the
+# host; the MPI exchange and KA stencil below are device-native.
+host = HaloArray(T, LOCAL, HALO, topo, bc)
+fill_from_global_indices!(I -> sinpi(2I[1] / gx) * sinpi(2I[2] / gy), host)
+u    = HaloArray(to_device(parent(host)), HALO, topo, bc)   # device, IC already set
+unew = HaloArray(to_device(zeros(T, FULL...)), HALO, topo, bc)
 
 # ---- one diffusion step: exchange ghosts, then a portable KA 5-point Laplacian -
 # HaloArrays' CellKernelRegion + cell_index map the launch index to the padded
