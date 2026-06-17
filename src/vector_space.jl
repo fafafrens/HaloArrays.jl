@@ -177,3 +177,18 @@ LinearAlgebra.rotate!(x::AbstractHaloCollection, y::AbstractHaloCollection, c, s
     (foreach((fx, fy) -> rotate!(fx, fy, c, s), eachfield(x), eachfield(y)); (x, y))
 LinearAlgebra.reflect!(x::AbstractHaloCollection, y::AbstractHaloCollection, c, s) =
     (foreach((fx, fy) -> reflect!(fx, fy, c, s), eachfield(x), eachfield(y)); (x, y))
+
+# MaybeHaloArray: forward to the inner array when active, no-op when inactive
+# (completes the BLAS-1 surface — `dot`/`norm`/`axpy!`/… already cover Maybe).
+function swap!(x::MaybeHaloArray, y::MaybeHaloArray)
+    isactive(x) && swap!(getdata(x), getdata(y))
+    return x, y
+end
+function LinearAlgebra.rotate!(x::MaybeHaloArray, y::MaybeHaloArray, c, s)
+    isactive(x) && LinearAlgebra.rotate!(getdata(x), getdata(y), c, s)
+    return x, y
+end
+function LinearAlgebra.reflect!(x::MaybeHaloArray, y::MaybeHaloArray, c, s)
+    isactive(x) && LinearAlgebra.reflect!(getdata(x), getdata(y), c, s)
+    return x, y
+end

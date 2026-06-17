@@ -64,6 +64,14 @@ using LinearAlgebra: dot, norm
     @test minimum(local_array_fields) == 1
     @test all(x -> x > 0, local_array_fields)
     @test any(x -> x == 40, local_array_fields)
+    # Single-collection reductions fold over the fields directly (no intermediate
+    # results container), so allocation is independent of the field count for BOTH
+    # the array-backed ArrayOfHaloArray and the tuple-backed MultiHaloArray — the
+    # old `map(eachfield)` materialized an O(#fields) Vector for the array case.
+    aoha_alloc(n) = (fs = [LocalHaloArray(Float64, (8,), 1; boundary_condition=:periodic) for _ in 1:n];
+                     for a in fs; fill!(a, 1.0); end;
+                     c = ArrayOfHaloArray(fs); sum(c); @allocated sum(c))
+    @test aoha_alloc(2) == aoha_alloc(16)
 
     threaded_u = ThreadedHaloArray(Int, (3,), 1; dims=(2,), boundary_condition=:repeating)
     threaded_v = similar(threaded_u)
@@ -159,6 +167,20 @@ using LinearAlgebra: dot, norm
         swap!(x, y)
         @test collect(interior_view(x)) == [10.0, 20, 30, 40]
         @test collect(interior_view(y)) == [1.0, 2, 3, 4]
+
+        # MaybeHaloArray: BLAS-1 forwards to the inner array (completes the surface
+        # alongside dot/norm/axpy!). The wrappers alias the inner arrays, so the
+        # mutation is observable through them.
+        ax = mk([1.0, 2, 3, 4]); ay = mk([10.0, 20, 30, 40])
+        swap!(MaybeHaloArray(ax), MaybeHaloArray(ay))
+        @test collect(interior_view(ax)) == [10.0, 20, 30, 40]
+        @test collect(interior_view(ay)) == [1.0, 2, 3, 4]
+        bx = mk([1.0, 2, 3, 4]); by = mk([10.0, 20, 30, 40])
+        rotate!(MaybeHaloArray(bx), MaybeHaloArray(by), 0.6, 0.8)
+        @test collect(interior_view(bx)) ≈ 0.6 .* [1.0, 2, 3, 4] .+ 0.8 .* [10.0, 20, 30, 40]
+        cx = mk([1.0, 2, 3, 4]); cy = mk([10.0, 20, 30, 40])
+        reflect!(MaybeHaloArray(cx), MaybeHaloArray(cy), 0.6, 0.8)
+        @test collect(interior_view(cx)) ≈ 0.6 .* [1.0, 2, 3, 4] .+ 0.8 .* [10.0, 20, 30, 40]
 
         # rotate! / reflect! vs the LinearAlgebra reference on plain vectors
         c, s = 0.6, 0.8                                   # c^2 + s^2 = 1
