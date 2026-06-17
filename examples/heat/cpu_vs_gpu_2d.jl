@@ -5,6 +5,12 @@ using Printf
 
 const KA = KernelAbstractions
 
+# One KernelAbstractions implementation, run on both the CPU and the Metal GPU
+# backend (chosen from the array type via `KA.get_backend`), then compared. The
+# kernels do all the work through HaloArrays' CellKernelRegion/ColoredFaceKernelRegion
+# helpers, so the same code is correct on either device — no separate hand-written
+# CPU loops.
+
 function stable_heat_dt(alpha, cfl, dx)
     return cfl / (alpha * (inv(abs2(dx[1])) + inv(abs2(dx[2]))))
 end
@@ -25,77 +31,17 @@ function fill_gaussian!(u)
     return u
 end
 
-function heat_step_cpu!(u_next, du, u, alpha, dt, dx)
-    zero_owned_cpu!(du)
-    accumulate_heat_fluxes_cpu!(du, u, alpha, dx)
-    apply_heat_update_cpu!(u_next, u, du, dt)
-    return u_next
-end
+# --- portable kernels (NB: @index hoisted to its own line so the CPU backend's
+# index-injection transform fires; nesting it inside cell_index(...) compiles for
+# GPU but errors on CPU) ---
 
-function zero_owned_cpu!(u)
-    data = parent(u)
-    @inbounds for I in get_interior_cells(CellRanges(u))
-        data[I] = zero(eltype(data))
-    end
-    return u
-end
-
-function accumulate_heat_fluxes_cpu!(du, u, alpha, dx)
-    ranges = FaceRanges(u)
-
-    for dim in 1:2
-        accumulate_heat_fluxes_cpu!(du, u, ranges, dim, alpha / dx[dim]^2)
-    end
-
-    return du
-end
-
-function accumulate_heat_fluxes_cpu!(du, u, ranges::FaceRanges, dim, scale)
-    du_data = parent(du)
-    data = parent(u)
-    offset = get_unit_vector(ranges, dim)
-
-    @inbounds for IL in get_left_face(ranges, dim)
-        IR = IL + offset
-        flux = scale * (data[IR] - data[IL])
-        du_data[IR] -= flux
-    end
-
-    @inbounds for IL in get_internal_face(ranges, dim)
-        IR = IL + offset
-        flux = scale * (data[IR] - data[IL])
-        du_data[IL] += flux
-        du_data[IR] -= flux
-    end
-
-    @inbounds for IL in get_right_face(ranges, dim)
-        IR = IL + offset
-        flux = scale * (data[IR] - data[IL])
-        du_data[IL] += flux
-    end
-
-    return du
-end
-
-function apply_heat_update_cpu!(u_next, u, du, dt)
-    out = parent(u_next)
-    data = parent(u)
-    du_data = parent(du)
-
-    @inbounds for I in get_interior_cells(CellRanges(u))
-        out[I] = data[I] + dt * du_data[I]
-    end
-
-    return u_next
-end
-
-@kernel function zero_owned_gpu_kernel!(data, region::CellKernelRegion{2})
-    J = @index(Global, NTuple)          # hoisted: keeps the kernel runnable on the
-    I = cell_index(region, J)           # KA CPU backend too (see heat_flux kernel)
+@kernel function zero_owned_kernel!(data, region::CellKernelRegion{2})
+    J = @index(Global, NTuple)
+    I = cell_index(region, J)
     @inbounds data[I...] = zero(eltype(data))
 end
 
-@kernel function heat_flux_gpu_kernel!(du, data, region::ColoredFaceKernelRegion{2}, scale)
+@kernel function heat_flux_kernel!(du, data, region::ColoredFaceKernelRegion{2}, scale)
     J = @index(Global, NTuple)
     IL = cell_index(region, J)          # lower cell of this face
     offset = Tuple(region.offset)
@@ -112,7 +58,7 @@ end
     end
 end
 
-@kernel function apply_heat_update_gpu_kernel!(out, data, du, dt, region::CellKernelRegion{2})
+@kernel function apply_heat_update_kernel!(out, data, du, dt, region::CellKernelRegion{2})
     J = @index(Global, NTuple)
     I = cell_index(region, J)
     @inbounds out[I...] = data[I...] + dt * du[I...]
@@ -132,7 +78,7 @@ function launch_face_kernel!(kernel!, args...)
     return nothing
 end
 
-function heat_step_gpu!(kernels, u_next, du, u, alpha, dt, dx)
+function heat_step!(kernels, u_next, du, u, alpha, dt, dx)
     backend, zero!, flux!, update! = kernels
     cell_region = get_interior_cell_region(CellRanges(u))
     ranges = FaceRanges(u)
@@ -159,33 +105,21 @@ function heat_step_gpu!(kernels, u_next, du, u, alpha, dt, dx)
     return u_next
 end
 
-function make_gpu_kernels(u)
+# Instantiate the kernels for the array's backend (CPU() for a plain Array,
+# MetalBackend() for an MtlArray, etc.).
+function make_kernels(u)
     backend = KA.get_backend(parent(u))
     return (
         backend,
-        zero_owned_gpu_kernel!(backend),
-        heat_flux_gpu_kernel!(backend),
-        apply_heat_update_gpu_kernel!(backend),
+        zero_owned_kernel!(backend),
+        heat_flux_kernel!(backend),
+        apply_heat_update_kernel!(backend),
     )
 end
 
-function solve_cpu!(u; alpha, dt, dx, steps)
-    current = u
-    next = similar(u)
-    du = similar(u)
-
-    for _ in 1:steps
-        synchronize_halo!(current)
-        heat_step_cpu!(next, du, current, alpha, dt, dx)
-        current, next = next, current
-    end
-
-    synchronize_halo!(current)
-    return current
-end
-
-function solve_gpu!(u; alpha, dt, dx, steps)
-    kernels = make_gpu_kernels(u)
+# Backend-agnostic solve: works for a CPU- or GPU-resident HaloArray alike.
+function solve!(u; alpha, dt, dx, steps)
+    kernels = make_kernels(u)
     backend = first(kernels)
     current = u
     next = similar(u)
@@ -194,7 +128,7 @@ function solve_gpu!(u; alpha, dt, dx, steps)
     for _ in 1:steps
         synchronize_halo!(current)
         KA.synchronize(backend)
-        heat_step_gpu!(kernels, next, du, current, alpha, dt, dx)
+        heat_step!(kernels, next, du, current, alpha, dt, dx)
         current, next = next, current
     end
 
@@ -213,8 +147,9 @@ function run_local_cpu_gpu_heat_2d(; n=(128, 128), alpha=1.0f0, cfl=0.25f0, step
 
     gpu0 = LocalHaloArray(Metal.MtlArray(parent(cpu0)), halo, :periodic)
 
-    cpu = solve_cpu!(copy(cpu0); alpha, dt, dx, steps)
-    gpu = solve_gpu!(gpu0; alpha, dt, dx, steps)
+    # same `solve!` on both — CPU backend vs Metal backend
+    cpu = solve!(copy(cpu0); alpha, dt, dx, steps)
+    gpu = solve!(gpu0; alpha, dt, dx, steps)
 
     cpu_interior = Array(interior_view(cpu))
     gpu_interior = Array(interior_view(gpu))
