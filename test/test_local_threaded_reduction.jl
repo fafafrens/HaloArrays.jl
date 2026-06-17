@@ -148,6 +148,16 @@ using LinearAlgebra: dot, norm
         z = mk([1.0, 1, 1, 1]); axpby!(2.0, mk([1.0, 2, 3, 4]), 10.0, z)
         @test collect(interior_view(z)) == [12.0, 14, 16, 18]
 
+        # On a dense Array parent these take a contiguous @simd path (not the strided
+        # interior-view broadcast), so per-call allocation must be independent of the
+        # vector length — a regression to a temp-allocating form would scale with N.
+        blas1_alloc(op!, n) = (a = LocalHaloArray(Float64, (n,), 1; boundary_condition=:periodic);
+                               b = LocalHaloArray(Float64, (n,), 1; boundary_condition=:periodic);
+                               fill!(a, 1.0); fill!(b, 2.0); op!(a, b); @allocated op!(a, b))
+        @test blas1_alloc((a, b) -> axpy!(2.0, a, b), 8)  == blas1_alloc((a, b) -> axpy!(2.0, a, b), 8000)
+        @test blas1_alloc((a, b) -> axpby!(2.0, a, 0.5, b), 8) == blas1_alloc((a, b) -> axpby!(2.0, a, 0.5, b), 8000)
+        @test blas1_alloc((a, _) -> rmul!(a, 2.0), 8)     == blas1_alloc((a, _) -> rmul!(a, 2.0), 8000)
+
         # threaded backend: same ops, per tile
         tx = ThreadedHaloArray(Float64, (3,), 1; dims=(2,), boundary_condition=:repeating)
         ty = similar(tx)
