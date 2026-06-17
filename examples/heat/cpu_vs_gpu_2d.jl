@@ -90,7 +90,8 @@ function apply_heat_update_cpu!(u_next, u, du, dt)
 end
 
 @kernel function zero_owned_gpu_kernel!(data, region::CellKernelRegion{2})
-    I = cell_index(region, @index(Global, NTuple))
+    J = @index(Global, NTuple)          # hoisted: keeps the kernel runnable on the
+    I = cell_index(region, J)           # KA CPU backend too (see heat_flux kernel)
     @inbounds data[I...] = zero(eltype(data))
 end
 
@@ -112,7 +113,8 @@ end
 end
 
 @kernel function apply_heat_update_gpu_kernel!(out, data, du, dt, region::CellKernelRegion{2})
-    I = cell_index(region, @index(Global, NTuple))
+    J = @index(Global, NTuple)
+    I = cell_index(region, J)
     @inbounds out[I...] = data[I...] + dt * du[I...]
 end
 
