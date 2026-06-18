@@ -1,7 +1,6 @@
 module HaloArrays
 
 using MPI
-using HDF5
 using LinearAlgebra
 using OhMyThreads: tforeach, tmapreduce
 using StaticArrays
@@ -33,7 +32,7 @@ include("vector_space.jl")
 include("linearsolve.jl")
 include("mpi_support.jl")
 include("adapt.jl")
-include("save_hdf5.jl")
+include("hdf5_api.jl")   # HDF5 I/O stubs; methods in ext/HaloArraysHDF5Ext.jl (weakdep)
 
 # Core types
 export HaloArray,
