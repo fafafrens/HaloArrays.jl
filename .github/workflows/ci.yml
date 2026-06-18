@@ -86,7 +86,11 @@ jobs:
         shell: julia --color=yes --project=. {0}
         run: |
           using Pkg
-          Pkg.add("MPIPreferences")
+          # HDF5 is a weakdep; promote it to a dep in this throwaway CI checkout so the
+          # mpiexec run (julia --project=.) can `using HDF5` and exercise the collective
+          # parallel-HDF5 path in test_saving_hdf5.jl. The HaloArraysHDF5Ext extension
+          # still activates (its trigger is now a regular dep).
+          Pkg.add(["MPIPreferences", "HDF5"])
           using MPIPreferences
           MPIPreferences.use_jll_binary("MPICH_jll")
       - uses: julia-actions/julia-buildpkg@v1
