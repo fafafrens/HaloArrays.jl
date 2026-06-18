@@ -67,6 +67,18 @@ interior-cell region API). Requires an Apple GPU supported by Metal.jl:
 julia --project=examples examples/heat/cpu_vs_gpu_2d.jl
 ```
 
+`heat/multigpu_mpi_2d.jl` is the **one-rank-per-GPU** pattern: each MPI rank owns a
+device-resident `HaloArray` and `synchronize_halo!` exchanges ghosts GPU-to-GPU over
+a CUDA-aware MPI. Runs on CPU anywhere (`HALO_BACKEND=cpu`, the default); set
+`HALO_BACKEND=cuda`/`amdgpu` on a GPU node. Verified on CINECA Leonardo (4× A100) —
+see [`heat/RUNNING_ON_LEONARDO.md`](heat/RUNNING_ON_LEONARDO.md) for the full,
+tested cluster recipe (system MPI + system HDF5 + CUDA local toolkit + `srun
+--mpi=pmix_v3`).
+
+```bash
+mpiexec -n 4 julia --project=examples examples/heat/multigpu_mpi_2d.jl    # CPU smoke test
+```
+
 To save a gathered MPI snapshot to HDF5:
 
 ```bash

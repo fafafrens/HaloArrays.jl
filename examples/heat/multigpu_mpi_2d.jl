@@ -26,13 +26,15 @@
 #     node-local rank.
 #
 # LAUNCH
-#   # CUDA cluster, 4 GPUs on the node:
-#   HALO_BACKEND=cuda mpiexec -n 4 julia --project=examples examples/heat/multigpu_mpi_2d.jl
 #   # Local CPU smoke test (no GPU needed — verifies the exchange + reduction logic):
 #   mpiexec -n 4 julia --project=examples examples/heat/multigpu_mpi_2d.jl
+#   # GPU cluster: see RUNNING_ON_LEONARDO.md for a full, tested recipe (system MPI +
+#   # system HDF5 + CUDA local toolkit + `srun --mpi=pmix_v3`).
 #
-# NOTE: the GPU path is untested in CI (needs GPU + GPU-aware MPI). The CPU path
-# is the reference; the GPU path is identical code on a device array type.
+# STATUS: the CPU path runs in CI. The CUDA path is VERIFIED on CINECA Leonardo
+# (4× A100, one rank per GPU, GPU-to-GPU CUDA-aware-MPI exchange): the global L2
+# norm is bit-identical to the CPU result (1 GPU → 127.691943, 4 GPUs → 255.845833),
+# so the device path computes the same answer as the reference.
 # =============================================================================
 
 using HaloArrays
@@ -50,9 +52,16 @@ const NR   = MPI.Comm_size(COMM)
 
 # ---- backend selection ------------------------------------------------------
 # CPU by default so the example runs anywhere. Set HALO_BACKEND=cuda|amdgpu on a
-# node that has the GPU package + a GPU-aware MPI. We load the GPU package lazily
-# so the CPU path needs no GPU dependency installed.
+# node that has the GPU package + a GPU-aware MPI.
 const BACKEND = lowercase(get(ENV, "HALO_BACKEND", "cpu"))
+
+# Load the GPU package at TOP LEVEL (not lazily inside the function): a
+# `@eval using CUDA` followed by using `CUDA`/`Main.CUDA` in the *same* call frame
+# throws a world-age error ("the binding may be too new"). Doing it here means the
+# package is in effect before `bind_device_and_get_adaptor` runs. The conditional
+# keeps the CPU path free of any GPU dependency.
+BACKEND == "cuda"   && @eval using CUDA
+BACKEND == "amdgpu" && @eval using AMDGPU
 
 function bind_device_and_get_adaptor()
     if BACKEND == "cpu"
@@ -62,12 +71,10 @@ function bind_device_and_get_adaptor()
     nodecomm   = MPI.Comm_split_type(COMM, MPI.COMM_TYPE_SHARED, RANK)
     local_rank = MPI.Comm_rank(nodecomm)
     if BACKEND == "cuda"
-        @eval Main using CUDA
         ndev = length(Main.CUDA.devices())
         Main.CUDA.device!(local_rank % ndev)
         return (A -> Main.CuArray(A)), "CUDA (rank $RANK → gpu $(local_rank % ndev))"
     elseif BACKEND == "amdgpu"
-        @eval Main using AMDGPU
         ndev = length(Main.AMDGPU.devices())
         Main.AMDGPU.device!(Main.AMDGPU.devices()[local_rank % ndev + 1])
         return (A -> Main.ROCArray(A)), "AMDGPU (rank $RANK → gpu $(local_rank % ndev))"
