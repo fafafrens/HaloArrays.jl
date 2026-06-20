@@ -14,6 +14,13 @@ or is decomposed across MPI ranks. Write a stencil once against `interior_view`,
 backend**. `synchronize_halo!` is the only place halos are filled, so the hot path
 stays local and halo validity is predictable.
 
+**The idea:** automate the two error-prone parts of a parallel stencil code — halo
+synchronization and boundary conditions — and otherwise stay out of your way. Beyond
+`synchronize_halo!`, everything is a plain array: drop to `parent(u)` for the raw
+storage and use `interior_range`/`interior_view` (plus the face/cell range utilities)
+to address your own slice, so your kernel is just a loop over arrays with no framework
+to fight.
+
 ## Features
 
 - **Three interchangeable backends behind one API** — `LocalHaloArray` (single
