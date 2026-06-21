@@ -10,10 +10,10 @@ end
 struct CustomBoundaryForTest <: HaloArrays.AbstractBoundaryCondition end
 
 # exercises the public launch-index mapping for colored face regions
-_colored_region_index(region::ColoredFaceKernelRegion{N}, J::CartesianIndex{N}) where {N} =
+_colored_region_index(region::FaceCheckerboard{N}, J::CartesianIndex{N}) where {N} =
     cell_index(region, J)
 
-function _colored_region_indices(region::ColoredFaceKernelRegion)
+function _colored_region_indices(region::FaceCheckerboard)
     return vec([_colored_region_index(region, J) for J in CartesianIndices(region.size)])
 end
 
@@ -23,7 +23,7 @@ function _cell_subrange_indices(ranges::Tuple)
     return reduce(vcat, map(r -> vec(collect(r)), ranges))
 end
 
-function _colored_cell_region_indices(region::ColoredCellKernelRegion{N}) where {N}
+function _colored_cell_region_indices(region::CellCheckerboard{N}) where {N}
     indices = CartesianIndex{N}[]
 
     for J in CartesianIndices(region.size)
@@ -145,12 +145,12 @@ end
         @test maximum(abs, interior_view(du)) == 0.0
         @test HaloArrays.get_unit_vector(range_struct, 1) == CartesianIndex(1, 0)
 
-        left_region = @inferred get_left_face_region(range_struct, Dim(1))
-        internal_region = @inferred get_internal_face_region(range_struct, Dim(1))
-        right_region_dim2 = @inferred get_right_face_region(range_struct, Dim(2))
-        @test left_region == FaceKernelRegion(CartesianIndex(1, 2), (1, 5), CartesianIndex(1, 0), false, true)
-        @test internal_region == FaceKernelRegion(CartesianIndex(2, 2), (3, 5), CartesianIndex(1, 0), true, true)
-        @test right_region_dim2 == FaceKernelRegion(CartesianIndex(2, 6), (4, 1), CartesianIndex(0, 1), true, false)
+        left_region = @inferred get_left_face_window(range_struct, Dim(1))
+        internal_region = @inferred get_internal_face_window(range_struct, Dim(1))
+        right_region_dim2 = @inferred get_right_face_window(range_struct, Dim(2))
+        @test left_region == FaceWindow(CartesianIndex(1, 2), (1, 5), CartesianIndex(1, 0), false, true)
+        @test internal_region == FaceWindow(CartesianIndex(2, 2), (3, 5), CartesianIndex(1, 0), true, true)
+        @test right_region_dim2 == FaceWindow(CartesianIndex(2, 6), (4, 1), CartesianIndex(0, 1), true, false)
 
         left_face_color0 = @inferred get_colored_left_face(range_struct, Dim(1), 0)
         left_face_color1 = @inferred get_colored_left_face(range_struct, Dim(1), 1)
@@ -172,31 +172,31 @@ end
         @test_throws ArgumentError get_colored_internal_face(range_struct, 1, -1)
         @test_throws ArgumentError get_colored_internal_face(range_struct, 1, 2)
 
-        left_color0 = @inferred get_colored_left_face_region(range_struct, Dim(1), 0)
-        left_color1 = @inferred get_colored_left_face_region(range_struct, Dim(1), 1)
-        internal_color0 = @inferred get_colored_internal_face_region(range_struct, Dim(1), 0)
-        internal_color1 = @inferred get_colored_internal_face_region(range_struct, Dim(1), 1)
-        right_dim2_color0 = @inferred get_colored_right_face_region(range_struct, Dim(2), 0)
-        right_dim2_color1 = @inferred get_colored_right_face_region(range_struct, Dim(2), 1)
+        left_color0 = @inferred get_left_face_checkerboard(range_struct, Dim(1), 0)
+        left_color1 = @inferred get_left_face_checkerboard(range_struct, Dim(1), 1)
+        internal_color0 = @inferred get_internal_face_checkerboard(range_struct, Dim(1), 0)
+        internal_color1 = @inferred get_internal_face_checkerboard(range_struct, Dim(1), 1)
+        right_dim2_color0 = @inferred get_right_face_checkerboard(range_struct, Dim(2), 0)
+        right_dim2_color1 = @inferred get_right_face_checkerboard(range_struct, Dim(2), 1)
 
         @test left_color0 ==
-              ColoredFaceKernelRegion(CartesianIndex(2, 2), (0, 5), CartesianIndex(2, 1), CartesianIndex(1, 0), false, true)
+              FaceCheckerboard(CartesianIndex(2, 2), (0, 5), CartesianIndex(2, 1), CartesianIndex(1, 0), false, true)
         @test left_color1 ==
-              ColoredFaceKernelRegion(CartesianIndex(1, 2), (1, 5), CartesianIndex(2, 1), CartesianIndex(1, 0), false, true)
+              FaceCheckerboard(CartesianIndex(1, 2), (1, 5), CartesianIndex(2, 1), CartesianIndex(1, 0), false, true)
         @test internal_color0 ==
-              ColoredFaceKernelRegion(CartesianIndex(2, 2), (2, 5), CartesianIndex(2, 1), CartesianIndex(1, 0), true, true)
+              FaceCheckerboard(CartesianIndex(2, 2), (2, 5), CartesianIndex(2, 1), CartesianIndex(1, 0), true, true)
         @test internal_color1 ==
-              ColoredFaceKernelRegion(CartesianIndex(3, 2), (1, 5), CartesianIndex(2, 1), CartesianIndex(1, 0), true, true)
+              FaceCheckerboard(CartesianIndex(3, 2), (1, 5), CartesianIndex(2, 1), CartesianIndex(1, 0), true, true)
         @test right_dim2_color0 ==
-              ColoredFaceKernelRegion(CartesianIndex(2, 6), (4, 1), CartesianIndex(1, 2), CartesianIndex(0, 1), true, false)
+              FaceCheckerboard(CartesianIndex(2, 6), (4, 1), CartesianIndex(1, 2), CartesianIndex(0, 1), true, false)
         @test right_dim2_color1 ==
-              ColoredFaceKernelRegion(CartesianIndex(2, 7), (4, 0), CartesianIndex(1, 2), CartesianIndex(0, 1), true, false)
+              FaceCheckerboard(CartesianIndex(2, 7), (4, 0), CartesianIndex(1, 2), CartesianIndex(0, 1), true, false)
         @test _colored_region_indices(internal_color0) == _colored_face_indices(internal_face_color0)
         @test _colored_region_indices(internal_color1) == _colored_face_indices(internal_face_color1)
         @test _colored_region_indices(right_dim2_color0) == _colored_face_indices(right_face_dim2_color0)
         @test _colored_region_indices(right_dim2_color1) == _colored_face_indices(right_face_dim2_color1)
-        @test_throws ArgumentError get_colored_internal_face_region(range_struct, 1, -1)
-        @test_throws ArgumentError get_colored_internal_face_region(range_struct, 1, 2)
+        @test_throws ArgumentError get_internal_face_checkerboard(range_struct, 1, -1)
+        @test_throws ArgumentError get_internal_face_checkerboard(range_struct, 1, 2)
 
         topology = CartesianTopology(MPI.COMM_SELF, (1, 1); periodic=(false, false))
         mpi_ha = HaloArray(Int, (4, 5), 1, topology; boundary_condition=:repeating)
@@ -205,16 +205,16 @@ end
         @test collect(get_internal_face(mpi_ranges, 1)) == collect(get_internal_face(range_struct, 1))
         @test collect(get_right_face(mpi_ranges, 1)) == collect(get_right_face(range_struct, 1))
         @test get_unit_vector(mpi_ranges, 1) == CartesianIndex(1, 0)
-        @test get_left_face_region(mpi_ranges, 1) == get_left_face_region(range_struct, 1)
-        @test get_internal_face_region(mpi_ranges, 1) == get_internal_face_region(range_struct, 1)
+        @test get_left_face_window(mpi_ranges, 1) == get_left_face_window(range_struct, 1)
+        @test get_internal_face_window(mpi_ranges, 1) == get_internal_face_window(range_struct, 1)
         @test _colored_face_indices(get_colored_left_face(mpi_ranges, 1, 1)) ==
               _colored_face_indices(get_colored_left_face(range_struct, 1, 1))
         @test _colored_face_indices(get_colored_internal_face(mpi_ranges, 1, 0)) ==
               _colored_face_indices(get_colored_internal_face(range_struct, 1, 0))
-        @test get_colored_left_face_region(mpi_ranges, 1, 1) ==
-              get_colored_left_face_region(range_struct, 1, 1)
-        @test get_colored_internal_face_region(mpi_ranges, 1, 0) ==
-              get_colored_internal_face_region(range_struct, 1, 0)
+        @test get_left_face_checkerboard(mpi_ranges, 1, 1) ==
+              get_left_face_checkerboard(range_struct, 1, 1)
+        @test get_internal_face_checkerboard(mpi_ranges, 1, 0) ==
+              get_internal_face_checkerboard(range_struct, 1, 0)
 
         threaded_ha = ThreadedHaloArray(Int, (4, 5), 1; dims=(1, 1), boundary_condition=:repeating)
         threaded_ranges = FaceRanges(threaded_ha)
@@ -222,16 +222,16 @@ end
         @test collect(get_internal_face(threaded_ranges, 1)) == collect(get_internal_face(range_struct, 1))
         @test collect(get_right_face(threaded_ranges, 1)) == collect(get_right_face(range_struct, 1))
         @test get_unit_vector(threaded_ranges, 1) == CartesianIndex(1, 0)
-        @test get_internal_face_region(threaded_ranges, 1) == get_internal_face_region(range_struct, 1)
-        @test get_right_face_region(threaded_ranges, 1) == get_right_face_region(range_struct, 1)
+        @test get_internal_face_window(threaded_ranges, 1) == get_internal_face_window(range_struct, 1)
+        @test get_right_face_window(threaded_ranges, 1) == get_right_face_window(range_struct, 1)
         @test _colored_face_indices(get_colored_internal_face(threaded_ranges, 1, 1)) ==
               _colored_face_indices(get_colored_internal_face(range_struct, 1, 1))
         @test _colored_face_indices(get_colored_right_face(threaded_ranges, 1, 1)) ==
               _colored_face_indices(get_colored_right_face(range_struct, 1, 1))
-        @test get_colored_internal_face_region(threaded_ranges, 1, 1) ==
-              get_colored_internal_face_region(range_struct, 1, 1)
-        @test get_colored_right_face_region(threaded_ranges, 1, 1) ==
-              get_colored_right_face_region(range_struct, 1, 1)
+        @test get_internal_face_checkerboard(threaded_ranges, 1, 1) ==
+              get_internal_face_checkerboard(range_struct, 1, 1)
+        @test get_right_face_checkerboard(threaded_ranges, 1, 1) ==
+              get_right_face_checkerboard(range_struct, 1, 1)
 
         fields = MultiHaloArray((;
             rho=LocalHaloArray(Int, (4, 5), 1; boundary_condition=:repeating),
@@ -243,19 +243,19 @@ end
         @test collect(get_right_face(field_ranges, 1)) == collect(get_right_face(range_struct, 1))
         @test get_unit_vector(field_ranges, 1) == CartesianIndex(1, 0)
         @test_throws BoundsError get_left_face(field_ranges, 3)
-        @test get_left_face_region(field_ranges, 1) == get_left_face_region(range_struct, 1)
-        @test get_right_face_region(field_ranges, 1) == get_right_face_region(range_struct, 1)
-        @test_throws BoundsError get_left_face_region(field_ranges, 3)
+        @test get_left_face_window(field_ranges, 1) == get_left_face_window(range_struct, 1)
+        @test get_right_face_window(field_ranges, 1) == get_right_face_window(range_struct, 1)
+        @test_throws BoundsError get_left_face_window(field_ranges, 3)
         @test _colored_face_indices(get_colored_left_face(field_ranges, 1, 1)) ==
               _colored_face_indices(get_colored_left_face(range_struct, 1, 1))
         @test _colored_face_indices(get_colored_right_face(field_ranges, 1, 1)) ==
               _colored_face_indices(get_colored_right_face(range_struct, 1, 1))
-        @test get_colored_left_face_region(field_ranges, 1, 1) ==
-              get_colored_left_face_region(range_struct, 1, 1)
-        @test get_colored_right_face_region(field_ranges, 1, 1) ==
-              get_colored_right_face_region(range_struct, 1, 1)
+        @test get_left_face_checkerboard(field_ranges, 1, 1) ==
+              get_left_face_checkerboard(range_struct, 1, 1)
+        @test get_right_face_checkerboard(field_ranges, 1, 1) ==
+              get_right_face_checkerboard(range_struct, 1, 1)
         @test_throws BoundsError get_colored_left_face(field_ranges, 3, 1)
-        @test_throws BoundsError get_colored_left_face_region(field_ranges, 3, 1)
+        @test_throws BoundsError get_left_face_checkerboard(field_ranges, 3, 1)
 
         array_fields = ArrayOfHaloArray([
             LocalHaloArray(Int, (4, 5), 1; boundary_condition=:repeating) for _ in 1:2, _ in 1:2
@@ -266,30 +266,30 @@ end
         @test collect(get_right_face(array_field_ranges, 1)) == collect(get_right_face(range_struct, 1))
         @test get_unit_vector(array_field_ranges, 1) == CartesianIndex(1, 0)
         @test_throws BoundsError get_right_face(array_field_ranges, 3)
-        @test get_left_face_region(array_field_ranges, 1) == get_left_face_region(range_struct, 1)
-        @test get_right_face_region(array_field_ranges, 1) == get_right_face_region(range_struct, 1)
+        @test get_left_face_window(array_field_ranges, 1) == get_left_face_window(range_struct, 1)
+        @test get_right_face_window(array_field_ranges, 1) == get_right_face_window(range_struct, 1)
         @test _colored_face_indices(get_colored_left_face(array_field_ranges, 1, 1)) ==
               _colored_face_indices(get_colored_left_face(range_struct, 1, 1))
         @test _colored_face_indices(get_colored_right_face(array_field_ranges, 1, 1)) ==
               _colored_face_indices(get_colored_right_face(range_struct, 1, 1))
-        @test get_colored_left_face_region(array_field_ranges, 1, 1) ==
-              get_colored_left_face_region(range_struct, 1, 1)
-        @test get_colored_right_face_region(array_field_ranges, 1, 1) ==
-              get_colored_right_face_region(range_struct, 1, 1)
+        @test get_left_face_checkerboard(array_field_ranges, 1, 1) ==
+              get_left_face_checkerboard(range_struct, 1, 1)
+        @test get_right_face_checkerboard(array_field_ranges, 1, 1) ==
+              get_right_face_checkerboard(range_struct, 1, 1)
 
-        one_cell_left_region = @inferred get_left_face_region(one_cell_ranges, Dim(1))
-        one_cell_internal_region = @inferred get_internal_face_region(one_cell_ranges, Dim(1))
-        one_cell_right_region = @inferred get_right_face_region(one_cell_ranges, Dim(1))
-        @test one_cell_left_region == FaceKernelRegion(CartesianIndex(1), (1,), CartesianIndex(1), false, true)
-        @test one_cell_internal_region == FaceKernelRegion(CartesianIndex(2), (0,), CartesianIndex(1), true, true)
-        @test one_cell_right_region == FaceKernelRegion(CartesianIndex(2), (1,), CartesianIndex(1), true, false)
+        one_cell_left_region = @inferred get_left_face_window(one_cell_ranges, Dim(1))
+        one_cell_internal_region = @inferred get_internal_face_window(one_cell_ranges, Dim(1))
+        one_cell_right_region = @inferred get_right_face_window(one_cell_ranges, Dim(1))
+        @test one_cell_left_region == FaceWindow(CartesianIndex(1), (1,), CartesianIndex(1), false, true)
+        @test one_cell_internal_region == FaceWindow(CartesianIndex(2), (0,), CartesianIndex(1), true, true)
+        @test one_cell_right_region == FaceWindow(CartesianIndex(2), (1,), CartesianIndex(1), true, false)
 
-        one_cell_internal_color0 = @inferred get_colored_internal_face_region(one_cell_ranges, Dim(1), 0)
-        one_cell_internal_color1 = @inferred get_colored_internal_face_region(one_cell_ranges, Dim(1), 1)
+        one_cell_internal_color0 = @inferred get_internal_face_checkerboard(one_cell_ranges, Dim(1), 0)
+        one_cell_internal_color1 = @inferred get_internal_face_checkerboard(one_cell_ranges, Dim(1), 1)
         @test one_cell_internal_color0 ==
-              ColoredFaceKernelRegion(CartesianIndex(2), (0,), CartesianIndex(2), CartesianIndex(1), true, true)
+              FaceCheckerboard(CartesianIndex(2), (0,), CartesianIndex(2), CartesianIndex(1), true, true)
         @test one_cell_internal_color1 ==
-              ColoredFaceKernelRegion(CartesianIndex(3), (0,), CartesianIndex(2), CartesianIndex(1), true, true)
+              FaceCheckerboard(CartesianIndex(3), (0,), CartesianIndex(2), CartesianIndex(1), true, true)
     end
 
     @testset "accumulate_flux_divergence!" begin
@@ -385,15 +385,15 @@ end
         @test_throws ArgumentError get_colored_interior_cell_ranges(ranges, -1)
         @test_throws ArgumentError get_colored_interior_cell_ranges(ranges, 2)
 
-        cell_region = @inferred get_interior_cell_region(ranges)
-        color0_region = @inferred get_colored_interior_cell_region(ranges, 0)
-        color1_region = @inferred get_colored_interior_cell_region(ranges, 1, Dim(1))
-        color0_dim2_region = @inferred get_colored_interior_cell_region(ranges, 0, Dim(2))
+        cell_region = @inferred get_interior_cell_window(ranges)
+        color0_region = @inferred get_interior_cell_checkerboard(ranges, 0)
+        color1_region = @inferred get_interior_cell_checkerboard(ranges, 1, Dim(1))
+        color0_dim2_region = @inferred get_interior_cell_checkerboard(ranges, 0, Dim(2))
 
-        @test cell_region == CellKernelRegion(CartesianIndex(2, 2), (4, 5))
-        @test color0_region == ColoredCellKernelRegion(CartesianIndex(2, 2), (2, 5), (4, 5), 0, 1)
-        @test color1_region == ColoredCellKernelRegion(CartesianIndex(2, 2), (2, 5), (4, 5), 1, 1)
-        @test color0_dim2_region == ColoredCellKernelRegion(CartesianIndex(2, 2), (4, 3), (4, 5), 0, 2)
+        @test cell_region == CellWindow(CartesianIndex(2, 2), (4, 5))
+        @test color0_region == CellCheckerboard(CartesianIndex(2, 2), (2, 5), (4, 5), 0, 1)
+        @test color1_region == CellCheckerboard(CartesianIndex(2, 2), (2, 5), (4, 5), 1, 1)
+        @test color0_dim2_region == CellCheckerboard(CartesianIndex(2, 2), (4, 3), (4, 5), 0, 2)
         @test @inferred(cell_index(cell_region, CartesianIndex(1, 1))) == CartesianIndex(2, 2)
         @test @inferred(cell_index(color0_region, CartesianIndex(1, 1))) == CartesianIndex(2, 2)
         @test @inferred(cell_index(color1_region, (1, 1))) == (3, 2)
@@ -404,10 +404,10 @@ end
         @test Set(_colored_cell_region_indices(color0_dim2_region)) == Set(color0_cells)
         @test all(I -> mod(sum(Tuple(I)), 2) == 0, _colored_cell_region_indices(color0_region))
         @test all(I -> mod(sum(Tuple(I)), 2) == 1, _colored_cell_region_indices(color1_region))
-        @test_throws ArgumentError get_colored_interior_cell_region(ranges, -1)
-        @test_throws ArgumentError get_colored_interior_cell_region(ranges, 2)
-        @test_throws ArgumentError get_colored_interior_cell_region(ranges, 0, 0)
-        @test_throws ArgumentError get_colored_interior_cell_region(ranges, 0, 3)
+        @test_throws ArgumentError get_interior_cell_checkerboard(ranges, -1)
+        @test_throws ArgumentError get_interior_cell_checkerboard(ranges, 2)
+        @test_throws ArgumentError get_interior_cell_checkerboard(ranges, 0, 0)
+        @test_throws ArgumentError get_interior_cell_checkerboard(ranges, 0, 3)
 
         one_d = LocalHaloArray(Int, (4,), 1; boundary_condition=:repeating)
         one_d_ranges = CellRanges(one_d)
@@ -424,14 +424,14 @@ end
         one_cell_ranges = CellRanges(one_cell)
         one_cell_color0 = @inferred get_colored_interior_cell_ranges(one_cell_ranges, 0)
         one_cell_color1 = @inferred get_colored_interior_cell_ranges(one_cell_ranges, 1)
-        one_cell_region_color0 = @inferred get_colored_interior_cell_region(one_cell_ranges, 0)
-        one_cell_region_color1 = @inferred get_colored_interior_cell_region(one_cell_ranges, 1)
+        one_cell_region_color0 = @inferred get_interior_cell_checkerboard(one_cell_ranges, 0)
+        one_cell_region_color1 = @inferred get_interior_cell_checkerboard(one_cell_ranges, 1)
 
         @test collect(get_interior_cells(one_cell_ranges)) == [CartesianIndex(2)]
         @test _cell_subrange_indices(one_cell_color0) == [CartesianIndex(2)]
         @test isempty(_cell_subrange_indices(one_cell_color1))
-        @test one_cell_region_color0 == ColoredCellKernelRegion(CartesianIndex(2), (1,), (1,), 0, 1)
-        @test one_cell_region_color1 == ColoredCellKernelRegion(CartesianIndex(2), (1,), (1,), 1, 1)
+        @test one_cell_region_color0 == CellCheckerboard(CartesianIndex(2), (1,), (1,), 0, 1)
+        @test one_cell_region_color1 == CellCheckerboard(CartesianIndex(2), (1,), (1,), 1, 1)
         @test _colored_cell_region_indices(one_cell_region_color0) == [CartesianIndex(2)]
         @test isempty(_colored_cell_region_indices(one_cell_region_color1))
 
@@ -441,8 +441,8 @@ end
         three_d_color1 = @inferred get_colored_interior_cell_ranges(three_d_ranges, 1)
         three_d_color0_cells = _cell_subrange_indices(three_d_color0)
         three_d_color1_cells = _cell_subrange_indices(three_d_color1)
-        three_d_color0_region = @inferred get_colored_interior_cell_region(three_d_ranges, 0)
-        three_d_color1_region = @inferred get_colored_interior_cell_region(three_d_ranges, 1)
+        three_d_color0_region = @inferred get_interior_cell_checkerboard(three_d_ranges, 0)
+        three_d_color1_region = @inferred get_interior_cell_checkerboard(three_d_ranges, 1)
 
         @test length(three_d_color0) == 4
         @test length(three_d_color1) == 4
@@ -451,9 +451,9 @@ end
         @test !_has_nearest_neighbor_conflict(three_d_color0_cells)
         @test !_has_nearest_neighbor_conflict(three_d_color1_cells)
         @test three_d_color0_region ==
-              ColoredCellKernelRegion(CartesianIndex(2, 2, 2), (2, 4, 2), (3, 4, 2), 0, 1)
+              CellCheckerboard(CartesianIndex(2, 2, 2), (2, 4, 2), (3, 4, 2), 0, 1)
         @test three_d_color1_region ==
-              ColoredCellKernelRegion(CartesianIndex(2, 2, 2), (2, 4, 2), (3, 4, 2), 1, 1)
+              CellCheckerboard(CartesianIndex(2, 2, 2), (2, 4, 2), (3, 4, 2), 1, 1)
         @test Set(_colored_cell_region_indices(three_d_color0_region)) == Set(three_d_color0_cells)
         @test Set(_colored_cell_region_indices(three_d_color1_region)) == Set(three_d_color1_cells)
 
@@ -473,9 +473,9 @@ end
             @test collect(get_interior_cells(other_ranges)) == collect(get_interior_cells(ranges))
             @test _cell_subrange_indices(get_colored_interior_cell_ranges(other_ranges, 0)) == color0_cells
             @test _cell_subrange_indices(get_colored_interior_cell_ranges(other_ranges, 1)) == color1_cells
-            @test get_interior_cell_region(other_ranges) == cell_region
-            @test get_colored_interior_cell_region(other_ranges, 0) == color0_region
-            @test get_colored_interior_cell_region(other_ranges, 1) == color1_region
+            @test get_interior_cell_window(other_ranges) == cell_region
+            @test get_interior_cell_checkerboard(other_ranges, 0) == color0_region
+            @test get_interior_cell_checkerboard(other_ranges, 1) == color1_region
         end
     end
 
@@ -583,10 +583,10 @@ end
         @test_throws ArgumentError ArrayOfHaloArray(Any[local_field, threaded])
     end
 
-    @testset "CellKernelRegion cell_index and is_cell_index_inbounds" begin
+    @testset "CellWindow cell_index and is_cell_index_inbounds" begin
         u = LocalHaloArray(Float64, (4,), 1; boundary_condition=:repeating)
         cr = CellRanges(u)
-        region = get_interior_cell_region(cr)
+        region = get_interior_cell_window(cr)
 
         # first owned cell is at storage index halo+1 = 2
         @test cell_index(region, (1,)) == (2,)
@@ -601,7 +601,7 @@ end
         # 2-D: halo=1, owned (3,3), storage 2:4 in each dim
         u2 = LocalHaloArray(Float64, (3, 3), 1; boundary_condition=:repeating)
         cr2 = CellRanges(u2)
-        r2 = get_interior_cell_region(cr2)
+        r2 = get_interior_cell_window(cr2)
 
         @test cell_index(r2, (1, 1)) == (2, 2)
         @test cell_index(r2, (3, 3)) == (4, 4)
@@ -610,13 +610,13 @@ end
         @test !is_cell_index_inbounds(r2, (2, 5))   # out of bounds in dim 2
     end
 
-    @testset "ColoredCellKernelRegion cell_index and is_cell_index_inbounds" begin
+    @testset "CellCheckerboard cell_index and is_cell_index_inbounds" begin
         # 1-D: 4 owned cells, halo=1 → storage 2:5
         u = LocalHaloArray(Float64, (4,), 1; boundary_condition=:repeating)
         cr = CellRanges(u)
 
-        r0 = get_colored_interior_cell_region(cr, 0)   # color 0: even storage index
-        r1 = get_colored_interior_cell_region(cr, 1)   # color 1: odd storage index
+        r0 = get_interior_cell_checkerboard(cr, 0)   # color 0: even storage index
+        r1 = get_interior_cell_checkerboard(cr, 1)   # color 1: odd storage index
 
         # color 0 maps J=(1,) → storage 2, J=(2,) → storage 4
         @test cell_index(r0, (1,)) == (2,)
@@ -643,7 +643,7 @@ end
         # 2-D: 4×4 owned cells, compressed_dim=2
         u2 = LocalHaloArray(Float64, (4, 4), 1; boundary_condition=:repeating)
         cr2 = CellRanges(u2)
-        r2c0 = get_colored_interior_cell_region(cr2, 0; compressed_dim=2)
+        r2c0 = get_interior_cell_checkerboard(cr2, 0; compressed_dim=2)
 
         # launch size: (4, ceil(4/2)) = (4, 2)
         @test r2c0.size == (4, 2)

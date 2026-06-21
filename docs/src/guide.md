@@ -87,6 +87,46 @@ HaloArray(Float64, (64, 64), 1, topology;
 Custom boundary conditions can be passed as a subtype or instance of
 `AbstractBoundaryCondition`.
 
+### Custom per-field conditions with `FunctionBC`
+
+For a one-off rule you don't want to make a type for, wrap a function in
+[`FunctionBC`](@ref). It runs inside `synchronize_halo!` like a built-in, on
+physical edges only, and works on every backend (single, MPI, threaded). Your
+function is called per `(side, dim)` face as `f(ghost, edge, side, dim, hw, origin)`,
+where `ghost` is the slab to write and `edge` is the adjacent interior slab to read
+(same shape). Because the two straddle the wall, the standard conditions are short,
+side-independent one-liners — and they're geometry-agnostic, so you pass any grid
+spacing `Δ` yourself:
+
+```julia
+# Dirichlet — fix the wall value u₀:           (ghost + edge)/2 = u₀
+dirichlet(u₀)     = FunctionBC((g, e, s, d, hw, o) -> (g .= 2 .* u₀ .- e))
+# Neumann — fix the outward normal flux q:     (ghost − edge)/Δ = q
+neumann(q, Δ)     = FunctionBC((g, e, s, d, hw, o) -> (g .= e .+ Δ .* q))
+# Robin — α·u + β·∂u/∂n = γ at the wall:
+robin(α, β, γ, Δ) = FunctionBC((g, e, s, d, hw, o) -> (g .= (γ .- (α/2 - β/Δ) .* e) ./ (α/2 + β/Δ)))
+```
+
+These compose the way you'd expect: `robin(1, 0, u₀, Δ)` is `dirichlet(u₀)`,
+`robin(0, 1, q, Δ)` is `neumann(q, Δ)`, and `dirichlet(0)` coincides with the
+built-in [`Antireflecting`](@ref) (zero-flux Neumann likewise coincides with
+[`Repeating`](@ref)). Pass them per side like any BC, e.g.
+`boundary_condition = ((dirichlet(300.0), neumann(0.0, dx)), (:periodic, :periodic))`.
+
+`origin` is the **global** `CartesianIndex` of `ghost[1]` (the package computes the
+MPI-rank / tile offset for you), so a *position-dependent* condition is a broadcast
+that stays correct under decomposition — and GPU-safe, since each lane derives its
+own global index:
+
+```julia
+inflow = FunctionBC() do g, e, s, d, hw, o
+    g .= profile.(Tuple.((o - oneunit(o)) .+ CartesianIndices(g)))   # value varies along the face
+end
+```
+
+Three kinds, one mechanism: built-in singletons, `FunctionBC` (custom **per-field**),
+and coupled (**cross-field**, below).
+
 ### Coupled boundary conditions
 
 Some schemes — characteristic reconstruction, for instance — need *all* fields'
@@ -207,8 +247,8 @@ updates use [`get_colored_interior_cell_ranges`](@ref)`(ranges, color)` (strided
 ## Kernel regions
 
 The range APIs are also available as compact launch metadata for GPU /
-KernelAbstractions kernels: [`FaceKernelRegion`](@ref) /
-[`ColoredFaceKernelRegion`](@ref) for faces, and [`CellKernelRegion`](@ref) /
-[`ColoredCellKernelRegion`](@ref) for cells (with [`cell_index`](@ref) and
+KernelAbstractions kernels: [`FaceWindow`](@ref) /
+[`FaceCheckerboard`](@ref) for faces, and [`CellWindow`](@ref) /
+[`CellCheckerboard`](@ref) for cells (with [`cell_index`](@ref) and
 [`is_cell_index_inbounds`](@ref) to map a launch index to a storage cell). See
 `examples/tutorials/gpu.jl`.

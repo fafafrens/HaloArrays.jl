@@ -24,6 +24,39 @@ struct Periodic        <: AbstractBoundaryCondition end
 struct NoBoundaryCondition <: AbstractBoundaryCondition end
 
 """
+    FunctionBC(f)
+
+A custom per-field boundary condition driven by your function `f`. It runs inside
+[`synchronize_halo!`](@ref)/[`boundary_condition!`](@ref) like a built-in, on
+physical edges only, and works identically on `LocalHaloArray`, MPI `HaloArray`,
+and `ThreadedHaloArray` (the method supplies whole-array or tile-local views).
+
+`f` is called once per `(side, dim)` face with
+
+    f(ghost, edge, side, dim, hw, origin)
+
+- `ghost`  — the ghost slab to **write** (a [`get_recv_view`](@ref))
+- `edge`   — the boundary-adjacent interior slab to **read** (a [`get_send_view`](@ref), same shape)
+- `side`, `dim` — which face (`Side`, `Dim`), so one `f` can branch per face
+- `hw`     — the halo width
+- `origin` — the **global** `CartesianIndex` of `ghost[1]`; the global index of
+  `ghost[J]` is `origin - oneunit(origin) + J`. Use it for position-dependent BCs;
+  computing it in a broadcast/kernel keeps the BC GPU-safe.
+
+Examples:
+```julia
+dirichlet(v) = FunctionBC((g, e, s, d, hw, o) -> (g .= v))          # fixed value
+neumann(q,Δ) = FunctionBC((g, e, s, d, hw, o) -> (g .= e .+ (s isa Side{1} ? -Δ*q : Δ*q)))
+inflow       = FunctionBC((g, e, s, d, hw, o) ->                    # varies along the face
+                   (g .= profile.(o .- oneunit(o) .+ CartesianIndices(g))))
+```
+For cross-field (characteristic) boundaries, see [`apply_coupled_bc!`](@ref) instead.
+"""
+struct FunctionBC{F} <: AbstractBoundaryCondition
+    f::F
+end
+
+"""
     Side{S}()  (S = 1 low, 2 high);  Side(s::Int)
 
 Type-level tag for the low (`1`) or high (`2`) end of a dimension, used to
@@ -162,6 +195,19 @@ function interior_to_global_index(halo::HaloArray{T,N}, owned_idx::NTuple{N,<:In
     all(i -> 1 <= owned_idx[i] <= owned_dims[i], 1:N) ||
         throw(BoundsError(halo, owned_idx))
     ntuple(i -> coords[i]*owned_dims[i] + owned_idx[i], Val(N))
+end
+
+# Global CartesianIndex of the first ghost cell (`get_recv_view(s,d,·)[1]`) on the
+# (side, dim) face — the ghost analog of `interior_to_global_index`. Along `dim`
+# the ghost sits outside the interior (local index `1-hw` on the low side,
+# `owned+1` on the high side); along every other dim it starts at the first
+# interior cell (local 1). `ghost[J]` then maps to `origin - oneunit + J`.
+@inline function ghost_origin(halo::HaloArray{T,N}, ::Side{S}, ::Dim{D}) where {T,N,S,D}
+    coords = halo.topology.cart_coords
+    owned  = interior_size(halo)
+    hw     = halo_width(halo)
+    CartesianIndex(ntuple(i -> coords[i]*owned[i] +
+        (i == D ? (S == 1 ? 1 - hw : owned[i] + 1) : 1), Val(N)))
 end
 
 function global_to_storage_index(halo::HaloArray{T,N}, global_idx::NTuple{N,<:Integer}) where {T,N}

@@ -111,6 +111,11 @@ function fill_from_global_indices!(f, halo::LocalHaloArray)
 end
 
 interior_to_global_index(::LocalHaloArray, owned_idx::NTuple{N,<:Integer}) where {N} = owned_idx
+@inline function ghost_origin(halo::LocalHaloArray{T,N}, ::Side{S}, ::Dim{D}) where {T,N,S,D}
+    owned = interior_size(halo)
+    hw    = halo_width(halo)
+    CartesianIndex(ntuple(i -> i == D ? (S == 1 ? 1 - hw : owned[i] + 1) : 1, Val(N)))
+end
 global_to_storage_index(halo::LocalHaloArray, global_idx::NTuple{N,<:Integer}) where {N} =
     all(i -> 1 <= global_idx[i] <= interior_size(halo, i), 1:N) ? ntuple(i -> global_idx[i] + halo_width(halo), Val(N)) : nothing
 global_size(halo::LocalHaloArray) = interior_size(halo)

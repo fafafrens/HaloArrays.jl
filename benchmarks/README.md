@@ -151,7 +151,7 @@ per workload via the `thread_backend=` keyword on `ThreadedHaloArray`.
 ## Metal Colored Cells
 
 Benchmarks a 2D Metal red-black cell stencil using a naive full launch with a
-parity branch versus `ColoredCellKernelRegion` compressed launches. The optional
+parity branch versus `CellCheckerboard` compressed launches. The optional
 manual kernels are hardcoded reference implementations used to check that the
 generic helper path compiles to comparable code.
 
@@ -176,7 +176,7 @@ The repository's `examples` environment already provides `Metal` and
 `KernelAbstractions`, so `julia --project=examples benchmarks/metal_colored_cells.jl`
 works without a separate probe environment.
 
-Reference (Apple M-series GPU; median): the `ColoredCellKernelRegion`
+Reference (Apple M-series GPU; median): the `CellCheckerboard`
 compressed launch is ~1.24× faster than the naive full launch with a parity
 branch. The hardcoded manual kernels are ~0.9× (slightly slower), confirming
 the generic helper path is competitive.

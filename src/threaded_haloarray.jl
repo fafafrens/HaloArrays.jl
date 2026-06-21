@@ -197,6 +197,17 @@ with the extra `tile_id` since the interior region is per tile.
         throw(BoundsError(halo, owned_idx))
     return ntuple(d -> (coord[d] - 1) * ts[d] + owned_idx[d], Val(N))
 end
+# Global CartesianIndex of the first ghost cell of tile `tile_id` on the (side,dim)
+# face — ghost analog of `interior_to_global_index`, per tile (see the HaloArray
+# version for the index convention).
+@inline function ghost_origin(halo::ThreadedHaloArray{T,N}, tile_id::Integer,
+        ::Side{S}, ::Dim{D}) where {T,N,S,D}
+    coord = tile_coordinates(halo, tile_id)
+    ts    = tile_size(halo)
+    hw    = halo_width(halo)
+    CartesianIndex(ntuple(i -> (coord[i] - 1) * ts[i] +
+        (i == D ? (S == 1 ? 1 - hw : ts[i] + 1) : 1), Val(N)))
+end
 @inline global_size(halo::ThreadedHaloArray) = interior_size(halo)
 @inline is_root(halo::ThreadedHaloArray; root::Integer=0) = is_root(halo.topology; root=root)
 # isactive, get_comm inherited from AbstractSerialHaloArray
@@ -362,6 +373,10 @@ end
 @inline boundary_condition!(h::ThreadedHaloArray, t::Integer, s::Side, d::Dim, ::Repeating) =
     _repeating_into!(get_recv_view(s, d, h, t), interior_view(h, t), s, d)
 boundary_condition!(::ThreadedHaloArray, ::Integer, ::Side, ::Dim, ::Periodic) = nothing
+# FunctionBC: tile-local views + per-tile global origin, same closure as the single
+# backends (see haloarray.jl `FunctionBC`).
+@inline boundary_condition!(h::ThreadedHaloArray, t::Integer, s::Side, d::Dim, bc::FunctionBC) =
+    bc.f(get_recv_view(s, d, h, t), get_send_view(s, d, h, t), s, d, halo_width(h), ghost_origin(h, t, s, d))
 
 function boundary_condition!(halo::ThreadedHaloArray)
     @inbounds for tile_id in eachindex(parent(halo))

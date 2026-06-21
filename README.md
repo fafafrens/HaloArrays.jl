@@ -14,6 +14,13 @@ or is decomposed across MPI ranks. Write a stencil once against `interior_view`,
 backend**. `synchronize_halo!` is the only place halos are filled, so the hot path
 stays local and halo validity is predictable.
 
+**The idea:** automate the two error-prone parts of a parallel stencil code — halo
+synchronization and boundary conditions — and otherwise stay out of your way. Beyond
+`synchronize_halo!`, everything is a plain array: drop to `parent(u)` for the raw
+storage and use `interior_range`/`interior_view` (plus the face/cell range utilities)
+to address your own slice, so your kernel is just a loop over arrays with no framework
+to fight.
+
 ## Features
 
 - **Three interchangeable backends behind one API** — `LocalHaloArray` (single
@@ -76,6 +83,38 @@ HALOARRAYS_RUN_UNIT_TESTS=false mpiexec -n 4 julia --project=. test/runtests.jl 
 ```
 
 CI runs unit tests (1 / 2 / 4 threads) and MPI tests (2 / 4 ranks).
+
+## Related work & acknowledgements
+
+I wrote HaloArrays.jl to fit my own needs, but the packages below are well done and
+more mature — if your needs differ, one of them may suit you better. HaloArrays.jl
+was directly inspired by [Chmy.jl](https://github.com/PTsolvers/Chmy.jl) and sits
+alongside Julia's excellent parallel-arrays ecosystem:
+
+- **[Chmy.jl](https://github.com/PTsolvers/Chmy.jl)** — architecture-agnostic
+  (CPU/GPU) fields on structured grids with distributed MPI; a direct inspiration
+  for this package — the way it exchanges halos between ranks is, I think, brilliant.
+- **[ParallelStencil.jl](https://github.com/omlins/ParallelStencil.jl)** —
+  high-performance stencil kernels on CPU/GPU (pairs with ImplicitGlobalGrid.jl
+  for distributed halo updates).
+- **[ImplicitGlobalGrid.jl](https://github.com/omlins/ImplicitGlobalGrid.jl)** —
+  distributed global grids with MPI halo updates (the companion to ParallelStencil).
+- **[Oceananigans.jl](https://github.com/CliMA/Oceananigans.jl)** — its `Field`
+  abstraction is a halo-region array that runs multi-architecture (CPU/GPU) and
+  distributed; an influential "fields with halos" design.
+- **[PencilArrays.jl](https://github.com/jipolanco/PencilArrays.jl)** — distributed
+  N-D arrays with pencil decompositions and halo exchange (and parallel FFTs via
+  [PencilFFTs.jl](https://github.com/jipolanco/PencilFFTs.jl)).
+- **[MPIHaloArrays.jl](https://github.com/smillerc/MPIHaloArrays.jl)** — arrays with
+  halo regions over MPI; closest in spirit and name.
+- **[PartitionedArrays.jl](https://github.com/fverdugo/PartitionedArrays.jl)** —
+  partitioned vectors and sparse matrices for distributed linear algebra.
+
+Where HaloArrays.jl focuses: *one* halo-array API that is identical across serial,
+threaded, and MPI backends (swap only the constructor), GPU-ready via
+KernelAbstractions and `Adapt`, with built-in global reductions and a vector-space
+interface so the same array drops straight into LinearSolve/Krylov and
+OrdinaryDiffEq.
 
 ## License
 

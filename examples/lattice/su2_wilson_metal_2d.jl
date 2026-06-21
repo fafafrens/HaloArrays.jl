@@ -89,7 +89,7 @@ end
 end
 
 @inline function su2_counter_2d(
-        region::ColoredCellKernelRegion{2},
+        region::CellCheckerboard{2},
         I::NTuple{2, <:Integer},
         sweep::UInt32,
         color::UInt32,
@@ -201,7 +201,7 @@ end
 @kernel function su2_metropolis_x_kernel!(
         x0, x1, x2, x3,
         y0, y1, y2, y3,
-        region::ColoredCellKernelRegion{2},
+        region::CellCheckerboard{2},
         params::SU2WilsonParams{Float32},
         key::UInt64,
         sweep::UInt32,
@@ -255,7 +255,7 @@ end
 @kernel function su2_metropolis_y_kernel!(
         x0, x1, x2, x3,
         y0, y1, y2, y3,
-        region::ColoredCellKernelRegion{2},
+        region::CellCheckerboard{2},
         params::SU2WilsonParams{Float32},
         key::UInt64,
         sweep::UInt32,
@@ -319,7 +319,7 @@ function su2_wilson_sweep!(
         synchronize_halo!(U)
         KA.synchronize(backend)
 
-        region = get_colored_interior_cell_region(ranges, color; compressed_dim = 2)
+        region = get_interior_cell_checkerboard(ranges, color; compressed_dim = 2)
         any(iszero, region.size) && continue
 
         kx!(
@@ -340,7 +340,7 @@ function su2_wilson_sweep!(
         synchronize_halo!(U)
         KA.synchronize(backend)
 
-        region = get_colored_interior_cell_region(ranges, color; compressed_dim = 2)
+        region = get_interior_cell_checkerboard(ranges, color; compressed_dim = 2)
         any(iszero, region.size) && continue
 
         ky!(

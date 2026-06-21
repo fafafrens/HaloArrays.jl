@@ -22,7 +22,7 @@ end
 
 @kernel function compressed_colored_cell_kernel!(
         u,
-        region::ColoredCellKernelRegion{2},
+        region::CellCheckerboard{2},
 )
     I = cell_index(region, @index(Global, NTuple))
 
@@ -98,7 +98,7 @@ function benchmark_gpu_sweeps!(kernel_calls, backend, steps, samples, warmups)
 end
 
 function time_naive!(kernel!, backend, u, ranges; steps, warmups, samples)
-    region = get_interior_cell_region(ranges)
+    region = get_interior_cell_window(ranges)
     first_i, first_j = Tuple(region.first)
 
     return benchmark_gpu_sweeps!(backend, steps, samples, warmups) do
@@ -108,8 +108,8 @@ function time_naive!(kernel!, backend, u, ranges; steps, warmups, samples)
 end
 
 function time_compressed!(kernel!, backend, u, ranges, dim; steps, warmups, samples)
-    region0 = get_colored_interior_cell_region(ranges, 0, Dim(dim))
-    region1 = get_colored_interior_cell_region(ranges, 1, Dim(dim))
+    region0 = get_interior_cell_checkerboard(ranges, 0, Dim(dim))
+    region1 = get_interior_cell_checkerboard(ranges, 1, Dim(dim))
 
     return benchmark_gpu_sweeps!(backend, steps, samples, warmups) do
         kernel!(u, region0; ndrange=region0.size)
@@ -118,7 +118,7 @@ function time_compressed!(kernel!, backend, u, ranges, dim; steps, warmups, samp
 end
 
 function time_manual!(kernel!, backend, u, ranges, dim; steps, warmups, samples)
-    region = get_interior_cell_region(ranges)
+    region = get_interior_cell_window(ranges)
     first_i, first_j = Tuple(region.first)
     full_i, full_j = region.size
     launch_size = dim == 1 ? (cld(full_i, 2), full_j) : (full_i, cld(full_j, 2))
