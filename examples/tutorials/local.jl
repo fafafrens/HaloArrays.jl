@@ -75,7 +75,7 @@ println("  2-D mixed BC: size=", interior_size(u2d), " halo=", halo_width(u2d))
 # These name the index ranges a stencil loop needs, so you don't hand-write
 # CartesianIndices(interior_range(u)) every time:
 #   CellRanges — cell-centred loops:  get_interior_cells,
-#                get_colored_interior_cell_ranges (checkerboard / Gauss-Seidel)
+#                get_checkerboard_interior_cell_ranges (checkerboard / Gauss-Seidel)
 #   FaceRanges — finite-volume flux loops:  get_left_face / get_internal_face /
 #                get_right_face, and get_unit_vector (offset across a face)
 
@@ -86,8 +86,8 @@ interior_view(u) .= Float64.(1:6)
 
 cr = CellRanges(u)
 println("interior cells  : ", collect(get_interior_cells(cr)))
-println("checkerboard : ", collect.(get_colored_interior_cell_ranges(cr, 0)),
-        " / ", collect.(get_colored_interior_cell_ranges(cr, 1)))
+println("checkerboard : ", collect.(get_checkerboard_interior_cell_ranges(cr, 0)),
+        " / ", collect.(get_checkerboard_interior_cell_ranges(cr, 1)))
 
 fr = FaceRanges(u)
 println("faces (left / internal / right):")
