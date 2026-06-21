@@ -69,6 +69,10 @@ function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,BCondition},
     return nothing
 end
 
+# Adapter: `_foreach_face` calls `f(halo, Dim, Side)`, while the per-face
+# `boundary_condition!` takes `(halo, Side, Dim)` — flip the order, no closure.
+@inline _boundary_face!(halo, dim::Dim, side::Side) = boundary_condition!(halo, side, dim)
+
 """
     boundary_condition!(u)
     boundary_condition!(u, Side(s), Dim(d))
@@ -85,10 +89,6 @@ edges), so it is safe to call on a decomposed grid. The condition per
 [`Periodic`](@ref), [`Reflecting`](@ref), [`Repeating`](@ref),
 [`Antireflecting`](@ref), [`NoBoundaryCondition`](@ref).
 """
-# Adapter: `_foreach_face` calls `f(halo, Dim, Side)`, while the per-face
-# `boundary_condition!` takes `(halo, Side, Dim)` — flip the order, no closure.
-@inline _boundary_face!(halo, dim::Dim, side::Side) = boundary_condition!(halo, side, dim)
-
 function boundary_condition!(halo::AbstractSingleHaloArray{T,N}) where {T,N}
     _foreach_face(_boundary_face!, halo, Val(N))
     return nothing
