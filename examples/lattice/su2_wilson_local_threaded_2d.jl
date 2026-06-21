@@ -200,7 +200,7 @@ function update_direction_color!(::LocalHaloBackend, U, rng, params, dir::Int, c
     arrays = link_arrays(U)
     update! = dir == 1 ? update_x_link! : update_y_link!
 
-    for indices in get_checkerboard_interior_cell_ranges(CellRanges(U), color)
+    for indices in get_interior_cells(CellRanges(U), color)
         @inbounds for I in indices
             update!(arrays, I, params, rng)
         end
@@ -210,7 +210,7 @@ function update_direction_color!(::LocalHaloBackend, U, rng, params, dir::Int, c
 end
 
 function update_direction_color!(::ThreadedHaloBackend, U, rngs, params, dir::Int, color::Int)
-    regions = get_checkerboard_interior_cell_ranges(CellRanges(U), color)
+    regions = get_interior_cells(CellRanges(U), color)
     update! = dir == 1 ? update_x_link! : update_y_link!
 
     tforeach(1:tile_count(U); scheduler=:static) do tile_id

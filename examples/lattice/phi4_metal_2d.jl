@@ -125,7 +125,7 @@ end
 
 function make_random_buffers(phi)
     ranges = CellRanges(phi)
-    region0 = get_interior_cell_checkerboard(ranges, 0; compressed_dim = 2)
+    region0 = get_interior_cell_window(ranges, 0; compressed_dim = 2)
 
     proposal = Metal.zeros(Float32, region0.size...)
     accept = Metal.zeros(Float32, region0.size...)
@@ -154,7 +154,7 @@ function phi4_sweep!(kernel!, backend, phi, params, buffers::RandomBuffers)
         synchronize_halo!(phi)
         KA.synchronize(backend)
 
-        region = get_interior_cell_checkerboard(ranges, color; compressed_dim = 2)
+        region = get_interior_cell_window(ranges, color; compressed_dim = 2)
         #any(==(0), region.size) && continue
 
         refill_random_buffers!(buffers)

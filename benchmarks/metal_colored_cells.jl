@@ -108,8 +108,8 @@ function time_naive!(kernel!, backend, u, ranges; steps, warmups, samples)
 end
 
 function time_compressed!(kernel!, backend, u, ranges, dim; steps, warmups, samples)
-    region0 = get_interior_cell_checkerboard(ranges, 0, Dim(dim))
-    region1 = get_interior_cell_checkerboard(ranges, 1, Dim(dim))
+    region0 = get_interior_cell_window(ranges, 0, Dim(dim))
+    region1 = get_interior_cell_window(ranges, 1, Dim(dim))
 
     return benchmark_gpu_sweeps!(backend, steps, samples, warmups) do
         kernel!(u, region0; ndrange=region0.size)

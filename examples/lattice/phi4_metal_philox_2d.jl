@@ -185,7 +185,7 @@ function phi4_sweep!(kernel!, backend, phi, params, key::UInt64, sweep::Integer)
         synchronize_halo!(phi)
         KA.synchronize(backend)
 
-        region = get_interior_cell_checkerboard(ranges, color; compressed_dim = 2)
+        region = get_interior_cell_window(ranges, color; compressed_dim = 2)
 
         if any(iszero, region.size)
             continue

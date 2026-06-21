@@ -83,49 +83,49 @@ Return compact launch metadata for the upper-side `interior | ghost` face.
     get_right_face_window(ranges, D)
 
 """
-    get_left_face_checkerboard(ranges, dim, color)
+    get_left_face_window(ranges, dim, color)
 
 Return compact launch metadata for one lower-side face color.
 """
-@inline get_left_face_checkerboard(ranges::FaceRanges, dim::Int, color::Integer) =
+@inline get_left_face_window(ranges::FaceRanges, dim::Int, color::Integer) =
     FaceCheckerboard(
-        get_checkerboard_left_face(ranges, dim, color),
+        get_left_face(ranges, dim, color),
         get_unit_vector(ranges, dim),
         false,
         true,
     )
-@inline get_left_face_checkerboard(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
-    get_left_face_checkerboard(ranges, D, color)
+@inline get_left_face_window(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
+    get_left_face_window(ranges, D, color)
 
 """
-    get_internal_face_checkerboard(ranges, dim, color)
+    get_internal_face_window(ranges, dim, color)
 
 Return compact launch metadata for one internal face color.
 """
-@inline get_internal_face_checkerboard(ranges::FaceRanges, dim::Int, color::Integer) =
+@inline get_internal_face_window(ranges::FaceRanges, dim::Int, color::Integer) =
     FaceCheckerboard(
-        get_checkerboard_internal_face(ranges, dim, color),
+        get_internal_face(ranges, dim, color),
         get_unit_vector(ranges, dim),
         true,
         true,
     )
-@inline get_internal_face_checkerboard(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
-    get_internal_face_checkerboard(ranges, D, color)
+@inline get_internal_face_window(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
+    get_internal_face_window(ranges, D, color)
 
 """
-    get_right_face_checkerboard(ranges, dim, color)
+    get_right_face_window(ranges, dim, color)
 
 Return compact launch metadata for one upper-side face color.
 """
-@inline get_right_face_checkerboard(ranges::FaceRanges, dim::Int, color::Integer) =
+@inline get_right_face_window(ranges::FaceRanges, dim::Int, color::Integer) =
     FaceCheckerboard(
-        get_checkerboard_right_face(ranges, dim, color),
+        get_right_face(ranges, dim, color),
         get_unit_vector(ranges, dim),
         true,
         false,
     )
-@inline get_right_face_checkerboard(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
-    get_right_face_checkerboard(ranges, D, color)
+@inline get_right_face_window(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
+    get_right_face_window(ranges, D, color)
 
 # ------------------------------------------------------------------------------
 # Launch-index → storage-index mapping, mirroring the cell-region API so kernels
