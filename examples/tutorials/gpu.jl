@@ -160,7 +160,7 @@ println("storage[2,2] (J=1,1) : ", corner_val)   # I=(2,2) → 2*100+2 = 202.0
 # Cells of the same color are independent and can be updated in
 # one parallel kernel launch.
 #
-# get_interior_cell_checkerboard(ranges, color; compressed_dim)
+# get_interior_cell_window(ranges, color; compressed_dim)
 #   compressed_dim — the spatial dimension along which the launch
 #                    grid is compressed.  Choosing the fastest-
 #                    varying memory dimension gives coalesced access.
@@ -191,7 +191,7 @@ for color in 0:1
     synchronize_halo!(u_gpu)
     KA.synchronize(backend)
 
-    region_c = get_interior_cell_checkerboard(ranges, color; compressed_dim=2)
+    region_c = get_interior_cell_window(ranges, color; compressed_dim=2)
     println("color=$color  launch size : ", region_c.size)
 
     any(==(0), region_c.size) && continue

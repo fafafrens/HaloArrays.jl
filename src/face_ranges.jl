@@ -262,35 +262,35 @@ end
 end
 
 """
-    get_checkerboard_left_face(ranges, dim, color)
+    get_left_face(ranges, dim, color)
 
 Return the lower-side face cells of one race-free face color.
 """
-get_checkerboard_left_face(ranges::FaceRanges, dim::Int, color::Integer) =
+get_left_face(ranges::FaceRanges, dim::Int, color::Integer) =
     _colored_face(get_left_face(ranges, dim), dim, color)
-get_checkerboard_left_face(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
-    get_checkerboard_left_face(ranges, D, color)
+get_left_face(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
+    get_left_face(ranges, D, color)
 
 """
-    get_checkerboard_internal_face(ranges, dim, color)
+    get_internal_face(ranges, dim, color)
 
 Return the internal face cells of one race-free face color.
 """
-function get_checkerboard_internal_face(ranges::FaceRanges, dim::Int, color::Integer)
+function get_internal_face(ranges::FaceRanges, dim::Int, color::Integer)
     return _colored_face(get_internal_face(ranges, dim), dim, color)
 end
-get_checkerboard_internal_face(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
-    get_checkerboard_internal_face(ranges, D, color)
+get_internal_face(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
+    get_internal_face(ranges, D, color)
 
 """
-    get_checkerboard_right_face(ranges, dim, color)
+    get_right_face(ranges, dim, color)
 
 Return the upper-side face cells of one race-free face color.
 """
-get_checkerboard_right_face(ranges::FaceRanges, dim::Int, color::Integer) =
+get_right_face(ranges::FaceRanges, dim::Int, color::Integer) =
     _colored_face(get_right_face(ranges, dim), dim, color)
-get_checkerboard_right_face(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
-    get_checkerboard_right_face(ranges, D, color)
+get_right_face(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
+    get_right_face(ranges, D, color)
 
 """
     face_offset(halo, dim)
