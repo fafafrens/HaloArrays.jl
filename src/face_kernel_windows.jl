@@ -89,7 +89,7 @@ Return compact launch metadata for one lower-side face color.
 """
 @inline get_left_face_checkerboard(ranges::FaceRanges, dim::Int, color::Integer) =
     FaceCheckerboard(
-        get_colored_left_face(ranges, dim, color),
+        get_checkerboard_left_face(ranges, dim, color),
         get_unit_vector(ranges, dim),
         false,
         true,
@@ -104,7 +104,7 @@ Return compact launch metadata for one internal face color.
 """
 @inline get_internal_face_checkerboard(ranges::FaceRanges, dim::Int, color::Integer) =
     FaceCheckerboard(
-        get_colored_internal_face(ranges, dim, color),
+        get_checkerboard_internal_face(ranges, dim, color),
         get_unit_vector(ranges, dim),
         true,
         true,
@@ -119,7 +119,7 @@ Return compact launch metadata for one upper-side face color.
 """
 @inline get_right_face_checkerboard(ranges::FaceRanges, dim::Int, color::Integer) =
     FaceCheckerboard(
-        get_colored_right_face(ranges, dim, color),
+        get_checkerboard_right_face(ranges, dim, color),
         get_unit_vector(ranges, dim),
         true,
         false,

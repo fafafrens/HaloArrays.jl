@@ -11,7 +11,7 @@ For `MultiHaloArray` and `ArrayOfHaloArray`, the ranges are spatial only. Apply
 them after selecting an individual field.
 
 - `get_interior_cells(ranges)`: all interior cells.
-- `get_colored_interior_cell_ranges(ranges, color)`: branch-free checkerboard
+- `get_checkerboard_interior_cell_ranges(ranges, color)`: branch-free checkerboard
   subranges for nearest-neighbor in-place updates.
 """
 struct CellRanges{A,Halo}
@@ -62,11 +62,11 @@ end
 end
 
 """
-    get_colored_interior_cell_ranges(ranges, color)
+    get_checkerboard_interior_cell_ranges(ranges, color)
 
 Return a tuple of strided `CartesianIndices` that cover one checkerboard color
 of the interior cells. Colors are `0` and `1`, chosen by
 `mod(sum(Tuple(I)), 2)`.
 """
-get_colored_interior_cell_ranges(ranges::CellRanges, color::Integer) =
+get_checkerboard_interior_cell_ranges(ranges::CellRanges, color::Integer) =
     _colored_cell_ranges(get_interior_cells(ranges), color)

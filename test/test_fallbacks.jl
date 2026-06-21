@@ -21,8 +21,8 @@ using HaloArrays
         cells = get_interior_cells(cr)
         @test size(cells) == (4, 4)
         # colored subranges cover all owned cells
-        c0 = get_colored_interior_cell_ranges(cr, 0)
-        c1 = get_colored_interior_cell_ranges(cr, 1)
+        c0 = get_checkerboard_interior_cell_ranges(cr, 0)
+        c1 = get_checkerboard_interior_cell_ranges(cr, 1)
         @test sum(length, c0) + sum(length, c1) == 16
     end
 
