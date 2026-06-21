@@ -79,7 +79,7 @@ end
 end
 
 @inline function phi4_counter_2d(
-        region::ColoredCellKernelRegion{2},
+        region::CellCheckerboard{2},
         I::NTuple{2, <:Integer},
         sweep::UInt32,
         color::UInt32,
@@ -108,7 +108,7 @@ end
 
 @kernel function phi4_metropolis_color_kernel!(
         phi,
-        region::ColoredCellKernelRegion{2},
+        region::CellCheckerboard{2},
         params::Phi4Params{Float32},
         key::UInt64,
         sweep::UInt32,
@@ -185,7 +185,7 @@ function phi4_sweep!(kernel!, backend, phi, params, key::UInt64, sweep::Integer)
         synchronize_halo!(phi)
         KA.synchronize(backend)
 
-        region = get_colored_interior_cell_region(ranges, color; compressed_dim = 2)
+        region = get_interior_cell_checkerboard(ranges, color; compressed_dim = 2)
 
         if any(iszero, region.size)
             continue

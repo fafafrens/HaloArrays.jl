@@ -107,9 +107,9 @@ u    = HaloArray(to_device(parent(host)), HALO, topo, bc)   # device, IC already
 unew = HaloArray(to_device(zeros(T, FULL...)), HALO, topo, bc)
 
 # ---- one diffusion step: exchange ghosts, then a portable KA 5-point Laplacian -
-# HaloArrays' CellKernelRegion + cell_index map the launch index to the padded
+# HaloArrays' CellWindow + cell_index map the launch index to the padded
 # parent cell; ±1 reaches into the freshly-synced ghost layer.
-@kernel function heat_kernel!(out, s, dx2inv, region::CellKernelRegion{2})
+@kernel function heat_kernel!(out, s, dx2inv, region::CellWindow{2})
     J = @index(Global, NTuple)                        # hoisted (see header note)
     i, j = cell_index(region, J)                      # (i, j) into the padded parent
     @inbounds out[i, j] = s[i, j] + dx2inv *
@@ -118,7 +118,7 @@ end
 
 function step!(unew, u, kernel!, backend; dx2inv)
     synchronize_halo!(u)                              # GPU↔GPU (or rank↔rank) exchange
-    region = get_interior_cell_region(CellRanges(u))
+    region = get_interior_cell_window(CellRanges(u))
     any(==(0), region.size) && return nothing
     kernel!(parent(unew), parent(u), dx2inv, region; ndrange = region.size)
     KA.synchronize(backend)

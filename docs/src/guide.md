@@ -247,8 +247,8 @@ updates use [`get_colored_interior_cell_ranges`](@ref)`(ranges, color)` (strided
 ## Kernel regions
 
 The range APIs are also available as compact launch metadata for GPU /
-KernelAbstractions kernels: [`FaceKernelRegion`](@ref) /
-[`ColoredFaceKernelRegion`](@ref) for faces, and [`CellKernelRegion`](@ref) /
-[`ColoredCellKernelRegion`](@ref) for cells (with [`cell_index`](@ref) and
+KernelAbstractions kernels: [`FaceWindow`](@ref) /
+[`FaceCheckerboard`](@ref) for faces, and [`CellWindow`](@ref) /
+[`CellCheckerboard`](@ref) for cells (with [`cell_index`](@ref) and
 [`is_cell_index_inbounds`](@ref) to map a launch index to a storage cell). See
 `examples/tutorials/gpu.jl`.

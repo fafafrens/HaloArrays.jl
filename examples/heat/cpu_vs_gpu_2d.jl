@@ -7,7 +7,7 @@ const KA = KernelAbstractions
 
 # One KernelAbstractions implementation, run on both the CPU and the Metal GPU
 # backend (chosen from the array type via `KA.get_backend`), then compared. The
-# kernels do all the work through HaloArrays' CellKernelRegion/ColoredFaceKernelRegion
+# kernels do all the work through HaloArrays' CellWindow/FaceCheckerboard
 # helpers, so the same code is correct on either device — no separate hand-written
 # CPU loops.
 
@@ -35,13 +35,13 @@ end
 # index-injection transform fires; nesting it inside cell_index(...) compiles for
 # GPU but errors on CPU) ---
 
-@kernel function zero_owned_kernel!(data, region::CellKernelRegion{2})
+@kernel function zero_owned_kernel!(data, region::CellWindow{2})
     J = @index(Global, NTuple)
     I = cell_index(region, J)
     @inbounds data[I...] = zero(eltype(data))
 end
 
-@kernel function heat_flux_kernel!(du, data, region::ColoredFaceKernelRegion{2}, scale)
+@kernel function heat_flux_kernel!(du, data, region::FaceCheckerboard{2}, scale)
     J = @index(Global, NTuple)
     IL = cell_index(region, J)          # lower cell of this face
     offset = Tuple(region.offset)
@@ -58,7 +58,7 @@ end
     end
 end
 
-@kernel function apply_heat_update_kernel!(out, data, du, dt, region::CellKernelRegion{2})
+@kernel function apply_heat_update_kernel!(out, data, du, dt, region::CellWindow{2})
     J = @index(Global, NTuple)
     I = cell_index(region, J)
     @inbounds out[I...] = data[I...] + dt * du[I...]
@@ -80,7 +80,7 @@ end
 
 function heat_step!(kernels, u_next, du, u, alpha, dt, dx)
     backend, zero!, flux!, update! = kernels
-    cell_region = get_interior_cell_region(CellRanges(u))
+    cell_region = get_interior_cell_window(CellRanges(u))
     ranges = FaceRanges(u)
 
     launch_cell_kernel!(zero!, parent(du), cell_region)
@@ -90,9 +90,9 @@ function heat_step!(kernels, u_next, du, u, alpha, dt, dx)
         scale = Float32(alpha / dx[dim]^2)
         for color in 0:1
             for region in (
-                    get_colored_left_face_region(ranges, dim, color),
-                    get_colored_internal_face_region(ranges, dim, color),
-                    get_colored_right_face_region(ranges, dim, color),
+                    get_left_face_checkerboard(ranges, dim, color),
+                    get_internal_face_checkerboard(ranges, dim, color),
+                    get_right_face_checkerboard(ranges, dim, color),
             )
                 launch_face_kernel!(flux!, parent(du), parent(u), region, scale)
             end

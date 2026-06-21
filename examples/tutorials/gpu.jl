@@ -15,9 +15,9 @@
 # Sections:
 #   1. Moving a HaloArray to the GPU
 #   2. Writing a KernelAbstractions kernel on halo storage
-#   3. CellKernelRegion — mapping launch indices to storage
-#   4. ColoredCellKernelRegion — checkerboard sweeps
-#   5. FaceKernelRegion — finite-volume flux kernels
+#   3. CellWindow — mapping launch indices to storage
+#   4. CellCheckerboard — checkerboard sweeps
+#   5. FaceWindow — finite-volume flux kernels
 #   6. Heat equation on the GPU (2-D)
 # ============================================================
 
@@ -111,16 +111,16 @@ du_cpu = Array(interior_view(du_gpu))
 println("max |Δu|  : ", maximum(abs, du_cpu))   # near 0 for constant field
 
 # ============================================================
-# 3. CellKernelRegion — MAPPING LAUNCH INDICES TO STORAGE
+# 3. CellWindow — MAPPING LAUNCH INDICES TO STORAGE
 # ============================================================
 #
 # Manually adding the halo offset in every kernel is error-prone.
-# CellKernelRegion encapsulates the mapping from compact launch
+# CellWindow encapsulates the mapping from compact launch
 # coordinates (1-based, interior cells only) to storage coordinates
 # (1-based, includes ghost padding).
 #
 # Workflow:
-#   1.  region = get_interior_cell_region(CellRanges(u))
+#   1.  region = get_interior_cell_window(CellRanges(u))
 #   2.  Launch with ndrange = region.size
 #   3.  Inside kernel: I = cell_index(region, J)
 #                      where J = @index(Global, NTuple)
@@ -128,10 +128,10 @@ println("max |Δu|  : ", maximum(abs, du_cpu))   # near 0 for constant field
 
 println()
 println("=" ^ 60)
-println("Section 3 — CellKernelRegion")
+println("Section 3 — CellWindow")
 println("=" ^ 60)
 
-@kernel function fill_index_kernel!(data, region::CellKernelRegion{2})
+@kernel function fill_index_kernel!(data, region::CellWindow{2})
     J = @index(Global, NTuple)
     I = cell_index(region, J)
     if is_cell_index_inbounds(region, I)
@@ -139,7 +139,7 @@ println("=" ^ 60)
     end
 end
 
-region = get_interior_cell_region(CellRanges(u_gpu))
+region = get_interior_cell_window(CellRanges(u_gpu))
 println("launch size (interior)  : ", region.size)
 println("first interior cell     : ", region.first)   # storage coords, = (halo+1, halo+1)
 
@@ -151,7 +151,7 @@ corner_val = Array(parent(u_gpu))[halo+1, halo+1]
 println("storage[2,2] (J=1,1) : ", corner_val)   # I=(2,2) → 2*100+2 = 202.0
 
 # ============================================================
-# 4. ColoredCellKernelRegion — CHECKERBOARD SWEEPS
+# 4. CellCheckerboard — CHECKERBOARD SWEEPS
 # ============================================================
 #
 # For in-place Gauss-Seidel or Metropolis updates where a cell
@@ -160,17 +160,17 @@ println("storage[2,2] (J=1,1) : ", corner_val)   # I=(2,2) → 2*100+2 = 202.0
 # Cells of the same color are independent and can be updated in
 # one parallel kernel launch.
 #
-# get_colored_interior_cell_region(ranges, color; compressed_dim)
+# get_interior_cell_checkerboard(ranges, color; compressed_dim)
 #   compressed_dim — the spatial dimension along which the launch
 #                    grid is compressed.  Choosing the fastest-
 #                    varying memory dimension gives coalesced access.
 
 println()
 println("=" ^ 60)
-println("Section 4 — ColoredCellKernelRegion (checkerboard)")
+println("Section 4 — CellCheckerboard (checkerboard)")
 println("=" ^ 60)
 
-@kernel function checkerboard_kernel!(data, region::ColoredCellKernelRegion{2})
+@kernel function checkerboard_kernel!(data, region::CellCheckerboard{2})
     J = @index(Global, NTuple)
     I = cell_index(region, J)
     if is_cell_index_inbounds(region, I)
@@ -191,7 +191,7 @@ for color in 0:1
     synchronize_halo!(u_gpu)
     KA.synchronize(backend)
 
-    region_c = get_colored_interior_cell_region(ranges, color; compressed_dim=2)
+    region_c = get_interior_cell_checkerboard(ranges, color; compressed_dim=2)
     println("color=$color  launch size : ", region_c.size)
 
     any(==(0), region_c.size) && continue
@@ -201,26 +201,26 @@ for color in 0:1
 end
 
 # ============================================================
-# 5. FaceKernelRegion — FINITE-VOLUME FLUX KERNELS
+# 5. FaceWindow — FINITE-VOLUME FLUX KERNELS
 # ============================================================
 #
-# Finite-volume loops iterate over faces.  FaceKernelRegion maps
+# Finite-volume loops iterate over faces.  FaceWindow maps
 # a compact 1-D (per face type) launch index to a storage index.
 #
 # Three region types per dimension:
-#   get_left_face_region(fr, dim)     — ghost | interior boundary faces
-#   get_internal_face_region(fr, dim) — interior | interior internal faces
-#   get_right_face_region(fr, dim)    — interior | ghost boundary faces
+#   get_left_face_window(fr, dim)     — ghost | interior boundary faces
+#   get_internal_face_window(fr, dim) — interior | interior internal faces
+#   get_right_face_window(fr, dim)    — interior | ghost boundary faces
 #
 # Inside the kernel use cell_index(region, J) to get IL (lower cell).
 # The upper cell is IL + region.offset.
 
 println()
 println("=" ^ 60)
-println("Section 5 — FaceKernelRegion")
+println("Section 5 — FaceWindow")
 println("=" ^ 60)
 
-@kernel function flux_accumulate_kernel!(du, u, region::FaceKernelRegion{2}, inv_dx)
+@kernel function flux_accumulate_kernel!(du, u, region::FaceWindow{2}, inv_dx)
     J  = @index(Global, NTuple)
     IL = cell_index(region, J)
     if is_cell_index_inbounds(region, IL)
@@ -239,9 +239,9 @@ end
 
 fr = FaceRanges(u_gpu)
 dim = 1
-left_region     = get_left_face_region(fr, dim)
-internal_region = get_internal_face_region(fr, dim)
-right_region    = get_right_face_region(fr, dim)
+left_region     = get_left_face_window(fr, dim)
+internal_region = get_internal_face_window(fr, dim)
+right_region    = get_right_face_window(fr, dim)
 
 println("dim=1  left    launch size : ", left_region.size)
 println("dim=1  internal launch size: ", internal_region.size)
@@ -252,7 +252,7 @@ println("dim=1  right   launch size : ", right_region.size)
 # ============================================================
 #
 # We put everything together: GPU-backed LocalHaloArray, a
-# KernelAbstractions kernel using CellKernelRegion, and explicit
+# KernelAbstractions kernel using CellWindow, and explicit
 # Euler time integration.
 
 println()
@@ -260,7 +260,7 @@ println("=" ^ 60)
 println("Section 6 — Heat equation on the GPU (2-D)")
 println("=" ^ 60)
 
-@kernel function heat_rhs_kernel!(du, u, region::CellKernelRegion{2}, inv_dx2, inv_dy2)
+@kernel function heat_rhs_kernel!(du, u, region::CellWindow{2}, inv_dx2, inv_dy2)
     J = @index(Global, NTuple)
     I = cell_index(region, J)
     if is_cell_index_inbounds(region, I)
@@ -270,7 +270,7 @@ println("=" ^ 60)
     end
 end
 
-@kernel function euler_update_kernel!(u_next, u, du, region::CellKernelRegion{2}, dt)
+@kernel function euler_update_kernel!(u_next, u, du, region::CellWindow{2}, dt)
     J = @index(Global, NTuple)
     I = cell_index(region, J)
     if is_cell_index_inbounds(region, I)
@@ -304,7 +304,7 @@ function run_heat_gpu(; n=(128,128), alpha=1.0f0, nt=200, cfl=0.4f0, groupsize=(
     inv_dy2 = alpha / dy^2
 
     cr      = CellRanges(u)
-    region  = get_interior_cell_region(cr)
+    region  = get_interior_cell_window(cr)
 
     rhs_k!  = heat_rhs_kernel!(bk, groupsize)
     step_k! = euler_update_kernel!(bk, groupsize)

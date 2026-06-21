@@ -18,8 +18,8 @@ include("ArrayOfHaloArray.jl")
 include("multihaloarray.jl")
 include("face_ranges.jl")
 include("cell_ranges.jl")
-include("face_kernel_regions.jl")
-include("cell_kernel_regions.jl")
+include("face_kernel_windows.jl")
+include("cell_kernel_windows.jl")
 include("maybehaloarray.jl")
 include("interior_broadcast.jl")
 include("interior_broadcast_marray.jl")
@@ -93,26 +93,26 @@ export interior_view,
     FaceRanges,
     accumulate_flux_divergence!,
     CellRanges,
-    FaceKernelRegion,
-    ColoredFaceKernelRegion,
-    CellKernelRegion,
-    ColoredCellKernelRegion,
+    FaceWindow,
+    FaceCheckerboard,
+    CellWindow,
+    CellCheckerboard,
     get_left_face,
     get_internal_face,
     get_right_face,
     get_colored_left_face,
     get_colored_internal_face,
     get_colored_right_face,
-    get_left_face_region,
-    get_internal_face_region,
-    get_right_face_region,
-    get_colored_left_face_region,
-    get_colored_internal_face_region,
-    get_colored_right_face_region,
+    get_left_face_window,
+    get_internal_face_window,
+    get_right_face_window,
+    get_left_face_checkerboard,
+    get_internal_face_checkerboard,
+    get_right_face_checkerboard,
     get_interior_cells,
     get_colored_interior_cell_ranges,
-    get_interior_cell_region,
-    get_colored_interior_cell_region,
+    get_interior_cell_window,
+    get_interior_cell_checkerboard,
     cell_index,
     is_cell_index_inbounds,
     get_unit_vector,

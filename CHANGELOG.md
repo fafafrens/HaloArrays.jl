@@ -28,6 +28,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`norm` for `MultiHaloArray` / `ArrayOfHaloArray` / `MaybeHaloArray`.**
 
 ### Changed
+- **Kernel-region types renamed** for clarity ("region" now reads as a *range*
+  concept; these are positioned launch windows): `CellKernelRegion`→`CellWindow`,
+  `FaceKernelRegion`→`FaceWindow`, and the 2-colored (red-black) variants
+  `ColoredCellKernelRegion`→`CellCheckerboard`, `ColoredFaceKernelRegion`→
+  `FaceCheckerboard`. Accessors follow suit: `get_*_region`→`get_*_window` and
+  `get_colored_*_region`→`get_*_checkerboard`.
 - **HDF5 is now a weak dependency** (`HaloArraysHDF5Ext`): `using HaloArrays` no
   longer pulls in HDF5 (and its MPI-built JLLs, which clash with a system
   CUDA-aware MPI). The I/O API loads only when you `using HDF5`.

@@ -1,16 +1,16 @@
 """
-    CellKernelRegion
+    CellWindow
 
 Compact interior-cell metadata for launch-style loops. `first` is the first
 interior cell in storage coordinates and `size` is the interior-cell extent.
 """
-struct CellKernelRegion{N}
+struct CellWindow{N}
     first::CartesianIndex{N}
     size::NTuple{N,Int}
 end
 
 """
-    ColoredCellKernelRegion
+    CellCheckerboard
 
 Compact metadata for race-free colored cell kernels.
 
@@ -19,7 +19,7 @@ Compact metadata for race-free colored cell kernels.
 physical cell from the launch index and do a final bound check in the
 compressed dimension.
 """
-struct ColoredCellKernelRegion{N,C}
+struct CellCheckerboard{N,C}
     first::CartesianIndex{N}
     size::NTuple{N,Int}
     full_size::NTuple{N,Int}
@@ -27,8 +27,8 @@ struct ColoredCellKernelRegion{N,C}
     compressed_dim::Int
 end
 
-@inline CellKernelRegion(indices::CartesianIndices{N}) where {N} =
-    CellKernelRegion(first(indices), size(indices))
+@inline CellWindow(indices::CartesianIndices{N}) where {N} =
+    CellWindow(first(indices), size(indices))
 
 @inline function _check_cell_compressed_dim(::Val{N}, compressed_dim::Integer) where {N}
     dim = Int(compressed_dim)
@@ -37,14 +37,14 @@ end
     return dim
 end
 
-@inline function ColoredCellKernelRegion(first::CartesianIndex{N},
+@inline function CellCheckerboard(first::CartesianIndex{N},
                                          size::NTuple{N,Int},
                                          full_size::NTuple{N,Int},
                                          color::Integer,
                                          compressed_dim::Integer) where {N}
     checked_color = _check_loop_color(color)
     compressed = _check_cell_compressed_dim(Val(N), compressed_dim)
-    return ColoredCellKernelRegion{N,compressed}(
+    return CellCheckerboard{N,compressed}(
         first,
         size,
         full_size,
@@ -58,19 +58,19 @@ end
 
 Map a launch-local index `J` to the corresponding storage-space cell index.
 
-For `ColoredCellKernelRegion`, `J` lives in the compressed launch region and
+For `CellCheckerboard`, `J` lives in the compressed launch region and
 the returned cell is adjusted so `mod(sum(I), 2) == region.color`.
 """
-@inline function cell_index(region::CellKernelRegion{N},
+@inline function cell_index(region::CellWindow{N},
                             J::NTuple{N,<:Integer}) where {N}
     first_tuple = Tuple(region.first)
     return ntuple(d -> first_tuple[d] + Int(J[d]) - 1, Val(N))
 end
 
-@inline cell_index(region::CellKernelRegion{N}, J::CartesianIndex{N}) where {N} =
+@inline cell_index(region::CellWindow{N}, J::CartesianIndex{N}) where {N} =
     CartesianIndex(cell_index(region, Tuple(J)))
 
-@inline function cell_index(region::ColoredCellKernelRegion{N,C},
+@inline function cell_index(region::CellCheckerboard{N,C},
                             J::NTuple{N,<:Integer}) where {N,C}
     first_tuple = Tuple(region.first)
 
@@ -85,12 +85,12 @@ end
     return ntuple(d -> base_tuple[d] + (d == C ? delta : 0), Val(N))
 end
 
-@inline cell_index(region::ColoredCellKernelRegion{N},
+@inline cell_index(region::CellCheckerboard{N},
                    J::CartesianIndex{N}) where {N} =
     CartesianIndex(cell_index(region, Tuple(J)))
 
-@inline _cell_region_full_size(region::CellKernelRegion) = region.size
-@inline _cell_region_full_size(region::ColoredCellKernelRegion) = region.full_size
+@inline _cell_region_full_size(region::CellWindow) = region.size
+@inline _cell_region_full_size(region::CellCheckerboard) = region.full_size
 
 """
     is_cell_index_inbounds(region, I)
@@ -99,7 +99,7 @@ Return whether a storage-space cell index `I` lies inside the interior-cell exte
 described by `region`. This is mainly needed by compressed colored GPU kernels,
 where the last launch index may reconstruct one cell past the interior boundary.
 """
-@inline function is_cell_index_inbounds(region::Union{CellKernelRegion{N},ColoredCellKernelRegion{N}},
+@inline function is_cell_index_inbounds(region::Union{CellWindow{N},CellCheckerboard{N}},
                                         I::NTuple{N,<:Integer}) where {N}
     first_tuple = Tuple(region.first)
     full_size = _cell_region_full_size(region)
@@ -109,11 +109,11 @@ where the last launch index may reconstruct one cell past the interior boundary.
     return all(checks)
 end
 
-@inline is_cell_index_inbounds(region::Union{CellKernelRegion{N},ColoredCellKernelRegion{N}},
+@inline is_cell_index_inbounds(region::Union{CellWindow{N},CellCheckerboard{N}},
                                I::CartesianIndex{N}) where {N} =
     is_cell_index_inbounds(region, Tuple(I))
 
-@inline function ColoredCellKernelRegion(indices::CartesianIndices{N},
+@inline function CellCheckerboard(indices::CartesianIndices{N},
                                          color::Integer,
                                          compressed_dim::Integer=1) where {N}
     checked_color = _check_loop_color(color)
@@ -121,7 +121,7 @@ end
     full_size = size(indices)
     launch_size = ntuple(d -> d == compressed ? cld(full_size[d], 2) : full_size[d], Val(N))
 
-    return ColoredCellKernelRegion(
+    return CellCheckerboard(
         first(indices),
         launch_size,
         full_size,
@@ -131,29 +131,29 @@ end
 end
 
 """
-    get_interior_cell_region(ranges)
+    get_interior_cell_window(ranges)
 
 Return compact launch metadata for the interior-cell region.
 """
-@inline get_interior_cell_region(ranges::CellRanges) = CellKernelRegion(get_interior_cells(ranges))
+@inline get_interior_cell_window(ranges::CellRanges) = CellWindow(get_interior_cells(ranges))
 
 """
-    get_colored_interior_cell_region(ranges, color; compressed_dim=1)
-    get_colored_interior_cell_region(ranges, color, compressed_dim)
+    get_interior_cell_checkerboard(ranges, color; compressed_dim=1)
+    get_interior_cell_checkerboard(ranges, color, compressed_dim)
 
 Return compact launch metadata for one checkerboard cell color. The launch
 region is compressed in `compressed_dim`; kernels should reconstruct the
 physical cell index and check the compressed dimension upper bound.
 """
-@inline get_colored_interior_cell_region(ranges::CellRanges,
+@inline get_interior_cell_checkerboard(ranges::CellRanges,
                                       color::Integer;
                                       compressed_dim::Integer=1) =
-    get_colored_interior_cell_region(ranges, color, compressed_dim)
-@inline get_colored_interior_cell_region(ranges::CellRanges,
+    get_interior_cell_checkerboard(ranges, color, compressed_dim)
+@inline get_interior_cell_checkerboard(ranges::CellRanges,
                                       color::Integer,
                                       compressed_dim::Integer) =
-    ColoredCellKernelRegion(get_interior_cells(ranges), color, compressed_dim)
-@inline get_colored_interior_cell_region(ranges::CellRanges,
+    CellCheckerboard(get_interior_cells(ranges), color, compressed_dim)
+@inline get_interior_cell_checkerboard(ranges::CellRanges,
                                       color::Integer,
                                       ::Dim{D}) where {D} =
-    get_colored_interior_cell_region(ranges, color, D)
+    get_interior_cell_checkerboard(ranges, color, D)
