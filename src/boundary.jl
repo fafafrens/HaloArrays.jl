@@ -136,6 +136,14 @@ boundary_condition!(::HaloArray, ::Side, ::Dim, ::Periodic) = nothing
 boundary_condition!(::AbstractSingleHaloArray, ::Side, ::Dim, ::NoBoundaryCondition) = nothing
 boundary_condition!(::ThreadedHaloArray, ::Integer, ::Side, ::Dim, ::NoBoundaryCondition) = nothing
 
+# ---- FunctionBC (custom per-field) ------------------------------
+# Hand the user's closure the resolved ghost/edge views, the face, the halo width,
+# and the global origin of the ghost slab (for position-dependent / GPU-safe BCs).
+# Backend-uniform: the threaded method (threaded_haloarray.jl) passes tile-local
+# views and the per-tile origin, so one closure runs on every backend.
+@inline boundary_condition!(h::AbstractSingleHaloArray, s::Side, d::Dim, bc::FunctionBC) =
+    bc.f(get_recv_view(s, d, h), get_send_view(s, d, h), s, d, halo_width(h), ghost_origin(h, s, d))
+
 # ============================================================
 # Collection delegators
 # ============================================================
@@ -290,22 +298,21 @@ end
 # Helpers: symbol/type → BC instance, normalization
 # ============================================================
 
-function to_bc(x)
-    if x isa Symbol
-        x == :reflecting       && return Reflecting()
-        x == :antireflecting   && return Antireflecting()
-        x == :repeating        && return Repeating()
-        x == :periodic         && return Periodic()
-        x == :noboundary       && return NoBoundaryCondition()
-        throw(ArgumentError("Unknown boundary condition symbol: $x"))
-    elseif x isa DataType && x <: AbstractBoundaryCondition
-        return x()
-    elseif x isa AbstractBoundaryCondition
-        return x
-    else
-        throw(ArgumentError("Invalid boundary_condition: $x"))
-    end
-end
+# Map a user-supplied boundary condition (a symbol shortcut, a BC type, or a BC
+# instance) to a concrete instance. Multiple dispatch instead of an if/isa ladder,
+# so it stays open: an extension can register a new shortcut by adding a method
+# `to_bc(::Val{:myname}) = MyBC()` without editing this file. Construction-time
+# only, so the one dynamic dispatch through `Val(s)` is irrelevant.
+to_bc(bc::AbstractBoundaryCondition)                  = bc
+to_bc(::Type{T}) where {T<:AbstractBoundaryCondition} = T()
+to_bc(s::Symbol)                                      = to_bc(Val(s))
+to_bc(::Val{:reflecting})     = Reflecting()
+to_bc(::Val{:antireflecting}) = Antireflecting()
+to_bc(::Val{:repeating})      = Repeating()
+to_bc(::Val{:periodic})       = Periodic()
+to_bc(::Val{:noboundary})     = NoBoundaryCondition()
+to_bc(::Val{s}) where {s}     = throw(ArgumentError("Unknown boundary condition symbol: :$s"))
+to_bc(x)                      = throw(ArgumentError("Invalid boundary_condition: $x"))
 
 function normalize_one_dim(bc_dim)
     if bc_dim isa Tuple && length(bc_dim) == 2

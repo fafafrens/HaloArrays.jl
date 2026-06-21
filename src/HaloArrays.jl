@@ -65,6 +65,7 @@ export HaloArray,
     Repeating,
     Periodic,
     NoBoundaryCondition,
+    FunctionBC,
     Side,
     Dim
 

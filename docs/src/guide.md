@@ -87,6 +87,32 @@ HaloArray(Float64, (64, 64), 1, topology;
 Custom boundary conditions can be passed as a subtype or instance of
 `AbstractBoundaryCondition`.
 
+### Custom per-field conditions with `FunctionBC`
+
+For a one-off rule you don't want to make a type for, wrap a function in
+[`FunctionBC`](@ref). It runs inside `synchronize_halo!` like a built-in, on
+physical edges only, and works on every backend (single, MPI, threaded). Your
+function is called per `(side, dim)` face as `f(ghost, edge, side, dim, hw, origin)`:
+
+```julia
+dirichlet(v) = FunctionBC((g, e, s, d, hw, o) -> (g .= v))            # fixed value
+neumann0     = FunctionBC((g, e, s, d, hw, o) -> (g .= e))            # zero-flux (ghost = interior edge)
+```
+
+`origin` is the **global** `CartesianIndex` of `ghost[1]` (the package computes the
+MPI-rank / tile offset for you), so a *position-dependent* condition is a broadcast
+that stays correct under decomposition — and GPU-safe, since each lane derives its
+own global index:
+
+```julia
+inflow = FunctionBC() do g, e, s, d, hw, o
+    g .= profile.(Tuple.((o - oneunit(o)) .+ CartesianIndices(g)))   # value varies along the face
+end
+```
+
+Three kinds, one mechanism: built-in singletons, `FunctionBC` (custom **per-field**),
+and coupled (**cross-field**, below).
+
 ### Coupled boundary conditions
 
 Some schemes — characteristic reconstruction, for instance — need *all* fields'

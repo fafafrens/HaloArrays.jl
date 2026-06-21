@@ -7,6 +7,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.2.0]
 
 ### Added
+- **`FunctionBC`** — a custom per-field boundary condition from a plain function,
+  running inside `synchronize_halo!` like a built-in and on every backend (single,
+  MPI, threaded). Called per face as `f(ghost, edge, side, dim, hw, origin)`, where
+  `origin` is the global `CartesianIndex` of the ghost slab — so position-dependent
+  conditions are a broadcast that stays correct under MPI/thread decomposition and
+  runs on GPU. One mechanism now covers value-, gradient-, and position-based BCs;
+  cross-field conditions remain `apply_coupled_bc!`.
 - **Multi-GPU MPI example** (`examples/heat/multigpu_mpi_2d.jl`): one MPI rank per
   GPU, a device-resident `HaloArray`, and GPU-to-GPU **CUDA-aware-MPI** halo
   exchange — **validated on CINECA Leonardo** (1 and 4× A100, global `‖u‖₂`
@@ -26,6 +33,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   CUDA-aware MPI). The I/O API loads only when you `using HDF5`.
 - Examples use a single KernelAbstractions path for both CPU and GPU (removed the
   hand-written CPU scalar loops).
+- `to_bc` (boundary-condition normalization) now uses multiple dispatch instead of
+  an `if`/`isa` ladder, so a new `:symbol` shortcut can be registered by an
+  extension via `to_bc(::Val{:name})` without editing the package.
 - README trimmed to essentials.
 
 ### Performance
