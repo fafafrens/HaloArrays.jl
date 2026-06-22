@@ -36,9 +36,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   idiomatic — the `get_` prefix was dropped (`get_send_view`/`get_recv_view`/
   `get_comm` keep theirs) and the separate colored accessors were folded into the
   base ones via an optional `color` argument (dispatch). The family is now
-  `interior_cells(ranges[, color])`, `left_face`/`internal_face`/`right_face(ranges,
-  dim[, color])`, `interior_cell_window`/`left_face_window`/… `(ranges[, …][, color])`
-  (a `color` returns the checkerboard variant), plus `unit_vector(ranges, dim)`.
+  `interior_cells(ranges[, color])`, `interior_faces(ranges, dim[, color])`,
+  `interior_cell_window`/`interior_face_window(ranges[, …][, color])` (a `color`
+  returns the checkerboard variant), plus `unit_vector(ranges, dim)`.
+- **Face loops simplified to one accessor.** The separate `left_face`/
+  `internal_face`/`right_face` (and their `*_window`) were collapsed into a single
+  `interior_faces(ranges, dim)` — every face touching the interior — and the
+  flux-divergence loop now scatters each face's flux onto *both* adjacent cells
+  (the two boundary faces also write a ghost cell, which is in-bounds and harmless,
+  so the per-face owned-side flags on `FaceWindow`/`FaceCheckerboard` are gone).
+  `accumulate_flux_divergence!` keeps the same signature.
 - **HDF5 is now a weak dependency** (`HaloArraysHDF5Ext`): `using HaloArrays` no
   longer pulls in HDF5 (and its MPI-built JLLs, which clash with a system
   CUDA-aware MPI). The I/O API loads only when you `using HDF5`.

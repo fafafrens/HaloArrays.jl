@@ -28,10 +28,9 @@ using HaloArrays
 
     @testset "FaceRanges fallback" begin
         fr = FaceRanges(arrays)
-        # left/right faces are slabs of width 1, internal face is (3,4)
-        @test length(left_face(fr, 1))  == 4
-        @test length(right_face(fr, 1)) == 4
-        @test size(internal_face(fr, 1))   == (3, 4)
+        # every face along dim 1: 5 lower cells (4 interior + the low ghost) × 4 transverse
+        @test size(interior_faces(fr, 1)) == (5, 4)
+        @test length(interior_faces(fr, 1)) == 20
         @test unit_vector(fr, 1) == CartesianIndex(1, 0)
         @test unit_vector(fr, 2) == CartesianIndex(0, 1)
     end

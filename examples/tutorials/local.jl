@@ -76,8 +76,8 @@ println("  2-D mixed BC: size=", interior_size(u2d), " halo=", halo_width(u2d))
 # CartesianIndices(interior_range(u)) every time:
 #   CellRanges — cell-centred loops:  interior_cells,
 #                interior_cells (checkerboard / Gauss-Seidel)
-#   FaceRanges — finite-volume flux loops:  left_face / internal_face /
-#                right_face, and unit_vector (offset across a face)
+#   FaceRanges — finite-volume flux loops:  interior_faces (boundary + internal),
+#                and unit_vector (offset across a face)
 
 section("3 — Range helpers")
 
@@ -90,10 +90,7 @@ println("checkerboard : ", collect.(interior_cells(cr, 0)),
         " / ", collect.(interior_cells(cr, 1)))
 
 fr = FaceRanges(u)
-println("faces (left / internal / right):")
-println("  ", collect(left_face(fr, 1)), "  ",
-              collect(internal_face(fr, 1)), "  ",
-              collect(right_face(fr, 1)))
+println("interior faces (boundary + internal): ", collect(interior_faces(fr, 1)))
 
 # ============================================================
 # 4. WORKED EXAMPLE — 1-D HEAT EQUATION

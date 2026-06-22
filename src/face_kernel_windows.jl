@@ -2,16 +2,13 @@
     FaceWindow
 
 Compact face-region metadata for launch-style loops. `first` and `size`
-describe the lower-index cell region; `offset` maps each lower cell to the
-upper cell. `lower_owned` and `upper_owned` mark which side contributes to the
-interior update.
+describe the lower-index cell region; `offset` maps each lower cell to the upper
+cell. The kernel scatters each face's flux onto both cells.
 """
 struct FaceWindow{N}
     first::CartesianIndex{N}
     size::NTuple{N,Int}
     offset::CartesianIndex{N}
-    lower_owned::Bool
-    upper_owned::Bool
 end
 
 """
@@ -19,113 +16,46 @@ end
 
 Compact metadata for race-free colored face loops. `first`, `size`, and
 `stride` describe the lower-index cell region for one face color; `offset` maps
-each lower cell to the upper cell. `lower_owned` and `upper_owned` mark which
-side contributes to the interior update.
+each lower cell to the upper cell.
 """
 struct FaceCheckerboard{N}
     first::CartesianIndex{N}
     size::NTuple{N,Int}
     stride::CartesianIndex{N}
     offset::CartesianIndex{N}
-    lower_owned::Bool
-    upper_owned::Bool
 end
 
-@inline function FaceWindow(indices::CartesianIndices{N},
-                                     offset::CartesianIndex{N},
-                                     lower_owned::Bool,
-                                     upper_owned::Bool) where {N}
-    return FaceWindow(first(indices), size(indices), offset, lower_owned, upper_owned)
-end
+@inline FaceWindow(indices::CartesianIndices{N}, offset::CartesianIndex{N}) where {N} =
+    FaceWindow(first(indices), size(indices), offset)
 
 @inline function FaceCheckerboard(indices::CartesianIndices{N},
-                                         offset::CartesianIndex{N},
-                                         lower_owned::Bool,
-                                         upper_owned::Bool) where {N}
+                                  offset::CartesianIndex{N}) where {N}
     return FaceCheckerboard(
         first(indices),
         size(indices),
         CartesianIndex(ntuple(d -> step(indices.indices[d]), Val(N))),
         offset,
-        lower_owned,
-        upper_owned,
     )
 end
 
 """
-    left_face_window(ranges, dim)
+    interior_face_window(ranges, dim)
+    interior_face_window(ranges, dim, color)
 
-Return compact launch metadata for the lower-side `ghost | interior` face.
+Launch metadata ([`FaceWindow`](@ref)) for every face touching the interior along
+`dim` — the kernel reconstructs each face's lower cell with [`cell_index`](@ref),
+the upper with `+ region.offset`, and scatters the flux onto both. With a `color`
+(`0`/`1`) argument it returns a [`FaceCheckerboard`](@ref): one race-free color, so
+the parallel scatter needs no atomics.
 """
-@inline left_face_window(ranges::FaceRanges, dim::Int) =
-    FaceWindow(left_face(ranges, dim), unit_vector(ranges, dim), false, true)
-@inline left_face_window(ranges::FaceRanges, ::Dim{D}) where {D} =
-    left_face_window(ranges, D)
-
-"""
-    internal_face_window(ranges, dim)
-
-Return compact launch metadata for interior-cell internal faces.
-"""
-@inline internal_face_window(ranges::FaceRanges, dim::Int) =
-    FaceWindow(internal_face(ranges, dim), unit_vector(ranges, dim), true, true)
-@inline internal_face_window(ranges::FaceRanges, ::Dim{D}) where {D} =
-    internal_face_window(ranges, D)
-
-"""
-    right_face_window(ranges, dim)
-
-Return compact launch metadata for the upper-side `interior | ghost` face.
-"""
-@inline right_face_window(ranges::FaceRanges, dim::Int) =
-    FaceWindow(right_face(ranges, dim), unit_vector(ranges, dim), true, false)
-@inline right_face_window(ranges::FaceRanges, ::Dim{D}) where {D} =
-    right_face_window(ranges, D)
-
-"""
-    left_face_window(ranges, dim, color)
-
-Return compact launch metadata for one lower-side face color.
-"""
-@inline left_face_window(ranges::FaceRanges, dim::Int, color::Integer) =
-    FaceCheckerboard(
-        left_face(ranges, dim, color),
-        unit_vector(ranges, dim),
-        false,
-        true,
-    )
-@inline left_face_window(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
-    left_face_window(ranges, D, color)
-
-"""
-    internal_face_window(ranges, dim, color)
-
-Return compact launch metadata for one internal face color.
-"""
-@inline internal_face_window(ranges::FaceRanges, dim::Int, color::Integer) =
-    FaceCheckerboard(
-        internal_face(ranges, dim, color),
-        unit_vector(ranges, dim),
-        true,
-        true,
-    )
-@inline internal_face_window(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
-    internal_face_window(ranges, D, color)
-
-"""
-    right_face_window(ranges, dim, color)
-
-Return compact launch metadata for one upper-side face color.
-"""
-@inline right_face_window(ranges::FaceRanges, dim::Int, color::Integer) =
-    FaceCheckerboard(
-        right_face(ranges, dim, color),
-        unit_vector(ranges, dim),
-        true,
-        false,
-    )
-@inline right_face_window(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
-    right_face_window(ranges, D, color)
+@inline interior_face_window(ranges::FaceRanges, dim::Int) =
+    FaceWindow(interior_faces(ranges, dim), unit_vector(ranges, dim))
+@inline interior_face_window(ranges::FaceRanges, ::Dim{D}) where {D} =
+    interior_face_window(ranges, D)
+@inline interior_face_window(ranges::FaceRanges, dim::Int, color::Integer) =
+    FaceCheckerboard(interior_faces(ranges, dim, color), unit_vector(ranges, dim))
+@inline interior_face_window(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
+    interior_face_window(ranges, D, color)
 
 # ------------------------------------------------------------------------------
 # Launch-index → storage-index mapping, mirroring the cell-region API so kernels

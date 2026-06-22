@@ -14,102 +14,55 @@ end
 end
 
 """
-    left_face_range(halo, dim)
+    interior_face_range(halo, dim)
 
-Return the lower-side boundary face cells in dimension `dim`.
-
-These are ghost cells. In a face loop, pair each index `IL` with
-`IR = IL + face_offset(halo, dim)` to visit the `ghost | interior` face.
+Return every face touching the interior in dimension `dim`, identified by its
+lower-index cell: the low-boundary `ghost | interior` face, all internal
+`interior | interior` faces, and the high-boundary `interior | ghost` face. This
+is one contiguous span — `(first_interior - 1):last_interior` along `dim`, full in
+every transverse dimension. Pair each `IL` with `IR = IL + face_offset(halo, dim)`;
+a conservative flux loop scatters each face's flux onto both cells (the harmless
+ghost writes at the two boundary faces fall on allocated halo cells).
 """
-function left_face_range(halo, dim::Int)
+function interior_face_range(halo, dim::Int)
     _check_face_dim(halo, dim)
     ranges = _spatial_interior_range(halo)
-    return _dim_slab_range(ranges, dim, (first(ranges[dim]) - 1):(first(ranges[dim]) - 1))
-end
-
-left_face_range(halo, ::Dim{D}) where {D} = left_face_range(halo, D)
-
-"""
-    internal_face_range(halo, dim)
-
-Return the internal faces for a sweep along `dim`: the interior cells that have an
-interior `+dim` neighbour (only `dim` is trimmed by one), while every *transverse*
-dimension keeps its full interior extent. This is what a per-direction conservative
-flux update needs — it does not drop the last transverse row/column, so the
-boundary-face fluxes cancel correctly there. Pair each index `IL` with
-`IR = IL + face_offset(halo, dim)`.
-"""
-function internal_face_range(halo, dim::Int)
-    ranges = _spatial_interior_range(halo)
     return ntuple(_spatial_ndims(halo)) do d
-        d == dim ? (first(ranges[d]):(last(ranges[d]) - 1)) : (first(ranges[d]):last(ranges[d]))
+        d == dim ? ((first(ranges[d]) - 1):last(ranges[d])) : (first(ranges[d]):last(ranges[d]))
     end
 end
 
-"""
-    right_face_range(halo, dim)
-
-Return the upper-side boundary face cells in dimension `dim`.
-
-These are interior cells adjacent to the upper ghost side. In a face loop, pair
-each index `IL` with `IR = IL + face_offset(halo, dim)` to visit the
-`interior | ghost` face.
-"""
-function right_face_range(halo, dim::Int)
-    _check_face_dim(halo, dim)
-    ranges = _spatial_interior_range(halo)
-    return _dim_slab_range(ranges, dim, last(ranges[dim]):last(ranges[dim]))
-end
-
-right_face_range(halo, ::Dim{D}) where {D} = right_face_range(halo, D)
+interior_face_range(halo, ::Dim{D}) where {D} = interior_face_range(halo, D)
 
 """
     FaceRanges(halo)
 
-Precompute Cartesian index ranges and offsets for face loops.
-
-The stored indices always identify the lower-index cell of a face. Add
-`unit_vector(ranges, dim)` to get the upper-index cell.
+Precompute the face index ranges and offsets for conservative flux-divergence
+loops. The stored indices identify the lower-index cell of each face; add
+`unit_vector(ranges, dim)` to reach the upper-index cell.
 
 For `MultiHaloArray` and `ArrayOfHaloArray`, the ranges are spatial only. Apply
 them after selecting an individual field.
 
-- `left_face(ranges, dim)`: lower-side ghost cells.
-- `internal_face(ranges, dim)`: internal interior faces along `dim` (transverse-full).
-- `right_face(ranges, dim)`: upper-side interior cells.
-
-Minimal interior-cell update:
+[`interior_faces(ranges, dim)`](@ref interior_faces) gives every face touching the
+interior along `dim` (the two boundary faces plus the internal faces) as one
+iterable; a conservative update scatters each face's flux onto both cells:
 
 ```julia
 ranges = FaceRanges(u)
-e = unit_vector(ranges, dim)
-udata = parent(u)
-dudata = parent(du)
+e      = unit_vector(ranges, dim)
+udata  = parent(u); dudata = parent(du)
 
-for IL in left_face(ranges, dim)
-    IR = IL + e
+for IL in interior_faces(ranges, dim)
+    IR   = IL + e
     flux = numerical_flux(udata[IL], udata[IR])
+    dudata[IL] -= flux       # ghost write at the two boundary faces is in-bounds & harmless
     dudata[IR] += flux
-end
-
-for IL in internal_face(ranges,dim)
-    IR = IL + e
-    flux = numerical_flux(udata[IL], udata[IR])
-    dudata[IL] -= flux
-    dudata[IR] += flux
-end
-
-for IL in right_face(ranges, dim)
-    IR = IL + e
-    flux = numerical_flux(udata[IL], udata[IR])
-    dudata[IL] -= flux
 end
 ```
 """
-struct FaceRanges{A,Bd,C,D,Halo}
-    left_face::A
-    internal_face_dirs::Bd    # per-direction internal faces (transverse-full) for flux sweeps
-    right_face::C
+struct FaceRanges{F,D,Halo}
+    faces::F          # per-direction: every face touching the interior (lower-index cells)
     unit_vector::D
     halo::Halo
 end
@@ -117,45 +70,24 @@ end
 function FaceRanges(halo)
     spatial_ndims = _spatial_ndims(halo)
     return FaceRanges(
-        ntuple(d -> CartesianIndices(left_face_range(halo, d)), spatial_ndims),
-        ntuple(d -> CartesianIndices(internal_face_range(halo, d)), spatial_ndims),
-        ntuple(d -> CartesianIndices(right_face_range(halo, d)), spatial_ndims),
+        ntuple(d -> CartesianIndices(interior_face_range(halo, d)), spatial_ndims),
         ntuple(d -> face_offset(halo, d), Val(spatial_ndims)),
         halo_width(halo),
     )
 end
 
 """
-    left_face(ranges, dim)
+    interior_faces(ranges, dim)
+    interior_faces(ranges, dim, color)
 
-Lower-side boundary faces in `dim` (the `ghost | interior` faces): the ghost cells
-to fill, spanning the full transverse extent. Pair each `IL` with
-`IL + unit_vector(ranges, dim)`. See also [`internal_face`](@ref),
-[`right_face`](@ref).
+Every face touching the interior along `dim`, identified by its lower-index cell
+`IL`: the low-boundary `ghost | interior` face, the internal `interior | interior`
+faces, and the high-boundary `interior | ghost` face — one contiguous iterable.
+Pair each `IL` with `IL + unit_vector(ranges, dim)`. With a `color` (`0`/`1`)
+argument, returns one race-free checkerboard color (for parallel scatter).
 """
-left_face(ranges::FaceRanges) = ranges.left_face
-left_face(ranges::FaceRanges, dim::Int) = ranges.left_face[dim]
-left_face(ranges::FaceRanges, ::Dim{D}) where {D} = left_face(ranges, D)
-"""
-    internal_face(ranges, dim)
-
-Internal faces for a conservative sweep along `dim` (transverse dimensions kept
-full): the interior cells with an interior `+dim` neighbour. Pair each `IL` with
-`IL + unit_vector(ranges, dim)`.
-"""
-internal_face(ranges::FaceRanges, dim::Int) = ranges.internal_face_dirs[dim]
-internal_face(ranges::FaceRanges, ::Dim{D}) where {D} = internal_face(ranges, D)
-"""
-    right_face(ranges, dim)
-
-Upper-side boundary faces in `dim` (the `interior | ghost` faces): the interior cells
-adjacent to the upper ghost layer, spanning the full transverse extent. Pair each
-`IL` with `IL + unit_vector(ranges, dim)`. See also [`left_face`](@ref),
-[`internal_face`](@ref).
-"""
-right_face(ranges::FaceRanges) = ranges.right_face
-right_face(ranges::FaceRanges, dim::Int) = ranges.right_face[dim]
-right_face(ranges::FaceRanges, ::Dim{D}) where {D} = right_face(ranges, D)
+interior_faces(ranges::FaceRanges, dim::Int) = ranges.faces[dim]
+interior_faces(ranges::FaceRanges, ::Dim{D}) where {D} = interior_faces(ranges, D)
 """
     unit_vector(ranges[, dim])
 
@@ -209,21 +141,11 @@ function accumulate_flux_divergence!(du, u, ranges::FaceRanges, dim, scale,
         flux, read, scatter!)
     e = unit_vector(ranges, dim)
 
-    @inbounds for IL in left_face(ranges, dim)
+    @inbounds for IL in interior_faces(ranges, dim)
         IR = IL + e
-        scatter!(du, IR, scale, flux(read(u, IL), read(u, IR)))
-    end
-
-    @inbounds for IL in internal_face(ranges, dim)
-        IR = IL + e
-        F = flux(read(u, IL), read(u, IR))
+        F  = flux(read(u, IL), read(u, IR))
         scatter!(du, IL, -scale, F)
         scatter!(du, IR,  scale, F)
-    end
-
-    @inbounds for IL in right_face(ranges, dim)
-        IR = IL + e
-        scatter!(du, IL, -scale, flux(read(u, IL), read(u, IR)))
     end
 
     return du
@@ -261,36 +183,10 @@ end
     end)
 end
 
-"""
-    left_face(ranges, dim, color)
-
-Return the lower-side face cells of one race-free face color.
-"""
-left_face(ranges::FaceRanges, dim::Int, color::Integer) =
-    _colored_face(left_face(ranges, dim), dim, color)
-left_face(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
-    left_face(ranges, D, color)
-
-"""
-    internal_face(ranges, dim, color)
-
-Return the internal face cells of one race-free face color.
-"""
-function internal_face(ranges::FaceRanges, dim::Int, color::Integer)
-    return _colored_face(internal_face(ranges, dim), dim, color)
-end
-internal_face(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
-    internal_face(ranges, D, color)
-
-"""
-    right_face(ranges, dim, color)
-
-Return the upper-side face cells of one race-free face color.
-"""
-right_face(ranges::FaceRanges, dim::Int, color::Integer) =
-    _colored_face(right_face(ranges, dim), dim, color)
-right_face(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
-    right_face(ranges, D, color)
+interior_faces(ranges::FaceRanges, dim::Int, color::Integer) =
+    _colored_face(interior_faces(ranges, dim), dim, color)
+interior_faces(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
+    interior_faces(ranges, D, color)
 
 """
     face_offset(halo, dim)

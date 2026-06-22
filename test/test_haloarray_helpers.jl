@@ -49,12 +49,12 @@ function _has_nearest_neighbor_conflict(indices)
     return false
 end
 
-function _apply_colored_face_update!(du_data, u_data, indices, offset, lower_owned, upper_owned)
+function _apply_colored_face_update!(du_data, u_data, indices, offset)
     for IL in indices
         IR = IL + offset
         flux = u_data[IR] - u_data[IL]
-        lower_owned && (du_data[IL] -= flux)
-        upper_owned && (du_data[IR] += flux)
+        du_data[IL] -= flux       # boundary faces also touch a ghost cell (harmless)
+        du_data[IR] += flux
     end
     return du_data
 end
@@ -106,31 +106,25 @@ end
     @testset "owned face ranges" begin
         ha = LocalHaloArray(Int, (4, 5), 1; boundary_condition=:repeating)
 
-        @test HaloArrays.left_face_range(ha, 1) == (1:1, 2:6)
-        @test HaloArrays.right_face_range(ha, 1) == (5:5, 2:6)
+        # every face touching the interior along dim, as one contiguous span:
+        # (first_interior-1):last_interior in dim, full in every transverse dim.
+        @test HaloArrays.interior_face_range(ha, 1) == (1:5, 2:6)
+        @test HaloArrays.interior_face_range(ha, 2) == (2:5, 1:6)
         @test HaloArrays.face_offset(ha, 1) == CartesianIndex(1, 0)
 
         dim2_ranges = FaceRanges(ha)
-        @test collect(left_face(dim2_ranges, Dim(2))) == collect(CartesianIndices((2:5, 1:1)))
-        @test collect(right_face(dim2_ranges, Dim(2))) == collect(CartesianIndices((2:5, 6:6)))
+        @test collect(interior_faces(dim2_ranges, 1)) == collect(CartesianIndices((1:5, 2:6)))
+        @test collect(interior_faces(dim2_ranges, Dim(2))) == collect(CartesianIndices((2:5, 1:6)))
         @test HaloArrays.face_offset(ha, Dim(2)) == CartesianIndex(0, 1)
         @test unit_vector(dim2_ranges, Dim(2)) == CartesianIndex(0, 1)
 
-        # direction-aware internal faces keep the transverse dimension full
-        @test HaloArrays.internal_face_range(ha, 1) == (2:4, 2:6)
-        @test HaloArrays.internal_face_range(ha, 2) == (2:5, 2:5)
-        @test collect(internal_face(dim2_ranges, 1)) == collect(CartesianIndices((2:4, 2:6)))
-        @test collect(internal_face(dim2_ranges, Dim(2))) == collect(CartesianIndices((2:5, 2:5)))
-
         one_cell = LocalHaloArray(Int, (1,), 1; boundary_condition=:repeating)
         one_cell_ranges = FaceRanges(one_cell)
-        @test collect(left_face(one_cell_ranges, 1)) == [CartesianIndex(1)]
-        @test isempty(internal_face(one_cell_ranges, 1))
-        @test collect(right_face(one_cell_ranges, 1)) == [CartesianIndex(2)]
+        # one interior cell ⇒ two faces: low-ghost|cell and cell|high-ghost
+        @test collect(interior_faces(one_cell_ranges, 1)) == [CartesianIndex(1), CartesianIndex(2)]
 
         range_struct = HaloArrays.FaceRanges(ha)
-        @test collect(HaloArrays.left_face(range_struct, 1)) == collect(CartesianIndices((1:1, 2:6)))
-        @test collect(HaloArrays.right_face(range_struct, 1)) == collect(CartesianIndices((5:5, 2:6)))
+        @test collect(HaloArrays.interior_faces(range_struct, 1)) == collect(CartesianIndices((1:5, 2:6)))
 
         # accumulate_flux_divergence! is conservative on a 2-D uniform field:
         # a per-direction sweep must give zero update in every row/column,
@@ -145,151 +139,55 @@ end
         @test maximum(abs, interior_view(du)) == 0.0
         @test HaloArrays.unit_vector(range_struct, 1) == CartesianIndex(1, 0)
 
-        left_region = @inferred left_face_window(range_struct, Dim(1))
-        internal_region = @inferred internal_face_window(range_struct, Dim(1))
-        right_region_dim2 = @inferred right_face_window(range_struct, Dim(2))
-        @test left_region == FaceWindow(CartesianIndex(1, 2), (1, 5), CartesianIndex(1, 0), false, true)
-        @test internal_region == FaceWindow(CartesianIndex(2, 2), (3, 5), CartesianIndex(1, 0), true, true)
-        @test right_region_dim2 == FaceWindow(CartesianIndex(2, 6), (4, 1), CartesianIndex(0, 1), true, false)
+        # the window wraps the face range (no owned flags now)
+        @test (@inferred interior_face_window(range_struct, Dim(1))) ==
+              FaceWindow(CartesianIndex(1, 2), (5, 5), CartesianIndex(1, 0))
+        @test interior_face_window(range_struct, Dim(2)) ==
+              FaceWindow(CartesianIndex(2, 1), (4, 6), CartesianIndex(0, 1))
 
-        left_face_color0 = @inferred left_face(range_struct, Dim(1), 0)
-        left_face_color1 = @inferred left_face(range_struct, Dim(1), 1)
-        internal_face_color0 = @inferred internal_face(range_struct, Dim(1), 0)
-        internal_face_color1 = @inferred internal_face(range_struct, Dim(1), 1)
-        right_face_dim2_color0 = @inferred right_face(range_struct, Dim(2), 0)
-        right_face_dim2_color1 = @inferred right_face(range_struct, Dim(2), 1)
+        # the two checkerboard colors disjointly partition all the faces
+        faces1 = Set(collect(interior_faces(range_struct, 1)))
+        c0 = _colored_face_indices(@inferred interior_faces(range_struct, Dim(1), 0))
+        c1 = _colored_face_indices(@inferred interior_faces(range_struct, Dim(1), 1))
+        @test isempty(intersect(Set(c0), Set(c1)))
+        @test Set(vcat(c0, c1)) == faces1
+        @test_throws ArgumentError interior_faces(range_struct, 1, -1)
+        @test_throws ArgumentError interior_faces(range_struct, 1, 2)
 
-        @test _colored_face_indices(left_face_color0) == CartesianIndex{2}[]
-        @test _colored_face_indices(left_face_color1) == vec(collect(CartesianIndices((1:2:1, 2:6))))
-        @test _colored_face_indices(internal_face_color0) == vec(collect(CartesianIndices((2:2:4, 2:6))))
-        @test _colored_face_indices(internal_face_color1) == vec(collect(CartesianIndices((3:2:3, 2:6))))
-        @test _colored_face_indices(right_face_dim2_color0) == vec(collect(CartesianIndices((2:5, 6:2:6))))
-        @test _colored_face_indices(right_face_dim2_color1) == CartesianIndex{2}[]
-        @test Set(vcat(_colored_face_indices(internal_face_color0), _colored_face_indices(internal_face_color1))) ==
-              Set(collect(internal_face(range_struct, 1)))
-        @test Set(vcat(_colored_face_indices(right_face_dim2_color0), _colored_face_indices(right_face_dim2_color1))) ==
-              Set(collect(right_face(range_struct, Dim(2))))
-        @test_throws ArgumentError internal_face(range_struct, 1, -1)
-        @test_throws ArgumentError internal_face(range_struct, 1, 2)
+        # colored window indices match the colored range
+        @test _colored_region_indices(@inferred interior_face_window(range_struct, Dim(1), 0)) == c0
+        @test _colored_region_indices(@inferred interior_face_window(range_struct, Dim(1), 1)) == c1
+        @test_throws ArgumentError interior_face_window(range_struct, 1, -1)
+        @test_throws ArgumentError interior_face_window(range_struct, 1, 2)
 
-        left_color0 = @inferred left_face_window(range_struct, Dim(1), 0)
-        left_color1 = @inferred left_face_window(range_struct, Dim(1), 1)
-        internal_color0 = @inferred internal_face_window(range_struct, Dim(1), 0)
-        internal_color1 = @inferred internal_face_window(range_struct, Dim(1), 1)
-        right_dim2_color0 = @inferred right_face_window(range_struct, Dim(2), 0)
-        right_dim2_color1 = @inferred right_face_window(range_struct, Dim(2), 1)
-
-        @test left_color0 ==
-              FaceCheckerboard(CartesianIndex(2, 2), (0, 5), CartesianIndex(2, 1), CartesianIndex(1, 0), false, true)
-        @test left_color1 ==
-              FaceCheckerboard(CartesianIndex(1, 2), (1, 5), CartesianIndex(2, 1), CartesianIndex(1, 0), false, true)
-        @test internal_color0 ==
-              FaceCheckerboard(CartesianIndex(2, 2), (2, 5), CartesianIndex(2, 1), CartesianIndex(1, 0), true, true)
-        @test internal_color1 ==
-              FaceCheckerboard(CartesianIndex(3, 2), (1, 5), CartesianIndex(2, 1), CartesianIndex(1, 0), true, true)
-        @test right_dim2_color0 ==
-              FaceCheckerboard(CartesianIndex(2, 6), (4, 1), CartesianIndex(1, 2), CartesianIndex(0, 1), true, false)
-        @test right_dim2_color1 ==
-              FaceCheckerboard(CartesianIndex(2, 7), (4, 0), CartesianIndex(1, 2), CartesianIndex(0, 1), true, false)
-        @test _colored_region_indices(internal_color0) == _colored_face_indices(internal_face_color0)
-        @test _colored_region_indices(internal_color1) == _colored_face_indices(internal_face_color1)
-        @test _colored_region_indices(right_dim2_color0) == _colored_face_indices(right_face_dim2_color0)
-        @test _colored_region_indices(right_dim2_color1) == _colored_face_indices(right_face_dim2_color1)
-        @test_throws ArgumentError internal_face_window(range_struct, 1, -1)
-        @test_throws ArgumentError internal_face_window(range_struct, 1, 2)
-
+        # identical faces/windows across MPI, threaded, and collection backends
         topology = CartesianTopology(MPI.COMM_SELF, (1, 1); periodic=(false, false))
-        mpi_ha = HaloArray(Int, (4, 5), 1, topology; boundary_condition=:repeating)
-        mpi_ranges = FaceRanges(mpi_ha)
-        @test collect(left_face(mpi_ranges, 1)) == collect(left_face(range_struct, 1))
-        @test collect(internal_face(mpi_ranges, 1)) == collect(internal_face(range_struct, 1))
-        @test collect(right_face(mpi_ranges, 1)) == collect(right_face(range_struct, 1))
-        @test unit_vector(mpi_ranges, 1) == CartesianIndex(1, 0)
-        @test left_face_window(mpi_ranges, 1) == left_face_window(range_struct, 1)
-        @test internal_face_window(mpi_ranges, 1) == internal_face_window(range_struct, 1)
-        @test _colored_face_indices(left_face(mpi_ranges, 1, 1)) ==
-              _colored_face_indices(left_face(range_struct, 1, 1))
-        @test _colored_face_indices(internal_face(mpi_ranges, 1, 0)) ==
-              _colored_face_indices(internal_face(range_struct, 1, 0))
-        @test left_face_window(mpi_ranges, 1, 1) ==
-              left_face_window(range_struct, 1, 1)
-        @test internal_face_window(mpi_ranges, 1, 0) ==
-              internal_face_window(range_struct, 1, 0)
-
-        threaded_ha = ThreadedHaloArray(Int, (4, 5), 1; dims=(1, 1), boundary_condition=:repeating)
-        threaded_ranges = FaceRanges(threaded_ha)
-        @test collect(left_face(threaded_ranges, 1)) == collect(left_face(range_struct, 1))
-        @test collect(internal_face(threaded_ranges, 1)) == collect(internal_face(range_struct, 1))
-        @test collect(right_face(threaded_ranges, 1)) == collect(right_face(range_struct, 1))
-        @test unit_vector(threaded_ranges, 1) == CartesianIndex(1, 0)
-        @test internal_face_window(threaded_ranges, 1) == internal_face_window(range_struct, 1)
-        @test right_face_window(threaded_ranges, 1) == right_face_window(range_struct, 1)
-        @test _colored_face_indices(internal_face(threaded_ranges, 1, 1)) ==
-              _colored_face_indices(internal_face(range_struct, 1, 1))
-        @test _colored_face_indices(right_face(threaded_ranges, 1, 1)) ==
-              _colored_face_indices(right_face(range_struct, 1, 1))
-        @test internal_face_window(threaded_ranges, 1, 1) ==
-              internal_face_window(range_struct, 1, 1)
-        @test right_face_window(threaded_ranges, 1, 1) ==
-              right_face_window(range_struct, 1, 1)
-
-        fields = MultiHaloArray((;
+        mpi_ranges = FaceRanges(HaloArray(Int, (4, 5), 1, topology; boundary_condition=:repeating))
+        threaded_ranges = FaceRanges(ThreadedHaloArray(Int, (4, 5), 1; dims=(1, 1), boundary_condition=:repeating))
+        field_ranges = FaceRanges(MultiHaloArray((;
             rho=LocalHaloArray(Int, (4, 5), 1; boundary_condition=:repeating),
             mom=LocalHaloArray(Int, (4, 5), 1; boundary_condition=:repeating),
-        ))
-        field_ranges = FaceRanges(fields)
-        @test collect(left_face(field_ranges, 1)) == collect(left_face(range_struct, 1))
-        @test collect(internal_face(field_ranges, 1)) == collect(internal_face(range_struct, 1))
-        @test collect(right_face(field_ranges, 1)) == collect(right_face(range_struct, 1))
-        @test unit_vector(field_ranges, 1) == CartesianIndex(1, 0)
-        @test_throws BoundsError left_face(field_ranges, 3)
-        @test left_face_window(field_ranges, 1) == left_face_window(range_struct, 1)
-        @test right_face_window(field_ranges, 1) == right_face_window(range_struct, 1)
-        @test_throws BoundsError left_face_window(field_ranges, 3)
-        @test _colored_face_indices(left_face(field_ranges, 1, 1)) ==
-              _colored_face_indices(left_face(range_struct, 1, 1))
-        @test _colored_face_indices(right_face(field_ranges, 1, 1)) ==
-              _colored_face_indices(right_face(range_struct, 1, 1))
-        @test left_face_window(field_ranges, 1, 1) ==
-              left_face_window(range_struct, 1, 1)
-        @test right_face_window(field_ranges, 1, 1) ==
-              right_face_window(range_struct, 1, 1)
-        @test_throws BoundsError left_face(field_ranges, 3, 1)
-        @test_throws BoundsError left_face_window(field_ranges, 3, 1)
-
-        array_fields = ArrayOfHaloArray([
+        )))
+        array_field_ranges = FaceRanges(ArrayOfHaloArray([
             LocalHaloArray(Int, (4, 5), 1; boundary_condition=:repeating) for _ in 1:2, _ in 1:2
-        ])
-        array_field_ranges = FaceRanges(array_fields)
-        @test collect(left_face(array_field_ranges, 1)) == collect(left_face(range_struct, 1))
-        @test collect(internal_face(array_field_ranges, 1)) == collect(internal_face(range_struct, 1))
-        @test collect(right_face(array_field_ranges, 1)) == collect(right_face(range_struct, 1))
-        @test unit_vector(array_field_ranges, 1) == CartesianIndex(1, 0)
-        @test_throws BoundsError right_face(array_field_ranges, 3)
-        @test left_face_window(array_field_ranges, 1) == left_face_window(range_struct, 1)
-        @test right_face_window(array_field_ranges, 1) == right_face_window(range_struct, 1)
-        @test _colored_face_indices(left_face(array_field_ranges, 1, 1)) ==
-              _colored_face_indices(left_face(range_struct, 1, 1))
-        @test _colored_face_indices(right_face(array_field_ranges, 1, 1)) ==
-              _colored_face_indices(right_face(range_struct, 1, 1))
-        @test left_face_window(array_field_ranges, 1, 1) ==
-              left_face_window(range_struct, 1, 1)
-        @test right_face_window(array_field_ranges, 1, 1) ==
-              right_face_window(range_struct, 1, 1)
+        ]))
+        for other in (mpi_ranges, threaded_ranges, field_ranges, array_field_ranges)
+            @test collect(interior_faces(other, 1)) == collect(interior_faces(range_struct, 1))
+            @test unit_vector(other, 1) == CartesianIndex(1, 0)
+            @test interior_face_window(other, 1) == interior_face_window(range_struct, 1)
+            @test interior_face_window(other, 1, 1) == interior_face_window(range_struct, 1, 1)
+            @test _colored_face_indices(interior_faces(other, 1, 0)) ==
+                  _colored_face_indices(interior_faces(range_struct, 1, 0))
+        end
+        @test_throws BoundsError interior_faces(field_ranges, 3)
+        @test_throws BoundsError interior_face_window(field_ranges, 3)
 
-        one_cell_left_region = @inferred left_face_window(one_cell_ranges, Dim(1))
-        one_cell_internal_region = @inferred internal_face_window(one_cell_ranges, Dim(1))
-        one_cell_right_region = @inferred right_face_window(one_cell_ranges, Dim(1))
-        @test one_cell_left_region == FaceWindow(CartesianIndex(1), (1,), CartesianIndex(1), false, true)
-        @test one_cell_internal_region == FaceWindow(CartesianIndex(2), (0,), CartesianIndex(1), true, true)
-        @test one_cell_right_region == FaceWindow(CartesianIndex(2), (1,), CartesianIndex(1), true, false)
-
-        one_cell_internal_color0 = @inferred internal_face_window(one_cell_ranges, Dim(1), 0)
-        one_cell_internal_color1 = @inferred internal_face_window(one_cell_ranges, Dim(1), 1)
-        @test one_cell_internal_color0 ==
-              FaceCheckerboard(CartesianIndex(2), (0,), CartesianIndex(2), CartesianIndex(1), true, true)
-        @test one_cell_internal_color1 ==
-              FaceCheckerboard(CartesianIndex(3), (0,), CartesianIndex(2), CartesianIndex(1), true, true)
+        # one interior cell ⇒ two boundary faces, no internal faces
+        @test (@inferred interior_face_window(one_cell_ranges, Dim(1))) ==
+              FaceWindow(CartesianIndex(1), (2,), CartesianIndex(1))
+        oc0 = _colored_face_indices(interior_faces(one_cell_ranges, 1, 0))
+        oc1 = _colored_face_indices(interior_faces(one_cell_ranges, 1, 1))
+        @test Set(vcat(oc0, oc1)) == Set(collect(interior_faces(one_cell_ranges, 1)))
     end
 
     @testset "accumulate_flux_divergence!" begin
@@ -300,16 +198,15 @@ end
         ranges = FaceRanges(u)
         flux(uL, uR) = 0.5 * (uL + uR)
 
-        # Reference: explicit left / internal / right conservative scatter.
+        # Reference: scatter every face's flux onto both cells (boundary faces
+        # write the ghost cells too, which is in-bounds and harmless).
         pu = parent(u)
         ref = zeros(nx + 2)
-        ref[2] += flux(pu[1], pu[2])                       # left ghost|owned
-        for i in 2:5                                       # internal owned faces
-            F = flux(pu[i], pu[i + 1])
-            ref[i] -= F
-            ref[i + 1] += F
+        for IL in 1:(nx + 1)
+            F = flux(pu[IL], pu[IL + 1])
+            ref[IL]     -= F
+            ref[IL + 1] += F
         end
-        ref[6] -= flux(pu[6], pu[7])                       # right owned|ghost
 
         # Scalar default read/scatter.
         du = LocalHaloArray(Float64, (nx,), 1; boundary_condition=:repeating)
@@ -344,13 +241,11 @@ end
 
         ref_v = zeros(nx + 2)
         pv = parent(v)
-        ref_v[2] += flux(pv[1], pv[2])
-        for i in 2:5
-            F = flux(pv[i], pv[i + 1])
-            ref_v[i] -= F
-            ref_v[i + 1] += F
+        for IL in 1:(nx + 1)
+            F = flux(pv[IL], pv[IL + 1])
+            ref_v[IL]     -= F
+            ref_v[IL + 1] += F
         end
-        ref_v[6] -= flux(pv[6], pv[7])
         @test parent(dua) ≈ ref      # first component matches the scalar field u
         @test parent(dub) ≈ ref_v    # second component matches the scalar field v
     end
@@ -479,7 +374,7 @@ end
         end
     end
 
-    @testset "face ranges support owned-cell update" begin
+    @testset "interior_faces support a conservative flux update" begin
         u = LocalHaloArray(Int, (4,), 1; boundary_condition=:repeating)
         du = similar(u)
 
@@ -489,26 +384,19 @@ end
         ranges = FaceRanges(u)
         offset = unit_vector(ranges, 1)
 
-        for IL in left_face(ranges, 1)
-            IR = IL + offset
-            parent(du)[IR] += parent(u)[IR] - parent(u)[IL]
-        end
-
-        for IL in internal_face(ranges, 1)
+        # one loop over every face, scatter onto both cells
+        for IL in interior_faces(ranges, 1)
             IR = IL + offset
             flux = parent(u)[IR] - parent(u)[IL]
             parent(du)[IL] -= flux
             parent(du)[IR] += flux
         end
 
-        for IL in right_face(ranges, 1)
-            IR = IL + offset
-            parent(du)[IL] -= parent(u)[IR] - parent(u)[IL]
-        end
-
+        # interior update is exactly the conservative result …
         @test collect(interior_view(du)) == [-100, 0, 0, -195]
-        @test parent(du)[1] == 0
-        @test parent(du)[end] == 0
+        # … and the two boundary faces also wrote their (harmless) ghost cells
+        @test parent(du)[1] == 99
+        @test parent(du)[end] == 196
     end
 
     @testset "colored face ranges support checkerboard update" begin
@@ -523,27 +411,18 @@ end
 
         for color in 0:1
             color_touches = zeros(Int, length(parent(u)))
-            colored_faces = (
-                (left_face(ranges, 1, color), false, true),
-                (internal_face(ranges, 1, color), true, true),
-                (right_face(ranges, 1, color), true, false),
-            )
-
-            for (indices, lower_owned, upper_owned) in colored_faces
-                for IL in indices
-                    IR = IL + offset
-                    lower_owned && (color_touches[IL] += 1)
-                    upper_owned && (color_touches[IR] += 1)
-                end
-                _apply_colored_face_update!(parent(du), parent(u), indices, offset, lower_owned, upper_owned)
+            indices = interior_faces(ranges, 1, color)
+            for IL in indices
+                IR = IL + offset
+                color_touches[IL] += 1   # scatter-both touches both cells
+                color_touches[IR] += 1
             end
-
+            # race-free: within one color no cell (interior or ghost) is touched twice
             @test maximum(color_touches) <= 1
+            _apply_colored_face_update!(parent(du), parent(u), indices, offset)
         end
 
         @test collect(interior_view(du)) == [-100, 0, 0, -195]
-        @test parent(du)[1] == 0
-        @test parent(du)[end] == 0
     end
 
     @testset "is_root array fallbacks" begin

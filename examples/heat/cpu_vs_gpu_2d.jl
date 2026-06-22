@@ -49,12 +49,8 @@ end
 
     @inbounds begin
         flux = scale * (data[IR...] - data[IL...])
-        if region.lower_owned
-            du[IL...] += flux
-        end
-        if region.upper_owned
-            du[IR...] -= flux
-        end
+        du[IL...] += flux       # boundary faces also touch a ghost cell — in-bounds & harmless
+        du[IR...] -= flux
     end
 end
 
@@ -89,13 +85,8 @@ function heat_step!(kernels, u_next, du, u, alpha, dt, dx)
     for dim in 1:2
         scale = Float32(alpha / dx[dim]^2)
         for color in 0:1
-            for region in (
-                    left_face_window(ranges, dim, color),
-                    internal_face_window(ranges, dim, color),
-                    right_face_window(ranges, dim, color),
-            )
-                launch_face_kernel!(flux!, parent(du), parent(u), region, scale)
-            end
+            region = interior_face_window(ranges, dim, color)
+            launch_face_kernel!(flux!, parent(du), parent(u), region, scale)
             KA.synchronize(backend)
         end
     end

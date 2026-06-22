@@ -97,12 +97,8 @@ export interior_view,
     FaceCheckerboard,
     CellWindow,
     CellCheckerboard,
-    left_face,
-    internal_face,
-    right_face,
-    left_face_window,
-    internal_face_window,
-    right_face_window,
+    interior_faces,
+    interior_face_window,
     interior_cells,
     interior_cell_window,
     cell_index,
@@ -151,7 +147,7 @@ export append_haloarray_to_file!,
     gather_and_append_haloarray!
 
 # Internal-but-stable helpers remain accessible qualified, e.g.
-# HaloArrays.to_bc, HaloArrays.unwrap, HaloArrays.internal_face_range,
+# HaloArrays.to_bc, HaloArrays.unwrap, HaloArrays.interior_face_range,
 # HaloArrays.save_array_hdf5, HaloArrays.append_haloarray!.
 
 end
