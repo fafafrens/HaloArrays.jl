@@ -74,10 +74,10 @@ println("  2-D mixed BC: size=", interior_size(u2d), " halo=", halo_width(u2d))
 # ============================================================
 # These name the index ranges a stencil loop needs, so you don't hand-write
 # CartesianIndices(interior_range(u)) every time:
-#   CellRanges — cell-centred loops:  get_interior_cells,
-#                get_interior_cells (checkerboard / Gauss-Seidel)
-#   FaceRanges — finite-volume flux loops:  get_left_face / get_internal_face /
-#                get_right_face, and get_unit_vector (offset across a face)
+#   CellRanges — cell-centred loops:  interior_cells,
+#                interior_cells (checkerboard / Gauss-Seidel)
+#   FaceRanges — finite-volume flux loops:  left_face / internal_face /
+#                right_face, and unit_vector (offset across a face)
 
 section("3 — Range helpers")
 
@@ -85,15 +85,15 @@ u = LocalHaloArray(Float64, (6,), 1; boundary_condition=:periodic)
 interior_view(u) .= Float64.(1:6)
 
 cr = CellRanges(u)
-println("interior cells  : ", collect(get_interior_cells(cr)))
-println("checkerboard : ", collect.(get_interior_cells(cr, 0)),
-        " / ", collect.(get_interior_cells(cr, 1)))
+println("interior cells  : ", collect(interior_cells(cr)))
+println("checkerboard : ", collect.(interior_cells(cr, 0)),
+        " / ", collect.(interior_cells(cr, 1)))
 
 fr = FaceRanges(u)
 println("faces (left / internal / right):")
-println("  ", collect(get_left_face(fr, 1)), "  ",
-              collect(get_internal_face(fr, 1)), "  ",
-              collect(get_right_face(fr, 1)))
+println("  ", collect(left_face(fr, 1)), "  ",
+              collect(internal_face(fr, 1)), "  ",
+              collect(right_face(fr, 1)))
 
 # ============================================================
 # 4. WORKED EXAMPLE — 1-D HEAT EQUATION
@@ -272,7 +272,7 @@ interior_view(vel[2]) .= 0.0          # v-component
 synchronize_halo!(vel)                # refreshes every field at once
 
 println("  field shape / interior size : ", field_shape(vel), " / ", interior_size(vel[1]))
-println("  interior cells              : ", size(get_interior_cells(CellRanges(vel))))
+println("  interior cells              : ", size(interior_cells(CellRanges(vel))))
 
 # A 2×2 stress-tensor field; broadcast hits all four components:
 sigma = ArrayOfHaloArray(LocalHaloArray, Float64, (2, 2), (8, 8), 1;

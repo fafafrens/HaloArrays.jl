@@ -18,22 +18,22 @@ using HaloArrays
 
     @testset "CellRanges fallback" begin
         cr = CellRanges(arrays)
-        cells = get_interior_cells(cr)
+        cells = interior_cells(cr)
         @test size(cells) == (4, 4)
         # colored subranges cover all owned cells
-        c0 = get_interior_cells(cr, 0)
-        c1 = get_interior_cells(cr, 1)
+        c0 = interior_cells(cr, 0)
+        c1 = interior_cells(cr, 1)
         @test sum(length, c0) + sum(length, c1) == 16
     end
 
     @testset "FaceRanges fallback" begin
         fr = FaceRanges(arrays)
         # left/right faces are slabs of width 1, internal face is (3,4)
-        @test length(get_left_face(fr, 1))  == 4
-        @test length(get_right_face(fr, 1)) == 4
-        @test size(get_internal_face(fr, 1))   == (3, 4)
-        @test get_unit_vector(fr, 1) == CartesianIndex(1, 0)
-        @test get_unit_vector(fr, 2) == CartesianIndex(0, 1)
+        @test length(left_face(fr, 1))  == 4
+        @test length(right_face(fr, 1)) == 4
+        @test size(internal_face(fr, 1))   == (3, 4)
+        @test unit_vector(fr, 1) == CartesianIndex(1, 0)
+        @test unit_vector(fr, 2) == CartesianIndex(0, 1)
     end
 end
 
@@ -68,7 +68,7 @@ end
 
     @testset "CellRanges on ArrayOfHaloArray" begin
         cr = CellRanges(vel)
-        @test size(get_interior_cells(cr)) == tsz   # per-tile range (interior_range of one tile)
+        @test size(interior_cells(cr)) == tsz   # per-tile range (interior_range of one tile)
     end
 end
 

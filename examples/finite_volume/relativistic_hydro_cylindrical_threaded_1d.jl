@@ -140,7 +140,7 @@ end
 function rel_rhs!(du, u, eos, r_min, dr)
     synchronize_halo!(u)                       # inter-tile copies + axis/outflow BC
     ranges = FaceRanges(u)
-    cells  = get_interior_cells(CellRanges(u))    # per-tile owned cells (same each tile)
+    cells  = interior_cells(CellRanges(u))    # per-tile owned cells (same each tile)
     h      = halo_width(u.N)
 
     tile_foreach(thread_backend(u.N), tile_id -> begin
@@ -169,7 +169,7 @@ end
 
 function diagnostics(u, eos, r_min, dr)
     h = halo_width(u.N)
-    cells = get_interior_cells(CellRanges(u))
+    cells = interior_cells(CellRanges(u))
     charge = 0.0; energy = 0.0; vmax = 0.0
     for tile_id in 1:tile_count(u)
         d = tile_parent(u, tile_id)

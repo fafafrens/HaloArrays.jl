@@ -80,7 +80,7 @@ end
 
 function heat_step!(kernels, u_next, du, u, alpha, dt, dx)
     backend, zero!, flux!, update! = kernels
-    cell_region = get_interior_cell_window(CellRanges(u))
+    cell_region = interior_cell_window(CellRanges(u))
     ranges = FaceRanges(u)
 
     launch_cell_kernel!(zero!, parent(du), cell_region)
@@ -90,9 +90,9 @@ function heat_step!(kernels, u_next, du, u, alpha, dt, dx)
         scale = Float32(alpha / dx[dim]^2)
         for color in 0:1
             for region in (
-                    get_left_face_window(ranges, dim, color),
-                    get_internal_face_window(ranges, dim, color),
-                    get_right_face_window(ranges, dim, color),
+                    left_face_window(ranges, dim, color),
+                    internal_face_window(ranges, dim, color),
+                    right_face_window(ranges, dim, color),
             )
                 launch_face_kernel!(flux!, parent(du), parent(u), region, scale)
             end
