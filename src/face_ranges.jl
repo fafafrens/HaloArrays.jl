@@ -69,37 +69,37 @@ right_face_range(halo, ::Dim{D}) where {D} = right_face_range(halo, D)
 Precompute Cartesian index ranges and offsets for face loops.
 
 The stored indices always identify the lower-index cell of a face. Add
-`get_unit_vector(ranges, dim)` to get the upper-index cell.
+`unit_vector(ranges, dim)` to get the upper-index cell.
 
 For `MultiHaloArray` and `ArrayOfHaloArray`, the ranges are spatial only. Apply
 them after selecting an individual field.
 
-- `get_left_face(ranges, dim)`: lower-side ghost cells.
-- `get_internal_face(ranges, dim)`: internal interior faces along `dim` (transverse-full).
-- `get_right_face(ranges, dim)`: upper-side interior cells.
+- `left_face(ranges, dim)`: lower-side ghost cells.
+- `internal_face(ranges, dim)`: internal interior faces along `dim` (transverse-full).
+- `right_face(ranges, dim)`: upper-side interior cells.
 
 Minimal interior-cell update:
 
 ```julia
 ranges = FaceRanges(u)
-e = get_unit_vector(ranges, dim)
+e = unit_vector(ranges, dim)
 udata = parent(u)
 dudata = parent(du)
 
-for IL in get_left_face(ranges, dim)
+for IL in left_face(ranges, dim)
     IR = IL + e
     flux = numerical_flux(udata[IL], udata[IR])
     dudata[IR] += flux
 end
 
-for IL in get_internal_face(ranges,dim)
+for IL in internal_face(ranges,dim)
     IR = IL + e
     flux = numerical_flux(udata[IL], udata[IR])
     dudata[IL] -= flux
     dudata[IR] += flux
 end
 
-for IL in get_right_face(ranges, dim)
+for IL in right_face(ranges, dim)
     IR = IL + e
     flux = numerical_flux(udata[IL], udata[IR])
     dudata[IL] -= flux
@@ -126,47 +126,47 @@ function FaceRanges(halo)
 end
 
 """
-    get_left_face(ranges, dim)
+    left_face(ranges, dim)
 
 Lower-side boundary faces in `dim` (the `ghost | interior` faces): the ghost cells
 to fill, spanning the full transverse extent. Pair each `IL` with
-`IL + get_unit_vector(ranges, dim)`. See also [`get_internal_face`](@ref),
-[`get_right_face`](@ref).
+`IL + unit_vector(ranges, dim)`. See also [`internal_face`](@ref),
+[`right_face`](@ref).
 """
-get_left_face(ranges::FaceRanges) = ranges.left_face
-get_left_face(ranges::FaceRanges, dim::Int) = ranges.left_face[dim]
-get_left_face(ranges::FaceRanges, ::Dim{D}) where {D} = get_left_face(ranges, D)
+left_face(ranges::FaceRanges) = ranges.left_face
+left_face(ranges::FaceRanges, dim::Int) = ranges.left_face[dim]
+left_face(ranges::FaceRanges, ::Dim{D}) where {D} = left_face(ranges, D)
 """
-    get_internal_face(ranges, dim)
+    internal_face(ranges, dim)
 
 Internal faces for a conservative sweep along `dim` (transverse dimensions kept
 full): the interior cells with an interior `+dim` neighbour. Pair each `IL` with
-`IL + get_unit_vector(ranges, dim)`.
+`IL + unit_vector(ranges, dim)`.
 """
-get_internal_face(ranges::FaceRanges, dim::Int) = ranges.internal_face_dirs[dim]
-get_internal_face(ranges::FaceRanges, ::Dim{D}) where {D} = get_internal_face(ranges, D)
+internal_face(ranges::FaceRanges, dim::Int) = ranges.internal_face_dirs[dim]
+internal_face(ranges::FaceRanges, ::Dim{D}) where {D} = internal_face(ranges, D)
 """
-    get_right_face(ranges, dim)
+    right_face(ranges, dim)
 
 Upper-side boundary faces in `dim` (the `interior | ghost` faces): the interior cells
 adjacent to the upper ghost layer, spanning the full transverse extent. Pair each
-`IL` with `IL + get_unit_vector(ranges, dim)`. See also [`get_left_face`](@ref),
-[`get_internal_face`](@ref).
+`IL` with `IL + unit_vector(ranges, dim)`. See also [`left_face`](@ref),
+[`internal_face`](@ref).
 """
-get_right_face(ranges::FaceRanges) = ranges.right_face
-get_right_face(ranges::FaceRanges, dim::Int) = ranges.right_face[dim]
-get_right_face(ranges::FaceRanges, ::Dim{D}) where {D} = get_right_face(ranges, D)
+right_face(ranges::FaceRanges) = ranges.right_face
+right_face(ranges::FaceRanges, dim::Int) = ranges.right_face[dim]
+right_face(ranges::FaceRanges, ::Dim{D}) where {D} = right_face(ranges, D)
 """
-    get_unit_vector(ranges[, dim])
+    unit_vector(ranges[, dim])
 
 The `CartesianIndex` unit step along dimension `dim` for these `ranges` (with no
 argument, the tuple of unit steps for every dimension). Add it to a lower-face
-index `IL` to reach the cell across the face, `IL + get_unit_vector(ranges, dim)`.
+index `IL` to reach the cell across the face, `IL + unit_vector(ranges, dim)`.
 `dim` may be an `Int` or a `Dim{D}`.
 """
-get_unit_vector(ranges::FaceRanges) = ranges.unit_vector
-get_unit_vector(ranges::FaceRanges, dim::Int) = ranges.unit_vector[dim]
-get_unit_vector(ranges::FaceRanges, ::Dim{D}) where {D} = get_unit_vector(ranges, D)
+unit_vector(ranges::FaceRanges) = ranges.unit_vector
+unit_vector(ranges::FaceRanges, dim::Int) = ranges.unit_vector[dim]
+unit_vector(ranges::FaceRanges, ::Dim{D}) where {D} = unit_vector(ranges, D)
 
 # Default cell accessors for scalar fields.
 @inline _scalar_face_read(data, I) = @inbounds data[I]
@@ -207,21 +207,21 @@ accumulate_flux_divergence!(parent(du), parent(u), ranges, 1, inv(dx), numerical
 """
 function accumulate_flux_divergence!(du, u, ranges::FaceRanges, dim, scale,
         flux, read, scatter!)
-    e = get_unit_vector(ranges, dim)
+    e = unit_vector(ranges, dim)
 
-    @inbounds for IL in get_left_face(ranges, dim)
+    @inbounds for IL in left_face(ranges, dim)
         IR = IL + e
         scatter!(du, IR, scale, flux(read(u, IL), read(u, IR)))
     end
 
-    @inbounds for IL in get_internal_face(ranges, dim)
+    @inbounds for IL in internal_face(ranges, dim)
         IR = IL + e
         F = flux(read(u, IL), read(u, IR))
         scatter!(du, IL, -scale, F)
         scatter!(du, IR,  scale, F)
     end
 
-    @inbounds for IL in get_right_face(ranges, dim)
+    @inbounds for IL in right_face(ranges, dim)
         IR = IL + e
         scatter!(du, IL, -scale, flux(read(u, IL), read(u, IR)))
     end
@@ -262,35 +262,35 @@ end
 end
 
 """
-    get_left_face(ranges, dim, color)
+    left_face(ranges, dim, color)
 
 Return the lower-side face cells of one race-free face color.
 """
-get_left_face(ranges::FaceRanges, dim::Int, color::Integer) =
-    _colored_face(get_left_face(ranges, dim), dim, color)
-get_left_face(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
-    get_left_face(ranges, D, color)
+left_face(ranges::FaceRanges, dim::Int, color::Integer) =
+    _colored_face(left_face(ranges, dim), dim, color)
+left_face(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
+    left_face(ranges, D, color)
 
 """
-    get_internal_face(ranges, dim, color)
+    internal_face(ranges, dim, color)
 
 Return the internal face cells of one race-free face color.
 """
-function get_internal_face(ranges::FaceRanges, dim::Int, color::Integer)
-    return _colored_face(get_internal_face(ranges, dim), dim, color)
+function internal_face(ranges::FaceRanges, dim::Int, color::Integer)
+    return _colored_face(internal_face(ranges, dim), dim, color)
 end
-get_internal_face(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
-    get_internal_face(ranges, D, color)
+internal_face(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
+    internal_face(ranges, D, color)
 
 """
-    get_right_face(ranges, dim, color)
+    right_face(ranges, dim, color)
 
 Return the upper-side face cells of one race-free face color.
 """
-get_right_face(ranges::FaceRanges, dim::Int, color::Integer) =
-    _colored_face(get_right_face(ranges, dim), dim, color)
-get_right_face(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
-    get_right_face(ranges, D, color)
+right_face(ranges::FaceRanges, dim::Int, color::Integer) =
+    _colored_face(right_face(ranges, dim), dim, color)
+right_face(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
+    right_face(ranges, D, color)
 
 """
     face_offset(halo, dim)

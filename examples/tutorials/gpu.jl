@@ -120,7 +120,7 @@ println("max |Δu|  : ", maximum(abs, du_cpu))   # near 0 for constant field
 # (1-based, includes ghost padding).
 #
 # Workflow:
-#   1.  region = get_interior_cell_window(CellRanges(u))
+#   1.  region = interior_cell_window(CellRanges(u))
 #   2.  Launch with ndrange = region.size
 #   3.  Inside kernel: I = cell_index(region, J)
 #                      where J = @index(Global, NTuple)
@@ -139,7 +139,7 @@ println("=" ^ 60)
     end
 end
 
-region = get_interior_cell_window(CellRanges(u_gpu))
+region = interior_cell_window(CellRanges(u_gpu))
 println("launch size (interior)  : ", region.size)
 println("first interior cell     : ", region.first)   # storage coords, = (halo+1, halo+1)
 
@@ -160,7 +160,7 @@ println("storage[2,2] (J=1,1) : ", corner_val)   # I=(2,2) → 2*100+2 = 202.0
 # Cells of the same color are independent and can be updated in
 # one parallel kernel launch.
 #
-# get_interior_cell_window(ranges, color; compressed_dim)
+# interior_cell_window(ranges, color; compressed_dim)
 #   compressed_dim — the spatial dimension along which the launch
 #                    grid is compressed.  Choosing the fastest-
 #                    varying memory dimension gives coalesced access.
@@ -191,7 +191,7 @@ for color in 0:1
     synchronize_halo!(u_gpu)
     KA.synchronize(backend)
 
-    region_c = get_interior_cell_window(ranges, color; compressed_dim=2)
+    region_c = interior_cell_window(ranges, color; compressed_dim=2)
     println("color=$color  launch size : ", region_c.size)
 
     any(==(0), region_c.size) && continue
@@ -208,9 +208,9 @@ end
 # a compact 1-D (per face type) launch index to a storage index.
 #
 # Three region types per dimension:
-#   get_left_face_window(fr, dim)     — ghost | interior boundary faces
-#   get_internal_face_window(fr, dim) — interior | interior internal faces
-#   get_right_face_window(fr, dim)    — interior | ghost boundary faces
+#   left_face_window(fr, dim)     — ghost | interior boundary faces
+#   internal_face_window(fr, dim) — interior | interior internal faces
+#   right_face_window(fr, dim)    — interior | ghost boundary faces
 #
 # Inside the kernel use cell_index(region, J) to get IL (lower cell).
 # The upper cell is IL + region.offset.
@@ -239,9 +239,9 @@ end
 
 fr = FaceRanges(u_gpu)
 dim = 1
-left_region     = get_left_face_window(fr, dim)
-internal_region = get_internal_face_window(fr, dim)
-right_region    = get_right_face_window(fr, dim)
+left_region     = left_face_window(fr, dim)
+internal_region = internal_face_window(fr, dim)
+right_region    = right_face_window(fr, dim)
 
 println("dim=1  left    launch size : ", left_region.size)
 println("dim=1  internal launch size: ", internal_region.size)
@@ -304,7 +304,7 @@ function run_heat_gpu(; n=(128,128), alpha=1.0f0, nt=200, cfl=0.4f0, groupsize=(
     inv_dy2 = alpha / dy^2
 
     cr      = CellRanges(u)
-    region  = get_interior_cell_window(cr)
+    region  = interior_cell_window(cr)
 
     rhs_k!  = heat_rhs_kernel!(bk, groupsize)
     step_k! = euler_update_kernel!(bk, groupsize)

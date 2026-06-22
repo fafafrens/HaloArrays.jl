@@ -131,29 +131,29 @@ end
 end
 
 """
-    get_interior_cell_window(ranges)
+    interior_cell_window(ranges)
 
 Return compact launch metadata for the interior-cell region.
 """
-@inline get_interior_cell_window(ranges::CellRanges) = CellWindow(get_interior_cells(ranges))
+@inline interior_cell_window(ranges::CellRanges) = CellWindow(interior_cells(ranges))
 
 """
-    get_interior_cell_window(ranges, color; compressed_dim=1)
-    get_interior_cell_window(ranges, color, compressed_dim)
+    interior_cell_window(ranges, color; compressed_dim=1)
+    interior_cell_window(ranges, color, compressed_dim)
 
 Return compact launch metadata for one checkerboard cell color. The launch
 region is compressed in `compressed_dim`; kernels should reconstruct the
 physical cell index and check the compressed dimension upper bound.
 """
-@inline get_interior_cell_window(ranges::CellRanges,
+@inline interior_cell_window(ranges::CellRanges,
                                       color::Integer;
                                       compressed_dim::Integer=1) =
-    get_interior_cell_window(ranges, color, compressed_dim)
-@inline get_interior_cell_window(ranges::CellRanges,
+    interior_cell_window(ranges, color, compressed_dim)
+@inline interior_cell_window(ranges::CellRanges,
                                       color::Integer,
                                       compressed_dim::Integer) =
-    CellCheckerboard(get_interior_cells(ranges), color, compressed_dim)
-@inline get_interior_cell_window(ranges::CellRanges,
+    CellCheckerboard(interior_cells(ranges), color, compressed_dim)
+@inline interior_cell_window(ranges::CellRanges,
                                       color::Integer,
                                       ::Dim{D}) where {D} =
-    get_interior_cell_window(ranges, color, D)
+    interior_cell_window(ranges, color, D)

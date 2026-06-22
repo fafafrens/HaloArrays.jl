@@ -32,11 +32,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   concept; these are positioned launch windows): `CellKernelRegion`→`CellWindow`,
   `FaceKernelRegion`→`FaceWindow`, and the 2-colored (red-black) variants
   `ColoredCellKernelRegion`→`CellCheckerboard`, `ColoredFaceKernelRegion`→
-  `FaceCheckerboard`. The `get_*_region` accessors became `get_*_window`, and the
-  separate colored accessors were folded into the base ones via an optional
-  `color` argument (dispatch) rather than their own names — e.g.
-  `get_interior_cells(ranges, color)`, `get_left_face(ranges, dim, color)`,
-  `get_interior_cell_window(ranges, color)` return the checkerboard variant.
+  `FaceCheckerboard`. The cell/face range and window accessors were also made more
+  idiomatic — the `get_` prefix was dropped (`get_send_view`/`get_recv_view`/
+  `get_comm` keep theirs) and the separate colored accessors were folded into the
+  base ones via an optional `color` argument (dispatch). The family is now
+  `interior_cells(ranges[, color])`, `left_face`/`internal_face`/`right_face(ranges,
+  dim[, color])`, `interior_cell_window`/`left_face_window`/… `(ranges[, …][, color])`
+  (a `color` returns the checkerboard variant), plus `unit_vector(ranges, dim)`.
 - **HDF5 is now a weak dependency** (`HaloArraysHDF5Ext`): `using HaloArrays` no
   longer pulls in HDF5 (and its MPI-built JLLs, which clash with a system
   CUDA-aware MPI). The I/O API loads only when you `using HDF5`.

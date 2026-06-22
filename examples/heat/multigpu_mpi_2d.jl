@@ -118,7 +118,7 @@ end
 
 function step!(unew, u, kernel!, backend; dx2inv)
     synchronize_halo!(u)                              # GPU↔GPU (or rank↔rank) exchange
-    region = get_interior_cell_window(CellRanges(u))
+    region = interior_cell_window(CellRanges(u))
     any(==(0), region.size) && return nothing
     kernel!(parent(unew), parent(u), dx2inv, region; ndrange = region.size)
     KA.synchronize(backend)

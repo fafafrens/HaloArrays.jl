@@ -85,7 +85,7 @@ end
 function rel_rhs_serial!(du, u, eos, r_min, dr)
     synchronize_halo!(u)
     h = halo_width(u.N)
-    set_source_tile!(parent(du), parent(u), eos, get_interior_cells(CellRanges(u)),
+    set_source_tile!(parent(du), parent(u), eos, interior_cells(CellRanges(u)),
         I -> r_min + (I[1] - h - 0.5) * dr)
     accumulate_flux_divergence!(parent(du), parent(u), FaceRanges(u), 1, inv(dr),
         (UL, UR) -> rusanov_flux(eos, UL, UR), conserved_cell, add_conserved!)
@@ -95,7 +95,7 @@ end
 # ── threaded RHS / step ──
 function rel_rhs_threaded!(du, u, eos, r_min, dr)
     synchronize_halo!(u)
-    ranges = FaceRanges(u); cells = get_interior_cells(CellRanges(u)); h = halo_width(u.N)
+    ranges = FaceRanges(u); cells = interior_cells(CellRanges(u)); h = halo_width(u.N)
     tile_foreach(thread_backend(u.N), tile_id -> begin
         du_data = tile_parent(du, tile_id); u_data = tile_parent(u, tile_id)
         offset = interior_to_global_index(u.N, tile_id, (1,))[1] - 1

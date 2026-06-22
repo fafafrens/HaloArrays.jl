@@ -228,19 +228,19 @@ fr = FaceRanges(u)
 accumulate_flux_divergence!(parent(du), parent(u), fr, dim, inv(dx), numerical_flux)
 ```
 
-Or write the loops explicitly with [`get_left_face`](@ref),
-[`get_internal_face`](@ref)`(ranges, dim)` (direction-aware), and
-[`get_right_face`](@ref), pairing each `IL` with `IL + get_unit_vector(ranges, dim)`.
+Or write the loops explicitly with [`left_face`](@ref),
+[`internal_face`](@ref)`(ranges, dim)` (direction-aware), and
+[`right_face`](@ref), pairing each `IL` with `IL + unit_vector(ranges, dim)`.
 For in-place updates that write both adjacent cells, use the colored variants
-(`get_internal_face(ranges, dim, color)`) to avoid same-color conflicts.
+(`internal_face(ranges, dim, color)`) to avoid same-color conflicts.
 
 For collections the ranges are spatial only — select a field first.
 
 ## Cell loops
 
 [`CellRanges`](@ref)`(u)` gives the interior-cell range. For ordinary out-of-place
-stencils use [`get_interior_cells`](@ref); for nearest-neighbor in-place red-black
-updates use [`get_interior_cells`](@ref)`(ranges, color)` (strided
+stencils use [`interior_cells`](@ref); for nearest-neighbor in-place red-black
+updates use [`interior_cells`](@ref)`(ranges, color)` (strided
 `CartesianIndices`, so the inner loop has no parity branch). Cell colors use
 `mod(sum(Tuple(I)), 2)`.
 

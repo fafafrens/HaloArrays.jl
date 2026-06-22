@@ -169,18 +169,18 @@ println("=" ^ 60)
     0.5*(0.5*ul^2 + 0.5*ur^2) - 0.5*max(abs(ul), abs(ur))*(ur - ul)
 
 function burgers_rhs_tile!(du_data, u_data, ranges::FaceRanges, invdx)
-    e = get_unit_vector(ranges, 1)
-    for IL in get_left_face(ranges, 1)
+    e = unit_vector(ranges, 1)
+    for IL in left_face(ranges, 1)
         IR = IL + e
         du_data[IR] += rusanov_flux(u_data[IL], u_data[IR]) * invdx
     end
-    for IL in get_internal_face(ranges, 1)
+    for IL in internal_face(ranges, 1)
         IR = IL + e
         f = rusanov_flux(u_data[IL], u_data[IR]) * invdx
         du_data[IL] -= f
         du_data[IR] += f
     end
-    for IL in get_right_face(ranges, 1)
+    for IL in right_face(ranges, 1)
         IR = IL + e
         du_data[IL] -= rusanov_flux(u_data[IL], u_data[IR]) * invdx
     end
@@ -301,8 +301,8 @@ synchronize_halo!(vel2)
 
 # tile_count, CellRanges, FaceRanges all accept the container directly
 println("tile_count  : ", tile_count(vel2))
-println("interior cells : ", size(get_interior_cells(CellRanges(vel2))))
-println("face ranges : ", get_left_face(FaceRanges(vel2), 1))
+println("interior cells : ", size(interior_cells(CellRanges(vel2))))
+println("face ranges : ", left_face(FaceRanges(vel2), 1))
 
 println()
 println("Threaded tutorial complete.")

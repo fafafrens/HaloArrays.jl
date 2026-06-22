@@ -200,7 +200,7 @@ function update_direction_color!(::LocalHaloBackend, U, rng, params, dir::Int, c
     arrays = link_arrays(U)
     update! = dir == 1 ? update_x_link! : update_y_link!
 
-    for indices in get_interior_cells(CellRanges(U), color)
+    for indices in interior_cells(CellRanges(U), color)
         @inbounds for I in indices
             update!(arrays, I, params, rng)
         end
@@ -210,7 +210,7 @@ function update_direction_color!(::LocalHaloBackend, U, rng, params, dir::Int, c
 end
 
 function update_direction_color!(::ThreadedHaloBackend, U, rngs, params, dir::Int, color::Int)
-    regions = get_interior_cells(CellRanges(U), color)
+    regions = interior_cells(CellRanges(U), color)
     update! = dir == 1 ? update_x_link! : update_y_link!
 
     tforeach(1:tile_count(U); scheduler=:static) do tile_id
@@ -267,7 +267,7 @@ function average_plaquette(U::ArrayOfHaloArray)
 end
 
 function average_plaquette(::LocalHaloBackend, U::ArrayOfHaloArray)
-    total, count = plaquette_sum_count(link_arrays(U), get_interior_cells(CellRanges(U)))
+    total, count = plaquette_sum_count(link_arrays(U), interior_cells(CellRanges(U)))
     return total / count
 end
 
@@ -278,7 +278,7 @@ function average_plaquette(::ThreadedHaloBackend, U::ArrayOfHaloArray)
     for tile_id in 1:tile_count(U)
         tile_total, tile_count_ = plaquette_sum_count(
             link_arrays(U, tile_id),
-            get_interior_cells(CellRanges(U)),
+            interior_cells(CellRanges(U)),
         )
         total += tile_total
         count += tile_count_
