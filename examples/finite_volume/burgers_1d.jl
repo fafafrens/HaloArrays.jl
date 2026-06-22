@@ -12,21 +12,11 @@ function _accumulate_burgers_flux!(du_data, u_data, ranges::FaceRanges, dx)
     invdx = inv(dx)
     offset = unit_vector(ranges, 1)
 
-    @inbounds for IL in left_face(ranges, 1)
-        IR = IL + offset
-        du_data[IR] += rusanov_flux(u_data[IL], u_data[IR]) * invdx
-    end
-
-    @inbounds for IL in internal_face(ranges, 1)
+    @inbounds for IL in interior_faces(ranges, 1)
         IR = IL + offset
         flux = rusanov_flux(u_data[IL], u_data[IR]) * invdx
         du_data[IL] -= flux
         du_data[IR] += flux
-    end
-
-    @inbounds for IL in right_face(ranges, 1)
-        IR = IL + offset
-        du_data[IL] -= rusanov_flux(u_data[IL], u_data[IR]) * invdx
     end
 
     return du_data

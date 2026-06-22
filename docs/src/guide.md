@@ -220,7 +220,7 @@ propagates through `similar`, broadcast, and reductions. Add your own by definin
 
 [`FaceRanges`](@ref)`(u)` gives the index ranges for finite-volume face updates,
 in parent-storage indices (for kernels working on `parent(u)`/`parent(du)`). The
-high-level [`accumulate_flux_divergence!`](@ref) does the whole left/internal/right
+high-level [`accumulate_flux_divergence!`](@ref) does the whole flux-divergence
 update for one direction:
 
 ```julia
@@ -228,11 +228,12 @@ fr = FaceRanges(u)
 accumulate_flux_divergence!(parent(du), parent(u), fr, dim, inv(dx), numerical_flux)
 ```
 
-Or write the loops explicitly with [`left_face`](@ref),
-[`internal_face`](@ref)`(ranges, dim)` (direction-aware), and
-[`right_face`](@ref), pairing each `IL` with `IL + unit_vector(ranges, dim)`.
-For in-place updates that write both adjacent cells, use the colored variants
-(`internal_face(ranges, dim, color)`) to avoid same-color conflicts.
+Or write the loop explicitly with [`interior_faces`](@ref)`(ranges, dim)` — every
+face touching the interior along `dim` — pairing each lower cell `IL` with
+`IL + unit_vector(ranges, dim)` and scattering the flux onto both cells (the two
+boundary faces also write a ghost cell, which is in-bounds and harmless). For a
+race-free *parallel* scatter, loop one checkerboard color at a time with
+`interior_faces(ranges, dim, color)`.
 
 For collections the ranges are spatial only — select a field first.
 

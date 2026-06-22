@@ -207,13 +207,13 @@ end
 # Finite-volume loops iterate over faces.  FaceWindow maps
 # a compact 1-D (per face type) launch index to a storage index.
 #
-# Three region types per dimension:
-#   left_face_window(fr, dim)     — ghost | interior boundary faces
-#   internal_face_window(fr, dim) — interior | interior internal faces
-#   right_face_window(fr, dim)    — interior | ghost boundary faces
+# One region per dimension:
+#   interior_face_window(fr, dim[, color]) — every face touching the interior
+#       (the two boundary faces + the internal faces); pass a color (0/1) for the
+#       race-free checkerboard used by parallel scatter.
 #
 # Inside the kernel use cell_index(region, J) to get IL (lower cell).
-# The upper cell is IL + region.offset.
+# The upper cell is IL + region.offset; scatter each face's flux onto both.
 
 println()
 println("=" ^ 60)
@@ -239,13 +239,11 @@ end
 
 fr = FaceRanges(u_gpu)
 dim = 1
-left_region     = left_face_window(fr, dim)
-internal_region = internal_face_window(fr, dim)
-right_region    = right_face_window(fr, dim)
+face_region = interior_face_window(fr, dim)
 
-println("dim=1  left    launch size : ", left_region.size)
-println("dim=1  internal launch size: ", internal_region.size)
-println("dim=1  right   launch size : ", right_region.size)
+println("dim=1  face launch size      : ", face_region.size)
+println("dim=1  checkerboard color 0  : ", interior_face_window(fr, dim, 0).size)
+println("dim=1  checkerboard color 1  : ", interior_face_window(fr, dim, 1).size)
 
 # ============================================================
 # 6. HEAT EQUATION ON THE GPU (2-D)
