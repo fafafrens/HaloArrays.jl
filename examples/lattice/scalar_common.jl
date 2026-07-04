@@ -124,7 +124,7 @@ function exact_free_scalar_phi2(n::NTuple{2,<:Integer}, p)
 end
 
 heatbath_rng(phi::LocalHaloArray, seed) = MersenneTwister(seed)
-heatbath_rng(phi::HaloArray, seed) = MersenneTwister(seed + MPI.Comm_rank(get_comm(phi)))
+heatbath_rng(phi::HaloArray, seed) = MersenneTwister(seed + MPI.Comm_rank(communicator(phi)))
 heatbath_rng(phi::ThreadedHaloArray, seed) =
     [MersenneTwister(seed + tile_id) for tile_id in 1:tile_count(phi)]
 

@@ -4,6 +4,66 @@ All notable changes to HaloArrays.jl are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0]
+
+### Changed (breaking)
+- **One initializer, one callback.** `fill_from_local_indices!` was removed: a
+  local-index fill makes the global field depend on the domain decomposition,
+  contradicting the backend-agnostic promise (`interior_view(u) .= …` covers the
+  rare legitimate use). `fill_from_global_indices!` is the single initializer;
+  its callback receives the **index tuple** `f(I)` (the docstring previously
+  showed a splatted form that never worked) and it returns `u`.
+- **Uniform returns.** Every public mutating driver now returns its array on
+  every backend — `halo_exchange!`, `start_/finish_halo_exchange!`,
+  `boundary_condition!` (whole-array, per-face, collections, threaded) and the
+  `_threads!` variants. The MPI methods previously returned `nothing`, breaking
+  backend-agnostic chaining.
+- **`unit_vector` is the single name for Cartesian unit steps** — new methods on
+  halo arrays and `Val(N)` (`unit_vector(u[, dim])`) absorb the internal
+  `face_offset` (deleted) and the private `versors` the examples used to reach for.
+- **View helpers renamed and reordered**: `get_send_view(s, d, u[, tile])` →
+  `edge_view(u, s, d[, tile])` and `get_recv_view(…)` → `ghost_view(u, s, d[, tile])`
+  — array first like every other helper, tile last, and names that are correct in
+  both of their roles (boundary conditions *and* the MPI exchange, which sends the
+  edge and receives into the ghost). `tile = nothing` means "whole array", so
+  backend-generic code can pass a tile handle straight through.
+- **`get_comm` → `communicator`, `isactive` → `is_active`** — the last `get_`
+  holdouts and the one predicate that didn't follow the package's underscored
+  naming.
+- **Coupled boundary conditions: one method, every backend.** The canonical
+  signature is now `apply_coupled_bc!(bc, state, side, dim, tile)` with
+  `tile === nothing` on Local/MPI fields and the boundary tile id on threaded
+  fields — mirroring `FunctionBC`'s backend-uniform design. The legacy split
+  4-arg / per-tile 5-arg methods still dispatch.
+
+### Deprecated
+- `get_send_view`, `get_recv_view` (all arities, old argument order), `get_comm`,
+  and `isactive` remain as `@deprecate` shims; they will be removed in 0.4.
+
+### Fixed
+- **Implicit OrdinaryDiffEq solves on distributed states.** OrdinaryDiffEq wraps
+  every iterative linear solver with error-weight preconditioners
+  `Diagonal(weight)` where `weight` is a halo array; LinearAlgebra's generic
+  diagonal kernels apply them by scalar-indexing *global* indices — fine on one
+  rank by accident, an error on 2+. New elementwise `mul!`/`ldiv!` methods for
+  `Diagonal`-of-halo-array route through the interior broadcast (no
+  communication, every backend).
+- **`iterate(::ThreadedHaloArray)` returned the indices, not the values**, so
+  `collect`, comprehensions, and generic `copyto!` silently produced `1, 2, 3, …`
+  regardless of contents.
+- **CI actually runs the distributed implicit regression test** — the MPI job now
+  installs OrdinaryDiffEq/LinearSolve/Krylov; previously the runtests gate
+  silently skipped `test_mpi_implicit.jl` while the job stayed green.
+
+### Added
+- **`benchmark/` harness** — stencil throughput (Local vs Threaded, Mcell/s) and
+  MPI exchange cost vs message size including how much the split
+  `start_/finish_halo_exchange!` overlap hides (`HALO_BENCH_QUICK=1` for smoke runs).
+- **`Diagonal`-of-halo-array operators** (`mul!` 3/5-arg, `ldiv!` 2/3-arg) —
+  Jacobi/error-weight preconditioning works on every backend.
+- **`FieldCollection` is exported** (the concrete type behind the
+  `MultiHaloArray`/`ArrayOfHaloArray` aliases).
+
 ## [0.2.0]
 
 ### Added

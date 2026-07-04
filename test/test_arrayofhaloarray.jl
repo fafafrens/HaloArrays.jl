@@ -53,7 +53,7 @@ end
     @test_logs (:warn, r"Global scalar getindex") begin
         @test fields[1, 2, 3] == 123
     end
-    @test isactive(fields)
+    @test is_active(fields)
 
     interior_view(arrays[1, 2])[3] = 123
     @test_logs (:warn, r"Global scalar setindex!") begin

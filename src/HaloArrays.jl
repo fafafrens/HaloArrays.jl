@@ -33,6 +33,7 @@ include("linearsolve.jl")
 include("mpi_support.jl")
 include("adapt.jl")
 include("hdf5_api.jl")   # HDF5 I/O stubs; methods in ext/HaloArraysHDF5Ext.jl (weakdep)
+include("deprecated.jl") # @deprecate shims for pre-0.3 names
 
 # Core types
 export HaloArray,
@@ -52,6 +53,7 @@ export HaloArray,
     LocalHaloArray,
     ThreadedHaloArray,
     ThreadedMultiHaloArray,
+    FieldCollection,
     MultiHaloArray,
     LocalMultiHaloArray,
     ArrayOfHaloArray,
@@ -82,7 +84,7 @@ export interior_view,
     tile_mapreduce,
     field_shape,
     halo_width,
-    get_comm,
+    communicator,
     global_size,
     tile_size,
     tile_count,
@@ -122,8 +124,8 @@ export halo_exchange!,
     finish_halo_exchange!,
     synchronize_halo!,
     synchronize_halo_threads!,
-    get_send_view,
-    get_recv_view,
+    edge_view,
+    ghost_view,
     swap!,
     HaloKrylov,
     HaloCG,
@@ -136,7 +138,7 @@ export mapreduce_haloarray_dims,
     gather_haloarray
 
 # Maybe helpers
-export isactive
+export is_active
 
 # HDF5 I/O helpers
 export append_haloarray_to_file!,

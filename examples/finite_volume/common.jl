@@ -164,7 +164,7 @@ function _fv_max_exact_error_1d(u::_FVSerialHaloArray, exact_value, args...)
         local_error = max(local_error, abs(parent(u)[I] - exact_value(global_i, nx, args...)))
     end
 
-    return u isa HaloArray ? MPI.Allreduce(local_error, max, get_comm(u)) : local_error
+    return u isa HaloArray ? MPI.Allreduce(local_error, max, communicator(u)) : local_error
 end
 
 function _fv_max_exact_error_1d(u::ThreadedHaloArray, exact_value, args...)

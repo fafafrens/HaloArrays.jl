@@ -64,10 +64,10 @@ end
 
         boundary_condition!(ha)
 
-        @test collect(get_recv_view(Side(1), Dim(1), ha)) == reshape([11, 12, 13, 14], 1, 4)
-        @test collect(get_recv_view(Side(2), Dim(1), ha)) == reshape([31, 32, 33, 34], 1, 4)
-        @test collect(get_recv_view(Side(1), Dim(2), ha)) == reshape([-11, -21, -31], 3, 1)
-        @test collect(get_recv_view(Side(2), Dim(2), ha)) == reshape([14, 24, 34], 3, 1)
+        @test collect(ghost_view(ha, Side(1), Dim(1))) == reshape([11, 12, 13, 14], 1, 4)
+        @test collect(ghost_view(ha, Side(2), Dim(1))) == reshape([31, 32, 33, 34], 1, 4)
+        @test collect(ghost_view(ha, Side(1), Dim(2))) == reshape([-11, -21, -31], 3, 1)
+        @test collect(ghost_view(ha, Side(2), Dim(2))) == reshape([14, 24, 34], 3, 1)
         @test collect(interior_view(ha)) == [10 * i + j for i in 1:3, j in 1:4]
     end
 

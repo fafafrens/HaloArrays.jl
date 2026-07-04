@@ -29,12 +29,12 @@ struct CartesianTopology{N,C} <: AbstractCartesianTopology{N}
 end
 
 """
-    isactive(cart::CartesianTopology)
+    is_active(cart::CartesianTopology)
 
 Return `true` if the topology is active on this process.
 """
 @inline Base.ndims(::AbstractCartesianTopology{N}) where {N} = N
-isactive(cart::CartesianTopology) = cart.active
+is_active(cart::CartesianTopology) = cart.active
 
 """
     is_root(cart::CartesianTopology; root=0)
@@ -42,7 +42,7 @@ isactive(cart::CartesianTopology) = cart.active
 Return `true` on the root rank (default 0) of an active topology.
 """
 is_root(cart::CartesianTopology; root::Integer=0) =
-    isactive(cart) && cart.global_rank == root
+    is_active(cart) && cart.global_rank == root
 
 """
     coords_to_color_multi(coords, dims, dims_to_remove) -> Int

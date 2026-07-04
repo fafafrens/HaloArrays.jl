@@ -7,7 +7,7 @@ This handles the MPI case where a rank ends up owning no data (an empty patch):
 the array is still a valid object to pass around and call collectively, but it
 reports `length 0`, iterates over nothing, and errors on scalar indexing.
 Reductions and broadcasts skip inactive values. The activity is taken from
-`isactive(a)` at construction.
+`is_active(a)` at construction.
 """
 struct MaybeHaloArray{T,N,A<:AbstractHaloArray{T,N}} <: AbstractHaloArray{T,N}
     data::A
@@ -16,7 +16,7 @@ end
 
 
 MaybeHaloArray(a::A) where {T,N,A<:AbstractHaloArray{T,N}} =
-    MaybeHaloArray{T,N,A}(a, isactive(a))
+    MaybeHaloArray{T,N,A}(a, is_active(a))
 
 
 
@@ -41,15 +41,15 @@ Base.eltype(::Type{<:MaybeHaloArray{T,N,A}}) where {T,N,A} = T
 Base.eltype(::MaybeHaloArray{T,N,A}) where {T,N,A} = T
 Base.length(m::MaybeHaloArray) = m.active ? length(m.data) : 0
 Base.eachindex(m::MaybeHaloArray{T,N,A}) where {T,N,A} =
-    isactive(m) ? eachindex(m.data) : CartesianIndices(ntuple(_ -> 1:0, Val(N)))
+    is_active(m) ? eachindex(m.data) : CartesianIndices(ntuple(_ -> 1:0, Val(N)))
 
 function Base.getindex(m::MaybeHaloArray, I::Vararg{Integer})
-    isactive(m) || throw(ErrorException("MaybeHaloArray: attempt to index inactive value"))
+    is_active(m) || throw(ErrorException("MaybeHaloArray: attempt to index inactive value"))
     return getindex(m.data, I...)
 end
 
 function Base.setindex!(m::MaybeHaloArray, value, I::Vararg{Integer})
-    isactive(m) || throw(ErrorException("MaybeHaloArray: attempt to index inactive value"))
+    is_active(m) || throw(ErrorException("MaybeHaloArray: attempt to index inactive value"))
     setindex!(m.data, value, I...)
     return m
 end
@@ -63,9 +63,9 @@ function Base.show(io::IO, m::MaybeHaloArray)
     end
 end
 
-isactive(m::MaybeHaloArray) = m.active
+is_active(m::MaybeHaloArray) = m.active
 is_root(m::MaybeHaloArray; root::Integer=0) =
-    isactive(m) && is_root(getdata(m); root=root)
+    is_active(m) && is_root(getdata(m); root=root)
 halo_backend(m::MaybeHaloArray) = halo_backend(getdata(m))
 getdata(m::MaybeHaloArray) = m.data
 active(x::AbstractHaloArray)   = MaybeHaloArray(x, true)
@@ -84,7 +84,7 @@ function apply_if_active(f::Function, m::MaybeHaloArray, args...; kwargs...)
 end
 
 function apply_if_active!(f::Function, m::MaybeHaloArray, args...; kwargs...)
-    if isactive(m)
+    if is_active(m)
         f(m.data, args...; kwargs...)
     end
     return m
@@ -135,16 +135,16 @@ function Base.copy(m::MaybeHaloArray)
 end
 
 function Base.copyto!(dest::MaybeHaloArray, src::MaybeHaloArray)
-    isactive(dest) == isactive(src) ||
+    is_active(dest) == is_active(src) ||
         throw(ArgumentError("MaybeHaloArray copyto! requires matching active states"))
-    if isactive(dest)
+    if is_active(dest)
         copyto!(dest.data, src.data)
     end
     return dest
 end
 
 function Base.fill!(m::MaybeHaloArray, value)
-    if isactive(m)
+    if is_active(m)
         fill!(m.data, value)
     end
     return m

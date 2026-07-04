@@ -73,11 +73,11 @@ LinearAlgebra.dot(x::AbstractHaloCollection, y::AbstractHaloCollection) =
 # hits the two-arg-mapreduce fallback below and `norm` hits Base's generic path —
 # both O(N) per call (the same hot-path leak fixed for collections above).
 LinearAlgebra.dot(x::MaybeHaloArray, y::MaybeHaloArray) =
-    isactive(x) ? LinearAlgebra.dot(getdata(x), getdata(y)) : zero(eltype(x))
+    is_active(x) ? LinearAlgebra.dot(getdata(x), getdata(y)) : zero(eltype(x))
 LinearAlgebra.norm(m::MaybeHaloArray) =
-    isactive(m) ? LinearAlgebra.norm(getdata(m)) : zero(real(eltype(m)))
+    is_active(m) ? LinearAlgebra.norm(getdata(m)) : zero(real(eltype(m)))
 LinearAlgebra.norm(m::MaybeHaloArray, p::Real) =
-    isactive(m) ? LinearAlgebra.norm(getdata(m), p) : zero(real(eltype(m)))
+    is_active(m) ? LinearAlgebra.norm(getdata(m), p) : zero(real(eltype(m)))
 # Fallback for any other halo-array type.
 LinearAlgebra.dot(x::AbstractHaloArray, y::AbstractHaloArray) = mapreduce(LinearAlgebra.dot, +, x, y)
 
@@ -298,14 +298,14 @@ LinearAlgebra.reflect!(x::AbstractHaloCollection, y::AbstractHaloCollection, c, 
 # MaybeHaloArray: forward to the inner array when active, no-op when inactive
 # (completes the BLAS-1 surface — `dot`/`norm`/`axpy!`/… already cover Maybe).
 function swap!(x::MaybeHaloArray, y::MaybeHaloArray)
-    isactive(x) && swap!(getdata(x), getdata(y))
+    is_active(x) && swap!(getdata(x), getdata(y))
     return x, y
 end
 function LinearAlgebra.rotate!(x::MaybeHaloArray, y::MaybeHaloArray, c, s)
-    isactive(x) && LinearAlgebra.rotate!(getdata(x), getdata(y), c, s)
+    is_active(x) && LinearAlgebra.rotate!(getdata(x), getdata(y), c, s)
     return x, y
 end
 function LinearAlgebra.reflect!(x::MaybeHaloArray, y::MaybeHaloArray, c, s)
-    isactive(x) && LinearAlgebra.reflect!(getdata(x), getdata(y), c, s)
+    is_active(x) && LinearAlgebra.reflect!(getdata(x), getdata(y), c, s)
     return x, y
 end

@@ -143,7 +143,7 @@ for func in (:mapreduce, :mapfoldl, :mapfoldr)
     @eval function Base.$func(
             f::F, op::OP, halo::MaybeHaloArray, etc::Vararg{MaybeHaloArray}; kws...,
         ) where {F<:Function, OP}
-        all(isactive, (halo, etc...)) ||
+        all(is_active, (halo, etc...)) ||
             throw(ErrorException("MaybeHaloArray: attempt to reduce inactive value"))
         return $func(f, op, getdata(halo), getdata.(etc)...; kws...)
     end
@@ -157,12 +157,12 @@ for func in (:mapreduce, :mapfoldl, :mapfoldr)
 end
 
 function Base.all(f::F, halo::MaybeHaloArray) where {F<:Function}
-    isactive(halo) || throw(ErrorException("MaybeHaloArray: attempt to reduce inactive value"))
+    is_active(halo) || throw(ErrorException("MaybeHaloArray: attempt to reduce inactive value"))
     return all(f, getdata(halo))
 end
 
 function Base.any(f::F, halo::MaybeHaloArray) where {F<:Function}
-    isactive(halo) || throw(ErrorException("MaybeHaloArray: attempt to reduce inactive value"))
+    is_active(halo) || throw(ErrorException("MaybeHaloArray: attempt to reduce inactive value"))
     return any(f, getdata(halo))
 end
 

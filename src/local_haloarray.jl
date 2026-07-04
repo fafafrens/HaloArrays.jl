@@ -54,7 +54,7 @@ end
 # inherited from AbstractSingleHaloArray / AbstractArray.
 
 is_root(::LocalHaloArray; root::Integer=0) = (root == 0)
-# isactive, get_comm inherited from AbstractSerialHaloArray
+# is_active, communicator inherited from AbstractSerialHaloArray
 
 @inline halo_width(::Type{<:LocalHaloArray{T,N,A,Halo}}) where {T,N,A,Halo} = Halo
 @inline halo_width(::LocalHaloArray{T,N,A,Halo}) where {T,N,A,Halo} = Halo
@@ -76,8 +76,8 @@ function full_view(halo::LocalHaloArray)
     @views return halo.data[ranges...]
 end
 
-@inline get_send_view(s, d, array::LocalHaloArray) = get_send_view(s, d, parent(array), halo_width(array))
-@inline get_recv_view(s, d, array::LocalHaloArray) = get_recv_view(s, d, parent(array), halo_width(array))
+@inline edge_view(array::LocalHaloArray, s::Side, d::Dim)  = edge_view(parent(array), s, d, halo_width(array))
+@inline ghost_view(array::LocalHaloArray, s::Side, d::Dim) = ghost_view(parent(array), s, d, halo_width(array))
 # versors, Base.similar dispatchers, Base.map!/map inherited from AbstractSingleHaloArray
 
 function Base.similar(halo::LocalHaloArray{T,N,A,Halo,BCondition}, ::Type{AA},

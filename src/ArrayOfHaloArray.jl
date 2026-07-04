@@ -106,4 +106,4 @@ end
 # (abstract_haloarray.jl): the _fields/_first_field/_map_fields/_check_same_fields
 # hooks, integer+Cartesian getindex/setindex!, similar(c[, T][, dims]),
 # copy/copyto!/fill!/zero, map, interior_view, map_over_field, all/any (reduction.jl),
-# and halo_backend/halo_width/tile_*/isactive/is_root.
+# and halo_backend/halo_width/tile_*/is_active/is_root.

@@ -26,7 +26,7 @@ function DiffEqBase.NAN_CHECK(halo::HaloArrays.FieldCollection)
 end
 
 function DiffEqBase.NAN_CHECK(halo::MaybeHaloArray)
-    return isactive(halo) && DiffEqBase.NAN_CHECK(getdata(halo))
+    return is_active(halo) && DiffEqBase.NAN_CHECK(getdata(halo))
 end
 
 function DiffEqBase.ODE_DEFAULT_UNSTABLE_CHECK(dt, halo::AbstractHaloArray, p, t)

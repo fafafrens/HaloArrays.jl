@@ -52,7 +52,7 @@ function ThreadedCartesianTopology(dims::NTuple{N,<:Integer}; periodic=ntuple(_ 
     return ThreadedCartesianTopology{N}(tile_dims, tile_coords, neighbors, periodic_tuple)
 end
 
-@inline isactive(::ThreadedCartesianTopology) = true
+@inline is_active(::ThreadedCartesianTopology) = true
 # Base.ndims inherited from AbstractCartesianTopology{N}
 @inline is_root(::ThreadedCartesianTopology; root::Integer=0) = true
 @inline tile_count(topology::ThreadedCartesianTopology) = prod(topology.dims)
@@ -207,8 +207,8 @@ end
 # Global CartesianIndex of the first ghost cell of tile `tile_id` on the (side,dim)
 # face — ghost analog of `interior_to_global_index`, per tile (see the HaloArray
 # version for the index convention).
-@inline function ghost_origin(halo::ThreadedHaloArray{T,N}, tile_id::Integer,
-        ::Side{S}, ::Dim{D}) where {T,N,S,D}
+@inline function ghost_origin(halo::ThreadedHaloArray{T,N}, ::Side{S}, ::Dim{D},
+        tile_id::Integer) where {T,N,S,D}
     coord = tile_coordinates(halo, tile_id)
     ts    = tile_size(halo)
     hw    = halo_width(halo)
@@ -217,7 +217,7 @@ end
 end
 @inline global_size(halo::ThreadedHaloArray) = interior_size(halo)
 @inline is_root(halo::ThreadedHaloArray; root::Integer=0) = is_root(halo.topology; root=root)
-# isactive, get_comm inherited from AbstractSerialHaloArray
+# is_active, communicator inherited from AbstractSerialHaloArray
 
 @inline function _threaded_global_to_tile_index(halo::ThreadedHaloArray{T,N}, I) where {T,N}
     idx = _check_global_scalar_indices(halo, I)
@@ -271,20 +271,12 @@ end
     @views return tile_parent(halo, tile_id)[ranges...]
 end
 
-@inline function get_send_view(::Side{1}, ::Dim{D}, halo::ThreadedHaloArray, tile_id::Int) where {D}
-    return get_send_view(Side(1), Dim(D), tile_parent(halo, tile_id), halo_width(halo))
+@inline function edge_view(halo::ThreadedHaloArray, s::Side, ::Dim{D}, tile_id::Int) where {D}
+    return edge_view(tile_parent(halo, tile_id), s, Dim(D), halo_width(halo))
 end
 
-@inline function get_send_view(::Side{2}, ::Dim{D}, halo::ThreadedHaloArray, tile_id::Int) where {D}
-    return get_send_view(Side(2), Dim(D), tile_parent(halo, tile_id), halo_width(halo))
-end
-
-@inline function get_recv_view(::Side{1}, ::Dim{D}, halo::ThreadedHaloArray, tile_id::Int) where {D}
-    return get_recv_view(Side(1), Dim(D), tile_parent(halo, tile_id), halo_width(halo))
-end
-
-@inline function get_recv_view(::Side{2}, ::Dim{D}, halo::ThreadedHaloArray, tile_id::Int) where {D}
-    return get_recv_view(Side(2), Dim(D), tile_parent(halo, tile_id), halo_width(halo))
+@inline function ghost_view(halo::ThreadedHaloArray, s::Side, ::Dim{D}, tile_id::Int) where {D}
+    return ghost_view(tile_parent(halo, tile_id), s, Dim(D), halo_width(halo))
 end
 
 @inline function neighbor_tile_id(halo::ThreadedHaloArray, tile_id::Integer, dim::Integer, side::Integer)
@@ -292,24 +284,24 @@ end
 end
 
 @inline function _threaded_exchange_side!(halo::ThreadedHaloArray, tile_id::Integer,
-        dim::Dim{D}, side::Side{S}) where {D,S}
+        side::Side{S}, dim::Dim{D}) where {D,S}
     neighbor_id = neighbor_tile_id(halo, tile_id, D, S)
     if neighbor_id != 0
-        _threaded_copy_side!(halo, tile_id, neighbor_id, dim, side)
+        _threaded_copy_side!(halo, tile_id, neighbor_id, side, dim)
     end
     return halo
 end
 
 @inline function _threaded_copy_side!(halo::ThreadedHaloArray, tile_id::Integer, neighbor_id::Integer,
-        dim::Dim{D}, side::Side{S}) where {D,S}
-    recv_view = get_recv_view(side, dim, halo, tile_id)
-    send_view = get_send_view(Side(3 - S), dim, halo, neighbor_id)
+        side::Side{S}, dim::Dim{D}) where {D,S}
+    recv_view = ghost_view(halo, side, dim, tile_id)
+    send_view = edge_view(halo, Side(3 - S), dim, neighbor_id)
     copyto!(recv_view, send_view)
     return halo
 end
 
 @inline function _threaded_boundary_side!(halo::ThreadedHaloArray, tile_id::Integer,
-        dim::Dim{D}, side::Side{S}) where {D,S}
+        side::Side{S}, dim::Dim{D}) where {D,S}
     if neighbor_tile_id(halo, tile_id, D, S) == 0
         mode = halo.boundary_condition[D][S]
         boundary_condition!(halo, tile_id, side, dim, mode)
@@ -318,10 +310,10 @@ end
 end
 
 @inline function _threaded_synchronize_side!(halo::ThreadedHaloArray, tile_id::Integer,
-        dim::Dim{D}, side::Side{S}) where {D,S}
+        side::Side{S}, dim::Dim{D}) where {D,S}
     neighbor_id = neighbor_tile_id(halo, tile_id, D, S)
     if neighbor_id != 0
-        _threaded_copy_side!(halo, tile_id, neighbor_id, dim, side)
+        _threaded_copy_side!(halo, tile_id, neighbor_id, side, dim)
     else
         mode = halo.boundary_condition[D][S]
         boundary_condition!(halo, tile_id, side, dim, mode)
@@ -329,7 +321,7 @@ end
     return halo
 end
 
-# Per-tile work: iterate every (Dim, Side) face via the shared `_foreach_face`
+# Per-tile work: iterate every (Side, Dim) face via the shared `_foreach_face`
 # primitive (closure-free, allocation-safe), passing the tile id through.
 @inline _threaded_exchange_tile!(halo::ThreadedHaloArray{T,N}, tile_id::Integer) where {T,N} =
     _foreach_face(_threaded_exchange_side!, halo, tile_id, Val(N))
@@ -366,7 +358,7 @@ function halo_exchange_threads!(halo::ThreadedHaloArray)
 end
 
 function boundary_condition!(halo::ThreadedHaloArray, tile_id::Integer, side::Side{S}, dim::Dim{D}) where {S,D}
-    _threaded_boundary_side!(halo, tile_id, dim, side)
+    _threaded_boundary_side!(halo, tile_id, side, dim)
     return halo
 end
 
@@ -374,16 +366,16 @@ end
 # tile-aware views — the same code the single-array backends use, only the views
 # differ. Periodic is a no-op (the inter-tile exchange already wraps the edges).
 @inline boundary_condition!(h::ThreadedHaloArray, t::Integer, s::Side, d::Dim, ::Reflecting) =
-    _reflect_into!(get_recv_view(s, d, h, t), interior_view(h, t), s, d, halo_width(h), 1)
+    _reflect_into!(ghost_view(h, s, d, t), interior_view(h, t), s, d, halo_width(h), 1)
 @inline boundary_condition!(h::ThreadedHaloArray, t::Integer, s::Side, d::Dim, ::Antireflecting) =
-    _reflect_into!(get_recv_view(s, d, h, t), interior_view(h, t), s, d, halo_width(h), -1)
+    _reflect_into!(ghost_view(h, s, d, t), interior_view(h, t), s, d, halo_width(h), -1)
 @inline boundary_condition!(h::ThreadedHaloArray, t::Integer, s::Side, d::Dim, ::Repeating) =
-    _repeating_into!(get_recv_view(s, d, h, t), interior_view(h, t), s, d)
+    _repeating_into!(ghost_view(h, s, d, t), interior_view(h, t), s, d)
 boundary_condition!(::ThreadedHaloArray, ::Integer, ::Side, ::Dim, ::Periodic) = nothing
 # FunctionBC: tile-local views + per-tile global origin, same closure as the single
 # backends (see haloarray.jl `FunctionBC`).
 @inline boundary_condition!(h::ThreadedHaloArray, t::Integer, s::Side, d::Dim, bc::FunctionBC) =
-    bc.f(get_recv_view(s, d, h, t), get_send_view(s, d, h, t), s, d, halo_width(h), ghost_origin(h, t, s, d))
+    bc.f(ghost_view(h, s, d, t), edge_view(h, s, d, t), s, d, halo_width(h), ghost_origin(h, s, d, t))
 
 function boundary_condition!(halo::ThreadedHaloArray)
     @inbounds for tile_id in eachindex(parent(halo))

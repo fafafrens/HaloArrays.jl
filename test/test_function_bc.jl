@@ -7,7 +7,7 @@ import HaloArrays: _reflect_into!, _repeating_into!, ghost_origin
 function _boundary_ghost_values(u::LocalHaloArray)
     vals = Float64[]
     for d in 1:2, s in 1:2
-        append!(vals, vec(collect(get_recv_view(Side(s), Dim(d), u))))
+        append!(vals, vec(collect(ghost_view(u, Side(s), Dim(d)))))
     end
     sort(vals)
 end
@@ -15,7 +15,7 @@ function _boundary_ghost_values(u::ThreadedHaloArray)
     vals = Float64[]
     for t in 1:tile_count(u), d in 1:2, s in 1:2
         neighbor_tile_id(u, t, d, s) == 0 || continue   # physical edges only
-        append!(vals, vec(collect(get_recv_view(Side(s), Dim(d), u, t))))
+        append!(vals, vec(collect(ghost_view(u, Side(s), Dim(d), t))))
     end
     sort(vals)
 end
@@ -47,7 +47,7 @@ end
         interior_view(u) .= 1.0; boundary_condition!(u)
         @test all(interior_view(u) .== 1.0)
         for d in 1:2, s in 1:2
-            @test all(get_recv_view(Side(s), Dim(d), u) .== 9.0)
+            @test all(ghost_view(u, Side(s), Dim(d)) .== 9.0)
         end
         # zero-flux Neumann (ghost = edge) == Repeating at hw=1
         un = LocalHaloArray(Float64, (8, 8), 1;

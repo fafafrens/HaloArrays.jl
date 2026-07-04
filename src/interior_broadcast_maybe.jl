@@ -60,7 +60,7 @@ unpack_args_maybe(args::Tuple{Any}) = (unpack_maybe(args[1]),)
 unpack_args_maybe(::Tuple{}) = ()
 
 @inline function Base.copyto!(dest::MaybeHaloArray, bc::Broadcasted{<:MaybeHaloArrayStyle{Ndim}}) where {Ndim}
-    if !isactive(dest)
+    if !is_active(dest)
         return dest
     end
 
@@ -73,7 +73,7 @@ end
 
 @inline function Base.copy(bc::Broadcast.Broadcasted{<:MaybeHaloArrayStyle{Ndim}}) where {Ndim}
     dest = similar(bc)
-    if !isactive(dest)
+    if !is_active(dest)
         return dest
     end
     bc_flat = Broadcast.flatten(bc)
@@ -82,7 +82,7 @@ end
 end
 
 function Broadcast.materialize!(dest::MaybeHaloArray, bc::Broadcasted)
-    if !isactive(dest)
+    if !is_active(dest)
         return dest
     end
 

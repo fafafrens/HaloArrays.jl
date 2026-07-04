@@ -88,7 +88,7 @@ end
     maybe_reduced = mapreduce_haloarray_dims(identity, +, ha, (1,))
 
     if topology.cart_coords[1] == 0
-        @test isactive(maybe_reduced)
+        @test is_active(maybe_reduced)
         reduced = HaloArrays.unwrap(maybe_reduced)
         reduced_global_size = (topology.dims[2] * local_dims[2],)
         reduced_owned_size = (local_dims[2],)
@@ -106,7 +106,7 @@ end
         end
         @test collect(interior_view(reduced)) == expected
     else
-        @test !isactive(maybe_reduced)
+        @test !is_active(maybe_reduced)
     end
 
     u = copy(ha)
@@ -118,7 +118,7 @@ end
 
     maybe_fields = HaloArrays.mapreduce_mhaloarray_dims(identity, +, MultiHaloArray((; u, v)), (1,))
     if topology.cart_coords[1] == 0
-        @test isactive(maybe_fields)
+        @test is_active(maybe_fields)
         fields = HaloArrays.unwrap(maybe_fields)
         @test fields isa MultiHaloArray
         reduced_global_size = (topology.dims[2] * local_dims[2],)
@@ -128,6 +128,6 @@ end
         @test interior_size(fields.arrays.u) == reduced_owned_size
         @test interior_size(fields.arrays.v) == reduced_owned_size
     else
-        @test !isactive(maybe_fields)
+        @test !is_active(maybe_fields)
     end
 end

@@ -131,14 +131,14 @@
 
         synchronize_halo!(halo)
 
-        @test collect(get_recv_view(Side(2), Dim(1), halo, 1)) ==
-            collect(get_send_view(Side(1), Dim(1), halo, 2))
-        @test collect(get_recv_view(Side(2), Dim(2), halo, 1)) ==
-            collect(get_send_view(Side(1), Dim(2), halo, 3))
-        @test collect(get_recv_view(Side(1), Dim(1), halo, 1)) ==
-            collect(get_send_view(Side(1), Dim(1), halo, 1))
-        @test collect(get_recv_view(Side(2), Dim(2), halo, 4)) ==
-            collect(get_send_view(Side(2), Dim(2), halo, 4))
+        @test collect(ghost_view(halo, Side(2), Dim(1), 1)) ==
+            collect(edge_view(halo, Side(1), Dim(1), 2))
+        @test collect(ghost_view(halo, Side(2), Dim(2), 1)) ==
+            collect(edge_view(halo, Side(1), Dim(2), 3))
+        @test collect(ghost_view(halo, Side(1), Dim(1), 1)) ==
+            collect(edge_view(halo, Side(1), Dim(1), 1))
+        @test collect(ghost_view(halo, Side(2), Dim(2), 4)) ==
+            collect(edge_view(halo, Side(2), Dim(2), 4))
     end
 
     @testset "2D mixed boundary modes fill only exterior faces" begin
@@ -152,10 +152,10 @@
 
         synchronize_halo!(halo)
 
-        @test collect(get_recv_view(Side(1), Dim(1), halo, 1)) == reshape([11, 12, 13], 1, 3)
-        @test collect(get_recv_view(Side(2), Dim(1), halo, 1)) == reshape([-21, -22, -23], 1, 3)
-        @test collect(get_recv_view(Side(1), Dim(2), halo, 1)) == reshape([11, 21], 2, 1)
-        @test collect(get_recv_view(Side(2), Dim(2), halo, 1)) == reshape([13, 23], 2, 1)
+        @test collect(ghost_view(halo, Side(1), Dim(1), 1)) == reshape([11, 12, 13], 1, 3)
+        @test collect(ghost_view(halo, Side(2), Dim(1), 1)) == reshape([-21, -22, -23], 1, 3)
+        @test collect(ghost_view(halo, Side(1), Dim(2), 1)) == reshape([11, 21], 2, 1)
+        @test collect(ghost_view(halo, Side(2), Dim(2), 1)) == reshape([13, 23], 2, 1)
     end
 
     @testset "copyto! copies threaded tile storage" begin

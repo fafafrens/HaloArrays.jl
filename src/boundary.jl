@@ -69,10 +69,6 @@ function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,BCondition},
     return halo
 end
 
-# Adapter: `_foreach_face` calls `f(halo, Dim, Side)`, while the per-face
-# `boundary_condition!` takes `(halo, Side, Dim)` — flip the order, no closure.
-@inline _boundary_face!(halo, dim::Dim, side::Side) = boundary_condition!(halo, side, dim)
-
 """
     boundary_condition!(u)
     boundary_condition!(u, Side(s), Dim(d))
@@ -90,7 +86,7 @@ edges), so it is safe to call on a decomposed grid. The condition per
 [`Antireflecting`](@ref), [`NoBoundaryCondition`](@ref).
 """
 function boundary_condition!(halo::AbstractSingleHaloArray{T,N}) where {T,N}
-    _foreach_face(_boundary_face!, halo, Val(N))
+    _foreach_face(boundary_condition!, halo, Val(N))
     return halo
 end
 
@@ -109,7 +105,7 @@ end
 #
 # ThreadedHaloArray dispatches all take tile_id as the second
 # argument and will win over these fallbacks — no conflict.
-# HaloArray and LocalHaloArray both have a 3-arg get_recv_view
+# HaloArray and LocalHaloArray both have a 3-arg ghost_view
 # dispatch, so the body is identical for both types.
 # ============================================================
 
@@ -117,18 +113,18 @@ end
 # Delegate to the shared kernels with the whole-array views. `S`/`scale` are
 # compile-time, so these inline to the same code as a hand-written per-side method.
 @inline boundary_condition!(halo::AbstractSingleHaloArray, s::Side, d::Dim, ::Reflecting) =
-    _reflect_into!(get_recv_view(s, d, halo), interior_view(halo), s, d, halo_width(halo), 1)
+    _reflect_into!(ghost_view(halo, s, d), interior_view(halo), s, d, halo_width(halo), 1)
 @inline boundary_condition!(halo::AbstractSingleHaloArray, s::Side, d::Dim, ::Antireflecting) =
-    _reflect_into!(get_recv_view(s, d, halo), interior_view(halo), s, d, halo_width(halo), -1)
+    _reflect_into!(ghost_view(halo, s, d), interior_view(halo), s, d, halo_width(halo), -1)
 @inline boundary_condition!(halo::AbstractSingleHaloArray, s::Side, d::Dim, ::Repeating) =
-    _repeating_into!(get_recv_view(s, d, halo), interior_view(halo), s, d)
+    _repeating_into!(ghost_view(halo, s, d), interior_view(halo), s, d)
 
 # ---- Periodic -------------------------------------------------
 # HaloArray: MPI exchange fills halos → no-op here.
 # LocalHaloArray: must physically wrap the interior data (both sides in one method).
 boundary_condition!(::HaloArray, ::Side, ::Dim, ::Periodic) = nothing
 @inline boundary_condition!(halo::LocalHaloArray, s::Side, d::Dim, ::Periodic) =
-    _periodic_into!(get_recv_view(s, d, halo), interior_view(halo), s, d, halo_width(halo))
+    _periodic_into!(ghost_view(halo, s, d), interior_view(halo), s, d, halo_width(halo))
 
 # ---- NoBoundaryCondition ----------------------------------------
 # Ghost cells are left unchanged; the user fills them via a custom function.
@@ -142,7 +138,7 @@ boundary_condition!(::ThreadedHaloArray, ::Integer, ::Side, ::Dim, ::NoBoundaryC
 # Backend-uniform: the threaded method (threaded_haloarray.jl) passes tile-local
 # views and the per-tile origin, so one closure runs on every backend.
 @inline boundary_condition!(h::AbstractSingleHaloArray, s::Side, d::Dim, bc::FunctionBC) =
-    bc.f(get_recv_view(s, d, h), get_send_view(s, d, h), s, d, halo_width(h), ghost_origin(h, s, d))
+    bc.f(ghost_view(h, s, d), edge_view(h, s, d), s, d, halo_width(h), ghost_origin(h, s, d))
 
 # ============================================================
 # Collection delegators
@@ -209,30 +205,21 @@ condition only where one belongs.
 Apply a coupled boundary condition to a multi-field `state` (a
 [`MultiHaloArray`](@ref) or [`ArrayOfHaloArray`](@ref)).
 
-You implement the **four-argument** method for your `bc` type; it reads each
-field's interior edge with [`get_send_view`](@ref) and writes each field's ghost
-slab with [`get_recv_view`](@ref) (use [`eachfield`](@ref) to iterate fields):
+You implement **one five-argument method** for your `bc` type — the same method
+runs on every backend. It receives the face and a `tile` handle (`nothing` for
+`LocalHaloArray`/MPI [`HaloArray`](@ref) fields; the boundary tile id for
+[`ThreadedHaloArray`](@ref) fields), which it passes straight through to the
+view helpers: read each field's interior edge with [`edge_view`](@ref) and
+write each field's ghost slab with [`ghost_view`](@ref) (use
+[`eachfield`](@ref) to iterate fields):
 
 ```julia
 struct MyBC <: AbstractCoupledBoundaryCondition; ... end
-function HaloArrays.apply_coupled_bc!(bc::MyBC, state, s::Side{S}, d::Dim{D}) where {S,D}
+function HaloArrays.apply_coupled_bc!(bc::MyBC, state, s::Side{S}, d::Dim{D}, tile) where {S,D}
     for field in eachfield(state)
-        edge  = get_send_view(s, d, field)   # interior cells adjacent to the boundary
-        ghost = get_recv_view(s, d, field)   # ghost cells to fill
+        edge  = edge_view(field, s, d, tile)    # interior cells adjacent to the boundary
+        ghost = ghost_view(field, s, d, tile)   # ghost cells to fill
         # ... transform across fields, write ghost ...
-    end
-end
-```
-
-For **`ThreadedHaloArray`** fields, implement the **five-argument** method
-instead — it is called once per boundary *tile*, with the tile-aware views:
-
-```julia
-function HaloArrays.apply_coupled_bc!(bc::MyBC, state, s::Side{S}, d::Dim{D}, tile_id::Integer) where {S,D}
-    for field in eachfield(state)
-        edge  = get_send_view(s, d, field, tile_id)
-        ghost = get_recv_view(s, d, field, tile_id)
-        # ...
     end
 end
 ```
@@ -246,30 +233,48 @@ allocation-free. Mark the coupled edges [`NoBoundaryCondition`](@ref) so
 `synchronize_halo!` leaves them for this call; for a *mix* of coupled and
 ordinary boundaries, call the per-face form on the specific `(side, dim)`.
 
-Works on [`LocalHaloArray`](@ref), MPI [`HaloArray`](@ref), and
-[`ThreadedHaloArray`](@ref) fields.
+!!! compat "Legacy signatures (pre-0.3)"
+    The old split signatures still work: a **four-argument** method
+    `apply_coupled_bc!(bc, state, s, d)` (Local/MPI whole-array) and a
+    **five-argument** `(bc, state, s, d, tile_id::Integer)` (per threaded tile).
+    New code should define the single `tile`-generic method above instead.
 """
 function apply_coupled_bc!(bc::AbstractCoupledBoundaryCondition,
         state, ::Side{S}, ::Dim{D}) where {S,D}
     throw(ArgumentError(
         "no apply_coupled_bc! for $(typeof(bc)) at side $S dim $D; define " *
-        "`HaloArrays.apply_coupled_bc!(bc::$(nameof(typeof(bc))), state, ::Side, ::Dim)`"))
+        "`HaloArrays.apply_coupled_bc!(bc::$(nameof(typeof(bc))), state, ::Side, ::Dim, tile)` " *
+        "(read `edge_view(field, s, d, tile)`, write `ghost_view(field, s, d, tile)`)"))
 end
 
-function apply_coupled_bc!(bc::AbstractCoupledBoundaryCondition,
-        state, ::Side{S}, ::Dim{D}, tile_id::Integer) where {S,D}
-    throw(ArgumentError(
-        "no per-tile apply_coupled_bc! for $(typeof(bc)) at side $S dim $D; define " *
-        "`HaloArrays.apply_coupled_bc!(bc::$(nameof(typeof(bc))), state, ::Side, ::Dim, tile_id)`"))
+# Route one face to the user's method. The canonical signature is the 5-arg
+# `(bc, state, side, dim, tile)`; when only the legacy 4-arg (Local/MPI) method
+# exists, fall back to it. The `applicable` check (runtime method lookup) runs
+# once per face per application — noise next to the ghost fill itself. There is
+# deliberately NO generic throwing 5-arg fallback method: it would be dispatch-
+# ambiguous with user methods that leave `tile` untyped, so the missing-method
+# error lives here instead.
+@inline function _coupled_face_call!(bc, state, side::Side{S}, dim::Dim{D}, tile) where {S,D}
+    if applicable(apply_coupled_bc!, bc, state, side, dim, tile)
+        apply_coupled_bc!(bc, state, side, dim, tile)
+    elseif tile === nothing
+        apply_coupled_bc!(bc, state, side, dim)   # legacy 4-arg (or its helpful error)
+    else
+        throw(ArgumentError(
+            "no apply_coupled_bc! for $(typeof(bc)) at side $S dim $D tile $tile; define " *
+            "`HaloArrays.apply_coupled_bc!(bc::$(nameof(typeof(bc))), state, ::Side, ::Dim, tile)`"))
+    end
+    return nothing
 end
 
 # Apply the coupled BC on one physical face. The per-field path (Local/MPI) makes
-# a single whole-array call; the threaded path visits only the boundary tiles.
+# a single whole-array call (tile = nothing); the threaded path visits only the
+# boundary tiles.
 @inline _apply_coupled_face!(bc, state, side::Side, dim::Dim) =
     _apply_coupled_face!(halo_backend(state), bc, state, side, dim)
 
 @inline function _apply_coupled_face!(::AbstractHaloBackend, bc, state, side::Side, dim::Dim)
-    is_physical_boundary(state, side, dim) && apply_coupled_bc!(bc, state, side, dim)
+    is_physical_boundary(state, side, dim) && _coupled_face_call!(bc, state, side, dim, nothing)
     return nothing
 end
 
@@ -277,7 +282,7 @@ end
         side::Side{S}, dim::Dim{D}) where {S,D}
     for tile_id in 1:tile_count(state)
         neighbor_tile_id(state, tile_id, D, S) == 0 &&
-            apply_coupled_bc!(bc, state, side, dim, tile_id)
+            _coupled_face_call!(bc, state, side, dim, tile_id)
     end
     return nothing
 end

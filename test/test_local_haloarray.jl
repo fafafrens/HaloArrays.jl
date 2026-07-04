@@ -30,7 +30,7 @@ using HaloArrays
         @test parent(ha)[1:2] == [10, 10]
         @test parent(ha)[3:6] == [10, 20, 30, 40]
         @test parent(ha)[7:8] == [40, 30]
-        @test get_comm(ha) === nothing
+        @test communicator(ha) === nothing
         @test global_size(ha) == interior_size(ha)
     end
 
@@ -60,10 +60,10 @@ using HaloArrays
 
         boundary_condition!(ha)
 
-        @test collect(get_recv_view(Side(1), Dim(1), ha)) == reshape([11, 12, 13, 14], 1, 4)
-        @test collect(get_recv_view(Side(2), Dim(1), ha)) == reshape([31, 32, 33, 34], 1, 4)
-        @test collect(get_recv_view(Side(1), Dim(2), ha)) == reshape([-11, -21, -31], 3, 1)
-        @test collect(get_recv_view(Side(2), Dim(2), ha)) == reshape([14, 24, 34], 3, 1)
+        @test collect(ghost_view(ha, Side(1), Dim(1))) == reshape([11, 12, 13, 14], 1, 4)
+        @test collect(ghost_view(ha, Side(2), Dim(1))) == reshape([31, 32, 33, 34], 1, 4)
+        @test collect(ghost_view(ha, Side(1), Dim(2))) == reshape([-11, -21, -31], 3, 1)
+        @test collect(ghost_view(ha, Side(2), Dim(2))) == reshape([14, 24, 34], 3, 1)
     end
 
     @testset "similar, copy, and broadcast" begin
@@ -112,7 +112,7 @@ end
     @test ndims(fields) == 3
     @test fields[:u] === u
     @test fields[:v] === v
-    @test isactive(fields)
+    @test is_active(fields)
 
     views = interior_view(fields)
     @test keys(views) == (:u, :v)

@@ -138,10 +138,10 @@ implement [`apply_coupled_bc!`](@ref).
 
 ```julia
 struct MyBC <: AbstractCoupledBoundaryCondition end
-function HaloArrays.apply_coupled_bc!(bc::MyBC, state, s::Side{S}, d::Dim{D}) where {S,D}
-    for field in eachfield(state)              # iterate the collection's fields
-        edge  = get_send_view(s, d, field)     # interior cells at the boundary (read)
-        ghost = get_recv_view(s, d, field)     # ghost cells (write)
+function HaloArrays.apply_coupled_bc!(bc::MyBC, state, s::Side{S}, d::Dim{D}, tile) where {S,D}
+    for field in eachfield(state)                 # iterate the collection's fields
+        edge  = edge_view(field, s, d, tile)      # interior cells at the boundary (read)
+        ghost = ghost_view(field, s, d, tile)     # ghost cells (write)
         # ... transform across fields, then write `ghost` ...
     end
 end
@@ -150,10 +150,12 @@ synchronize_halo!(state)          # periodic/reflecting edges, per field
 apply_coupled_bc!(MyBC(), state)  # fills the NoBoundaryCondition physical edges
 ```
 
-The two-argument `apply_coupled_bc!(bc, state)` visits every face that is both a
+One method covers every backend: the driver passes `tile = nothing` for
+`LocalHaloArray`/MPI fields (whole-array views) and the boundary tile id for
+`ThreadedHaloArray` fields — you just forward it to the view helpers. The
+two-argument `apply_coupled_bc!(bc, state)` visits every face that is both a
 physical boundary ([`is_physical_boundary`](@ref)) and configured
-`NoBoundaryCondition`. Works on `MultiHaloArray` and `ArrayOfHaloArray` with
-`LocalHaloArray`/MPI fields (threaded fields use a per-tile five-argument method).
+`NoBoundaryCondition`.
 See `examples/finite_volume/acoustics_characteristic_1d.jl`.
 
 ## Local and threaded arrays

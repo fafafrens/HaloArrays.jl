@@ -29,17 +29,17 @@ end
 # The hook: fill every field's ghost on one (side, dim) from all fields' edges.
 # `Side{2}` is the high (right) end → outgoing wave is w⁺ = p + ρc·u;
 # `Side{1}` is the low (left) end   → outgoing wave is w⁻ = p − ρc·u.
-function HaloArrays.apply_coupled_bc!(bc::AcousticOutflow, state, ::Side{S}, ::Dim{1}) where {S}
+function HaloArrays.apply_coupled_bc!(bc::AcousticOutflow, state, ::Side{S}, ::Dim{1}, tile) where {S}
     p, u = eachfield(state)
     ρc  = bc.rho * bc.c
     sgn = S == 2 ? 1.0 : -1.0
 
-    p_edge = get_send_view(Side(S), Dim(1), p)[1]   # interior cell at the boundary
-    u_edge = get_send_view(Side(S), Dim(1), u)[1]
-    w_out  = p_edge + sgn * ρc * u_edge             # outgoing characteristic; incoming = 0
+    p_edge = edge_view(p, Side(S), Dim(1), tile)[1]   # interior cell at the boundary
+    u_edge = edge_view(u, Side(S), Dim(1), tile)[1]
+    w_out  = p_edge + sgn * ρc * u_edge               # outgoing characteristic; incoming = 0
 
-    get_recv_view(Side(S), Dim(1), p)[1] = 0.5 * w_out          # p = (w⁺+w⁻)/2,  w_in=0
-    get_recv_view(Side(S), Dim(1), u)[1] = sgn * 0.5 * w_out / ρc  # u = (w⁺−w⁻)/(2ρc)
+    ghost_view(p, Side(S), Dim(1), tile)[1] = 0.5 * w_out          # p = (w⁺+w⁻)/2,  w_in=0
+    ghost_view(u, Side(S), Dim(1), tile)[1] = sgn * 0.5 * w_out / ρc  # u = (w⁺−w⁻)/(2ρc)
     return nothing
 end
 

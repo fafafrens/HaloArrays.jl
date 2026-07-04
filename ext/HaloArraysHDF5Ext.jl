@@ -13,8 +13,8 @@ import HaloArrays:
     AbstractHaloArray, AbstractSingleHaloArray, AbstractSerialHaloArray,
     AbstractHaloCollection, HaloArray, LocalHaloArray, ThreadedHaloArray,
     MultiHaloArray, ArrayOfHaloArray, MaybeHaloArray,
-    global_size, field_shape, interior_size, interior_view, get_comm, _first_field,
-    tile_size, tile_count, tile_coordinates, gather_haloarray, isactive, getdata,
+    global_size, field_shape, interior_size, interior_view, communicator, _first_field,
+    tile_size, tile_count, tile_coordinates, gather_haloarray, is_active, getdata,
     # public API stubs (methods added below):
     append_haloarray_to_file!, write_haloarray_timestep!, create_haloarray_output_file,
     gather_and_save_haloarray, gather_and_append_haloarray!, save_array_hdf5,
@@ -31,7 +31,7 @@ import HaloArrays:
 @inline _hdf5_chunk_dims(halo::ArrayOfHaloArray) =
     (field_shape(halo)..., _hdf5_chunk_dims(first(parent(halo)))...)
 
-@inline _hdf5_comm(halo::HaloArray) = get_comm(halo)
+@inline _hdf5_comm(halo::HaloArray) = communicator(halo)
 @inline _hdf5_comm(::AbstractSerialHaloArray) = nothing
 @inline _hdf5_comm(halo::AbstractHaloCollection) = _hdf5_comm(_first_field(halo))
 
@@ -240,7 +240,7 @@ function create_dataset_from_haloarray(g, name::String, halo::MultiHaloArray)
 end
 
 function create_dataset_from_haloarray(g, name::String, halo::MaybeHaloArray)
-    isactive(halo) || return nothing
+    is_active(halo) || return nothing
     return create_dataset_from_haloarray(g, name, getdata(halo))
 end
 
@@ -272,12 +272,12 @@ function append_haloarray!(group::HDF5.Group, halo::MultiHaloArray)
 end
 
 function append_haloarray!(dset::HDF5.Dataset, halo::MaybeHaloArray)
-    isactive(halo) || return nothing
+    is_active(halo) || return nothing
     return append_haloarray!(dset, getdata(halo))
 end
 
 function append_haloarray!(group::HDF5.Group, halo::MaybeHaloArray)
-    isactive(halo) || return nothing
+    is_active(halo) || return nothing
     return append_haloarray!(group, getdata(halo))
 end
 
@@ -297,7 +297,7 @@ function append_haloarray_to_file!(file::String, dataset_name::String, halo::Abs
 end
 
 function append_haloarray_to_file!(file::String, dataset_name::String, halo::MaybeHaloArray)
-    isactive(halo) || return nothing
+    is_active(halo) || return nothing
     return append_haloarray_to_file!(file, dataset_name, getdata(halo))
 end
 
@@ -331,7 +331,7 @@ function create_fixedsize_dataset_from_haloarray(g, name::String, halo::MultiHal
 end
 
 function create_fixedsize_dataset_from_haloarray(g, name::String, halo::MaybeHaloArray, num_timesteps::Int)
-    isactive(halo) || return nothing
+    is_active(halo) || return nothing
     return create_fixedsize_dataset_from_haloarray(g, name, getdata(halo), num_timesteps)
 end
 
@@ -341,7 +341,7 @@ function write_haloarray_timestep!(dset, halo::AbstractHaloArray, timestep)
 end
 
 function write_haloarray_timestep!(dset, halo::MaybeHaloArray, timestep)
-    isactive(halo) || return nothing
+    is_active(halo) || return nothing
     return write_haloarray_timestep!(dset, getdata(halo), timestep)
 end
 
@@ -360,7 +360,7 @@ end
 
 function create_haloarray_output_file(filename::String, dataset_name::String,
                                       halo::MaybeHaloArray, num_timesteps::Int)
-    isactive(halo) || return nothing, nothing
+    is_active(halo) || return nothing, nothing
     return create_haloarray_output_file(filename, dataset_name, getdata(halo), num_timesteps)
 end
 
@@ -417,7 +417,7 @@ function gather_and_save_haloarray(filename::String, halo::MultiHaloArray; root:
 end
 
 function gather_and_save_haloarray(filename::String, halo::MaybeHaloArray; root::Int=0)
-    isactive(halo) || return nothing
+    is_active(halo) || return nothing
     return gather_and_save_haloarray(filename, getdata(halo); root=root)
 end
 
@@ -460,7 +460,7 @@ function gather_and_append_haloarray!(filename::String, dataset::String, halo::A
 end
 
 function gather_and_append_haloarray!(filename::String, dataset::String, halo::MaybeHaloArray; root::Int=0)
-    isactive(halo) || return nothing
+    is_active(halo) || return nothing
     return gather_and_append_haloarray!(filename, dataset, getdata(halo); root=root)
 end
 

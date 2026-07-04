@@ -35,8 +35,8 @@ and `ThreadedHaloArray` (the method supplies whole-array or tile-local views).
 
     f(ghost, edge, side, dim, hw, origin)
 
-- `ghost`  — the ghost slab to **write** (a [`get_recv_view`](@ref))
-- `edge`   — the boundary-adjacent interior slab to **read** (a [`get_send_view`](@ref), same shape)
+- `ghost`  — the ghost slab to **write** (a [`ghost_view`](@ref))
+- `edge`   — the boundary-adjacent interior slab to **read** (an [`edge_view`](@ref), same shape)
 - `side`, `dim` — which face (`Side`, `Dim`), so one `f` can branch per face
 - `hw`     — the halo width
 - `origin` — the **global** `CartesianIndex` of `ghost[1]`; the global index of
@@ -80,19 +80,19 @@ struct Dim{D}; end
 # stays type-stable and allocation-free on every Julia version — the single
 # face-iteration primitive shared by the boundary, halo-exchange, and threaded
 # paths (replacing the per-site `ntuple(Val(N)) do D … end` / hand-rolled
-# recursions). Two arities: whole-array `f(x, Dim, Side)` and per-tile
-# `f(x, tile, Dim, Side)`.
+# recursions). Two arities: whole-array `f(x, Side, Dim)` and per-tile
+# `f(x, tile, Side, Dim)` — the same (Side, Dim) order as every public helper.
 @inline _foreach_face(f::F, x, ::Val{0}) where {F} = nothing
 @inline function _foreach_face(f::F, x, ::Val{D}) where {F,D}
     _foreach_face(f, x, Val(D - 1))
-    f(x, Dim(D), Side(1)); f(x, Dim(D), Side(2))
+    f(x, Side(1), Dim(D)); f(x, Side(2), Dim(D))
     return nothing
 end
 
 @inline _foreach_face(f::F, x, tile, ::Val{0}) where {F} = nothing
 @inline function _foreach_face(f::F, x, tile, ::Val{D}) where {F,D}
     _foreach_face(f, x, tile, Val(D - 1))
-    f(x, tile, Dim(D), Side(1)); f(x, tile, Dim(D), Side(2))
+    f(x, tile, Side(1), Dim(D)); f(x, tile, Side(2), Dim(D))
     return nothing
 end
 
@@ -185,8 +185,8 @@ function global_size(halo::HaloArray{T,N}) where {T,N}
     ntuple(i -> local_interior[i] * dims[i], Val(N))
 end
 
-@inline get_comm(halo::HaloArray) = halo.topology.cart_comm
-@inline isactive(a::HaloArray)    = isactive(a.topology)
+@inline communicator(halo::HaloArray) = halo.topology.cart_comm
+@inline is_active(a::HaloArray)    = is_active(a.topology)
 @inline is_root(a::HaloArray; root::Integer=0) = is_root(a.topology; root=root)
 
 function interior_to_global_index(halo::HaloArray{T,N}, owned_idx::NTuple{N,<:Integer}) where {T,N}
@@ -197,7 +197,7 @@ function interior_to_global_index(halo::HaloArray{T,N}, owned_idx::NTuple{N,<:In
     ntuple(i -> coords[i]*owned_dims[i] + owned_idx[i], Val(N))
 end
 
-# Global CartesianIndex of the first ghost cell (`get_recv_view(s,d,·)[1]`) on the
+# Global CartesianIndex of the first ghost cell (`ghost_view(·,s,d)[1]`) on the
 # (side, dim) face — the ghost analog of `interior_to_global_index`. Along `dim`
 # the ghost sits outside the interior (local index `1-hw` on the low side,
 # `owned+1` on the high side); along every other dim it starts at the first
@@ -264,15 +264,15 @@ end
 #   Side 1 (low):   ghost = 1:halo            edge = halo+1 : 2*halo
 #   Side 2 (high):  ghost = sd-halo+1 : sd    edge = sd-2*halo+1 : sd-halo
 #
-# `get_send_view`/`get_recv_view` return *views* (writing into a recv view
+# `edge_view`/`ghost_view` return *views* (writing into a ghost view
 # mutates the array) of width `halo` along D, spanning the interior extent in
 # every other dimension. They behave identically for HaloArray (MPI) and
 # LocalHaloArray.
 #
 # Halo exchange uses them as the names suggest: copy this rank's `send` slab to
 # a neighbour, receive into the `recv` slab. For a *physical* boundary condition
-# the same views are the natural primitives: write `get_recv_view(s, d, field)`
-# (the ghosts) from `get_send_view(s, d, field)` (the adjacent interior edge) —
+# the same views are the natural primitives: write `ghost_view(field, s, d)`
+# (the ghosts) from `edge_view(field, s, d)` (the adjacent interior edge) —
 # both same-shaped, so per-cell it is just `recv[k] = g(edge[k])`. The two slabs
 # straddle the boundary, so their indices run TOWARD each other: on side 1 the
 # innermost ghost recv[halo] is adjacent to the edge cell send[1] (a mirror BC
@@ -295,40 +295,51 @@ end
 # HaloArray dispatch — the dimension is always a compile-time `Dim{D}` so the
 # window view specialises statically (the exchange and BC paths supply it typed).
 """
-    get_send_view(side, dim, field) -> view
+    edge_view(u, side, dim[, tile]) -> view
 
 A view of the `halo`-wide band of interior cells adjacent to the
-`(side, dim)` boundary — the cells a halo exchange reads, and the interior edge a
-boundary condition reads. Paired with [`get_recv_view`](@ref) (same shape) when
-writing a boundary condition. See also the layout discussion in the source.
+`(side, dim)` boundary — the cells a halo exchange reads (and sends), and the
+interior edge a boundary condition reads. Paired with [`ghost_view`](@ref)
+(same shape) when writing a boundary condition.
+
+For a [`ThreadedHaloArray`](@ref) pass the tile id as the last argument;
+`tile = nothing` means the whole array, so one coupled-BC method can pass its
+`tile` straight through on every backend.
 """
-@inline get_send_view(s::Side, ::Dim{D}, a::HaloArray{T,N,A,Halo}) where {D,T,N,A,Halo} =
+@inline edge_view(a::HaloArray{T,N,A,Halo}, s::Side, ::Dim{D}) where {D,T,N,A,Halo} =
     _halo_window_view(_send_window(s, storage_size(a, D), Halo), parent(a), D, Halo)
 
 """
-    get_recv_view(side, dim, field) -> view
+    ghost_view(u, side, dim[, tile]) -> view
 
 A mutable view of the `halo`-wide *ghost* band on the `(side, dim)` boundary —
 the cells a halo exchange (or a boundary condition) writes. Same shape as
-[`get_send_view`](@ref) on that side, so a BC can pair them cell-by-cell.
+[`edge_view`](@ref) on that side, so a BC can pair them cell-by-cell.
+`tile` as in [`edge_view`](@ref).
 """
-@inline get_recv_view(s::Side, ::Dim{D}, a::HaloArray{T,N,A,Halo}) where {D,T,N,A,Halo} =
+@inline ghost_view(a::HaloArray{T,N,A,Halo}, s::Side, ::Dim{D}) where {D,T,N,A,Halo} =
     _halo_window_view(_recv_window(s, storage_size(a, D), Halo), parent(a), D, Halo)
 
+# tile = nothing ⇒ whole array (single-block backends), so coupled-BC code can
+# pass its tile argument through uniformly (ghost_origin likewise).
+@inline edge_view(a::AbstractHaloArray, s::Side, d::Dim, ::Nothing)  = edge_view(a, s, d)
+@inline ghost_view(a::AbstractHaloArray, s::Side, d::Dim, ::Nothing) = ghost_view(a, s, d)
+@inline ghost_origin(a::AbstractHaloArray, s::Side, d::Dim, ::Nothing) = ghost_origin(a, s, d)
+
 # Plain-array dispatch (used during buffer construction, before the HaloArray exists).
-@inline get_send_view(s::Side, ::Dim{D}, arr::AbstractArray, halo::Int) where {D} =
+@inline edge_view(arr::AbstractArray, s::Side, ::Dim{D}, halo::Int) where {D} =
     _halo_window_view(_send_window(s, size(arr, D), halo), arr, D, halo)
-@inline get_recv_view(s::Side, ::Dim{D}, arr::AbstractArray, halo::Int) where {D} =
+@inline ghost_view(arr::AbstractArray, s::Side, ::Dim{D}, halo::Int) where {D} =
     _halo_window_view(_recv_window(s, size(arr, D), halo), arr, D, halo)
 
 # ---- buffer allocation ------------------------------------------------
 
 function make_recv_buffers(data::AbstractArray{T,N}, halo::Int) where {T,N}
-    ntuple(D -> ntuple(S -> similar(get_recv_view(Side(S), Dim(D), data, halo)), Val(2)), Val(N))
+    ntuple(D -> ntuple(S -> similar(ghost_view(data, Side(S), Dim(D), halo)), Val(2)), Val(N))
 end
 
 function make_send_buffers(data::AbstractArray{T,N}, halo::Int) where {T,N}
-    ntuple(D -> ntuple(S -> similar(get_send_view(Side(S), Dim(D), data, halo)), Val(2)), Val(N))
+    ntuple(D -> ntuple(S -> similar(edge_view(data, Side(S), Dim(D), halo)), Val(2)), Val(N))
 end
 
 # validate_boundary_condition is inherited from AbstractCartesianTopology (abstract_haloarray.jl)
@@ -337,7 +348,7 @@ end
 
 function _global_to_owned_dims(halo::HaloArray{T,N}, dims::NTuple{M,<:Integer}) where {T,N,M}
     M == N || throw(DimensionMismatch("HaloArray similar dims must have $N dimensions"))
-    topo_dims = isactive(halo) ? halo.topology.dims : ntuple(_ -> 1, Val(N))
+    topo_dims = is_active(halo) ? halo.topology.dims : ntuple(_ -> 1, Val(N))
     all(d -> Int(dims[d]) % topo_dims[d] == 0, 1:N) ||
         throw(DimensionMismatch("HaloArray global similar dims $dims not divisible by topology dims $topo_dims"))
     ntuple(d -> Int(dims[d]) ÷ topo_dims[d], Val(N))

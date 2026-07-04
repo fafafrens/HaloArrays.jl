@@ -23,17 +23,17 @@ struct RelativisticOutflow{E<:AbstractEOS} <: AbstractCoupledBoundaryCondition
     eos::E
 end
 
-function HaloArrays.apply_coupled_bc!(bc::RelativisticOutflow, state, ::Side{Sd}, ::Dim{1}) where {Sd}
+function HaloArrays.apply_coupled_bc!(bc::RelativisticOutflow, state, ::Side{Sd}, ::Dim{1}, tile) where {Sd}
     Df, Sf, Tf = eachfield(state)
-    U = SVector(get_send_view(Side(Sd), Dim(1), Df)[1],
-                get_send_view(Side(Sd), Dim(1), Sf)[1],
-                get_send_view(Side(Sd), Dim(1), Tf)[1])
+    U = SVector(edge_view(Df, Side(Sd), Dim(1), tile)[1],
+                edge_view(Sf, Side(Sd), Dim(1), tile)[1],
+                edge_view(Tf, Side(Sd), Dim(1), tile)[1])
     ρ, v, p = prim_from_cons(bc.eos, U)
     v = Sd == 1 ? max(v, 0.0) : min(v, 0.0)   # no supersonic inflow
     G = cons_from_prim(bc.eos, ρ, v, p)
-    fill!(get_recv_view(Side(Sd), Dim(1), Df), G[1])
-    fill!(get_recv_view(Side(Sd), Dim(1), Sf), G[2])
-    fill!(get_recv_view(Side(Sd), Dim(1), Tf), G[3])
+    fill!(ghost_view(Df, Side(Sd), Dim(1), tile), G[1])
+    fill!(ghost_view(Sf, Side(Sd), Dim(1), tile), G[2])
+    fill!(ghost_view(Tf, Side(Sd), Dim(1), tile), G[3])
     return nothing
 end
 

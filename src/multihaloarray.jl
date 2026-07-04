@@ -93,7 +93,7 @@ fields). `prod(field_shape(c))` is the number of fields.
 # (abstract_haloarray.jl): the _fields/_first_field/_map_fields/_check_same_fields
 # hooks, tile_parent, to_tuple, active_fields, integer+Cartesian getindex/
 # setindex!, similar(c[, T][, dims]), copy/copyto!/fill!/zero, map, interior_view,
-# map_over_field, all/any, and halo_backend/halo_width/tile_*/isactive/is_root.
+# map_over_field, all/any, and halo_backend/halo_width/tile_*/is_active/is_root.
 
 # ---- LocalMultiHaloArray constructors -----------------------------------
 

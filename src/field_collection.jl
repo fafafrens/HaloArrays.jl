@@ -189,10 +189,10 @@ to_tuple(c::FieldCollection) = (_fields(c)...,)
 """
     active_fields(c)
 
-`isactive` of every field, in the same container kind (a `NamedTuple` of Bools
+`is_active` of every field, in the same container kind (a `NamedTuple` of Bools
 for [`MultiHaloArray`](@ref), an array of Bools for [`ArrayOfHaloArray`](@ref)).
 """
-active_fields(c::FieldCollection) = map(isactive, getfield(c, :arrays))
+active_fields(c::FieldCollection) = map(is_active, getfield(c, :arrays))
 
 # One tile accessor for both flavors: the result keeps the container kind.
 @inline tile_parent(c::FieldCollection, tile_id::Integer) =

@@ -32,7 +32,7 @@ end
     @test fields[:u] === u
     @test fields[:v] === v
     @test eltype(typeof(fields)) === Float64
-    @test isactive(fields)
+    @test is_active(fields)
 
     views = interior_view(fields)
     @test keys(views) == (:u, :v)

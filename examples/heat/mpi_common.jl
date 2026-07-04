@@ -7,7 +7,7 @@ function _mpi_domain_lengths(domain_length, ::Val{N}) where {N}
 end
 
 function _mpi_global_mean(u::HaloArray)
-    comm = get_comm(u)
+    comm = communicator(u)
     local_total = sum(interior_view(u))
     total = MPI.Allreduce(local_total, +, comm)
     return total / prod(global_size(u))

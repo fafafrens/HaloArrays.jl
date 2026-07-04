@@ -9,7 +9,7 @@ Concrete subtypes:
 
 Shared interface (all subtypes must implement):
 - `Base.ndims(::AbstractCartesianTopology{N})` → N
-- `isactive(topology)` → Bool
+- `is_active(topology)` → Bool
 - `is_root(topology; root=0)` → Bool
 - `topology.dims` → NTuple{N,Int}
 - `topology.periodic_boundary_condition` → NTuple{N,Bool}
@@ -58,7 +58,7 @@ abstract type AbstractDistributedHaloArray{T,N} <: AbstractSingleHaloArray{T,N} 
 
 A halo array living entirely in one process: `LocalHaloArray` (a single padded
 block) or `ThreadedHaloArray` (a shared-memory tiling). Serial backends are
-always [`isactive`](@ref) and have no communicator (`get_comm` returns
+always [`is_active`](@ref) and have no communicator (`communicator` returns
 `nothing`).
 """
 abstract type AbstractSerialHaloArray{T,N} <: AbstractSingleHaloArray{T,N} end
@@ -125,23 +125,23 @@ function halo_backend end
 
 # Serial backends (local + threaded) are always active and have no communicator.
 """
-    isactive(x) -> Bool
+    is_active(x) -> Bool
 
 Whether this rank participates in the halo array / collection `x`. Always `true`
 for serial backends; for a distributed `HaloArray` it is `false` on ranks that
 fall outside the Cartesian topology (e.g. when the communicator has more ranks
 than the decomposition uses), letting collective code skip inactive ranks.
 """
-@inline isactive(::AbstractSerialHaloArray) = true
+@inline is_active(::AbstractSerialHaloArray) = true
 
 """
-    get_comm(x) -> MPI.Comm or nothing
+    communicator(x) -> MPI.Comm or nothing
 
 The MPI communicator backing `x`, or `nothing` for serial (local/threaded)
 backends. For a distributed `HaloArray` this is the Cartesian communicator of
 its topology.
 """
-@inline get_comm(::AbstractSerialHaloArray) = nothing
+@inline communicator(::AbstractSerialHaloArray) = nothing
 
 # Storage geometry for contiguous single arrays (one padded `data` array).
 # ThreadedHaloArray is tiled and overrides all three with per-tile versions.
@@ -215,10 +215,10 @@ function is_root end
         dim::Integer, side::Integer) =
     neighbor_tile_id(first(arr), tile_id, dim, side)
 
-isactive(::AbstractCartesianTopology) = true   # default: subtypes may override
+is_active(::AbstractCartesianTopology) = true   # default: subtypes may override
 
 function validate_boundary_condition(topology::AbstractCartesianTopology, boundary_condition)
-    isactive(topology) || return true
+    is_active(topology) || return true
     N = ndims(topology)
     for d in 1:N
         left, right = boundary_condition[d]
@@ -318,7 +318,7 @@ end
 
 # ---- AbstractHaloCollection helpers (Group 3) -------------------------
 # _first_field: the reference field used for geometry queries
-# _fields:      all fields as an iterable (for operations like isactive)
+# _fields:      all fields as an iterable (for operations like is_active)
 # Concrete methods are defined in ArrayOfHaloArray.jl and multihaloarray.jl
 # (those types don't exist at this point in the load order).
 function _first_field end
@@ -402,7 +402,7 @@ end
     neighbor_tile_id(_first_field(mha), tile_id, dim, side)
 @inline is_root(mha::AbstractHaloCollection; root::Integer=0) =
     is_root(_first_field(mha); root=root)
-@inline isactive(mha::AbstractHaloCollection) = all(isactive, _fields(mha))
+@inline is_active(mha::AbstractHaloCollection) = all(is_active, _fields(mha))
 
 function foreach_field!(f!, mha::AbstractHaloCollection)
     foreach(f!, _fields(mha))

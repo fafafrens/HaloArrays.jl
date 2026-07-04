@@ -24,7 +24,7 @@ end
 
     topology = CartesianTopology(comm, (0, 0); periodic=(true, false))
 
-    @test isactive(topology)
+    @test is_active(topology)
     @test prod(topology.dims) == nranks
     @test topology.periodic_boundary_condition == (true, false)
     @test all(0 <= topology.cart_coords[i] < topology.dims[i] for i in 1:2)
@@ -51,12 +51,12 @@ end
 
     root_topology = HaloArrays.root_topology_multi(topology, (1,))
     if topology.cart_coords[1] == 0
-        @test isactive(root_topology)
+        @test is_active(root_topology)
         @test root_topology.dims == (topology.dims[2],)
         @test root_topology.cart_coords == (topology.cart_coords[2],)
         @test root_topology.periodic_boundary_condition == (false,)
     else
-        @test !isactive(root_topology)
+        @test !is_active(root_topology)
         @test root_topology.cart_comm == MPI.COMM_NULL
     end
 
