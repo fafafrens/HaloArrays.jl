@@ -1,0 +1,6 @@
+[deps]
+HaloArrays = "817e997d-d664-46c1-9042-93a8067e2dd6"
+MPI = "da04e1cc-30fd-572f-bb4f-1f8673147195"
+OhMyThreads = "67456a42-1dca-4109-a031-0a68de7e3ad5"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
