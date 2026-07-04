@@ -90,7 +90,11 @@ jobs:
           # mpiexec run (julia --project=.) can `using HDF5` and exercise the collective
           # parallel-HDF5 path in test_saving_hdf5.jl. The HaloArraysHDF5Ext extension
           # still activates (its trigger is now a regular dep).
-          Pkg.add(["MPIPreferences", "HDF5"])
+          # OrdinaryDiffEq/LinearSolve/Krylov likewise: without them the runtests gate
+          # silently SKIPS test_mpi_implicit.jl (the FBDF + HaloKrylov regression test),
+          # which is exactly how the Diagonal-preconditioner scalar-indexing bug slipped
+          # past CI while every job stayed green.
+          Pkg.add(["MPIPreferences", "HDF5", "OrdinaryDiffEq", "LinearSolve", "Krylov"])
           using MPIPreferences
           MPIPreferences.use_jll_binary("MPICH_jll")
       - uses: julia-actions/julia-buildpkg@v1

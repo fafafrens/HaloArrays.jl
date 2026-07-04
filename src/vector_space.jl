@@ -96,6 +96,34 @@ LinearAlgebra.axpy!(s::Number, x::AbstractHaloArray, y::AbstractHaloArray) = (y 
 LinearAlgebra.axpby!(s::Number, x::AbstractHaloArray, t::Number, y::AbstractHaloArray) =
     (y .= s .* x .+ t .* y)
 
+# ---- Diagonal operators whose diagonal is a halo array ------------------------
+# Diagonal scaling (Jacobi / error-weight preconditioning) reaches halo arrays
+# through the SciML stack: OrdinaryDiffEq wraps every iterative linear solver
+# with `Pl = InvPreconditioner(Diagonal(weight))`, `Pr = Diagonal(weight)`,
+# where `weight = similar(u)` — i.e. a halo array. LinearAlgebra's generic
+# Diagonal kernels apply these by scalar-indexing every *global* index, which
+# is local-only on a distributed HaloArray (it works on 1 rank by accident and
+# throws on 2+). The operation is elementwise, so route it through the
+# interior-only broadcast: no communication, correct on every backend.
+const _HaloDiagonal = LinearAlgebra.Diagonal{<:Any,<:AbstractHaloArray}
+
+function LinearAlgebra.mul!(out::AbstractHaloArray, D::_HaloDiagonal, b::AbstractHaloArray,
+        α::Number, β::Number)
+    d = D.diag
+    if iszero(β)
+        out .= α .* (d .* b)
+    else
+        out .= α .* (d .* b) .+ β .* out
+    end
+    return out
+end
+LinearAlgebra.mul!(out::AbstractHaloArray, D::_HaloDiagonal, b::AbstractHaloArray) =
+    LinearAlgebra.mul!(out, D, b, true, false)
+
+LinearAlgebra.ldiv!(out::AbstractHaloArray, D::_HaloDiagonal, b::AbstractHaloArray) =
+    (out .= b ./ D.diag; out)
+LinearAlgebra.ldiv!(D::_HaloDiagonal, b::AbstractHaloArray) = (b .= b ./ D.diag; b)
+
 # contiguous @simd over the leading (contiguous) dim of a dense Array parent …
 @inline function _interior_scal!(p::Array, rng::Tuple, s)
     inner = rng[1]; outer = CartesianIndices(Base.tail(rng))

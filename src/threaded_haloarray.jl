@@ -152,10 +152,17 @@ ThreadedHaloArray(tile_size::NTuple{N,<:Integer}, halo::Integer; kwargs...) wher
 # interior_axes uses interior_size (tiles have no single interior_view without tile_id)
 @inline interior_axes(halo::ThreadedHaloArray)         = map(Base.OneTo, interior_size(halo))
 @inline interior_axes(halo::ThreadedHaloArray, d::Int) = Base.OneTo(interior_size(halo, d))
-# eachindex/iterate use global CartesianIndices (interior_view without tile_id was removed)
+# eachindex/iterate use global CartesianIndices (interior_view without tile_id was removed).
+# iterate must yield the *values* at those indices, not the indices — the
+# AbstractSingleHaloArray fallback (interior_view-based) doesn't apply to tiles.
 @inline Base.eachindex(halo::ThreadedHaloArray) = CartesianIndices(axes(halo))
-@inline Base.iterate(halo::ThreadedHaloArray) = iterate(CartesianIndices(axes(halo)))
-@inline Base.iterate(halo::ThreadedHaloArray, state) = iterate(CartesianIndices(axes(halo)), state)
+@inline function Base.iterate(halo::ThreadedHaloArray,
+        state = (eachindex(halo),))
+    it = length(state) == 1 ? iterate(state[1]) : iterate(state[1], state[2])
+    it === nothing && return nothing
+    I, s = it
+    return (@inbounds halo[I]), (state[1], s)
+end
 @inline halo_width(::Type{<:ThreadedHaloArray{T,N,A,Halo}}) where {T,N,A,Halo} = Halo
 @inline halo_width(::ThreadedHaloArray{T,N,A,Halo}) where {T,N,A,Halo} = Halo
 """    tile_size(u) -> dims

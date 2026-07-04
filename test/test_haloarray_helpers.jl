@@ -600,4 +600,46 @@ end
         end
     end
 
+    @testset "Diagonal-of-halo-array mul!/ldiv! (weight preconditioners)" begin
+        # OrdinaryDiffEq applies Diagonal(weight::halo array) preconditioners in
+        # every implicit+Krylov solve; the generic LinearAlgebra kernels scalar-
+        # index global indices (local-only under MPI). These must stay elementwise.
+        # 1-D states: OrdinaryDiffEq wraps the (vec'd) weight vector, Diagonal(weight).
+        nthreads = max(1, Threads.nthreads())
+        for u in Any[LocalHaloArray(Float64, (8,), 1; boundary_condition=:periodic),
+                     ThreadedHaloArray(Float64, (4,), 1;
+                         dims=(nthreads,), boundary_condition=:periodic)]
+            d   = fill_from_global_indices!(I -> 1.0 + 0.1I[1], similar(u))
+            b   = fill_from_global_indices!(I -> Float64(I[1]^2), similar(u))
+            out = similar(u)
+            D   = Diagonal(d)
+
+            @test mul!(out, D, b) === out
+            @test collect(out) ≈ collect(d) .* collect(b)
+
+            ref = 2.0 .* collect(d) .* collect(b) .+ 3.0 .* collect(out)
+            @test mul!(out, D, b, 2.0, 3.0) === out
+            @test collect(out) ≈ ref
+
+            @test ldiv!(out, D, b) === out
+            @test collect(out) ≈ collect(b) ./ collect(d)
+
+            copyto!(out, b)
+            @test ldiv!(D, out) === out
+            @test collect(out) ≈ collect(b) ./ collect(d)
+        end
+    end
+
+    @testset "ThreadedHaloArray iteration yields values, not indices" begin
+        # Regression: iterate delegated to CartesianIndices and returned the
+        # indices themselves, so collect/comprehensions silently gave 1,2,3,…
+        u = ThreadedHaloArray(Float64, (4,), 1; dims=(max(1, Threads.nthreads()),),
+            boundary_condition=:periodic)
+        fill_from_global_indices!(I -> Float64(I[1]^2), u)
+        n = length(u)
+        @test collect(u) == Float64.((1:n) .^ 2)
+        @test [x for x in u] == Float64.((1:n) .^ 2)
+        @test first(u) == 1.0
+    end
+
 end
