@@ -20,6 +20,7 @@ Fill `u`'s ghost cells from neighbouring data: MPI neighbour exchange for
 does **not** apply the physical-edge boundary condition — use
 [`synchronize_halo!`](@ref) for the full refresh, or call
 [`boundary_condition!`](@ref) afterwards. A no-op for [`LocalHaloArray`](@ref).
+Returns `u` on every backend.
 
 For overlapping communication with computation, use the split
 [`start_halo_exchange!`](@ref) / [`finish_halo_exchange!`](@ref) pair.
@@ -33,6 +34,7 @@ halo_exchange!(halo::LocalHaloArray) = halo
 Non-blocking form of [`halo_exchange!`](@ref): `start_` posts the exchange and
 returns immediately so you can do ghost-free interior work, then `finish_` waits
 for it to complete. Apply [`boundary_condition!`](@ref) afterwards if needed.
+Both return `u`.
 """
 start_halo_exchange!(halo::LocalHaloArray)  = halo
 finish_halo_exchange!(halo::LocalHaloArray) = halo

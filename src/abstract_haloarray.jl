@@ -240,7 +240,7 @@ end
 
 # ---- AbstractSingleHaloArray defaults ---------------------------------
 # ThreadedHaloArray overrides fill!, copyto!,
-# fill_from_local_indices!, and Base.foreach with tforeach variants.
+# and Base.foreach with tforeach variants.
 
 @inline Base.size(halo::AbstractSingleHaloArray)         = global_size(halo)
 # `size`/`axes` must return 1 / OneTo(1) for trailing dims `i > ndims` (the
@@ -270,22 +270,6 @@ call [`synchronize_halo!`](@ref) before a stencil reads them. Use
 function Base.fill!(halo::AbstractSingleHaloArray, value)
     fill!(interior_view(halo), value)
     return halo
-end
-
-"""
-    fill_from_local_indices!(f, u)
-
-Set each interior cell from `f(i, j, …)`, where the indices are **local** to this
-rank's/tile's interior region (1-based, ghost-free). For coordinates on the global
-grid (the usual choice for initial conditions), use
-[`fill_from_global_indices!`](@ref).
-"""
-function fill_from_local_indices!(f, halo::AbstractSingleHaloArray)
-    interior = interior_view(halo)
-    for I in CartesianIndices(interior)
-        interior[I] = f(Tuple(I)...)
-    end
-    return nothing
 end
 
 function Base.copyto!(dest::AbstractSingleHaloArray, src::AbstractSingleHaloArray)

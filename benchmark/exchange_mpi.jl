@@ -40,7 +40,7 @@ end
 
 function bench_size(n)
     u = HaloArray(Float64, (n, n, n), 1; boundary_condition=:periodic)
-    fill_from_local_indices!((I...) -> Float64(sum(I)), u)
+    fill_from_global_indices!(I -> Float64(sum(I)), u)
 
     # Ghost-independent compute stand-in, sized like one sweep over the interior.
     w = ones(n, n, n)

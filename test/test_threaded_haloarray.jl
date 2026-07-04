@@ -201,7 +201,7 @@
         default_boundary = make_sync_test_halo()
         threaded_boundary = copy(default_boundary)
         boundary_condition!(default_boundary)
-        @test boundary_condition_threads!(threaded_boundary) === nothing
+        @test boundary_condition_threads!(threaded_boundary) === threaded_boundary
         @test same_storage(threaded_boundary, default_boundary)
 
         default_sync = make_sync_test_halo()
@@ -389,21 +389,6 @@
         @test interior_to_global_index(u, 1, (1, 1)) == (1, 1)
         @test_throws BoundsError interior_to_global_index(u, 1, (0, 1))
         @test_throws BoundsError interior_to_global_index(u, 1, (tile_size(u)[1] + 1, 1))
-    end
-
-    @testset "fill_from_local_indices! fills per-tile interior" begin
-        nthreads = max(1, Threads.nthreads())
-        tsz = (3,)
-        u = ThreadedHaloArray(Float64, tsz, 1;
-            dims=(nthreads,), boundary_condition=:repeating)
-
-        fill_from_local_indices!(u) do i
-            Float64(i)
-        end
-
-        for tile_id in 1:tile_count(u)
-            @test collect(interior_view(u, tile_id)) == [1.0, 2.0, 3.0]
-        end
     end
 
     @testset "default dims decomposes last dimension with nthreads tiles" begin

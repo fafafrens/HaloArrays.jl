@@ -110,13 +110,16 @@ end
         # (first_interior-1):last_interior in dim, full in every transverse dim.
         @test HaloArrays.interior_face_range(ha, 1) == (1:5, 2:6)
         @test HaloArrays.interior_face_range(ha, 2) == (2:5, 1:6)
-        @test HaloArrays.face_offset(ha, 1) == CartesianIndex(1, 0)
+        @test unit_vector(ha, 1) == CartesianIndex(1, 0)
 
         dim2_ranges = FaceRanges(ha)
         @test collect(interior_faces(dim2_ranges, 1)) == collect(CartesianIndices((1:5, 2:6)))
         @test collect(interior_faces(dim2_ranges, Dim(2))) == collect(CartesianIndices((2:5, 1:6)))
-        @test HaloArrays.face_offset(ha, Dim(2)) == CartesianIndex(0, 1)
+        @test unit_vector(ha, Dim(2)) == CartesianIndex(0, 1)
         @test unit_vector(dim2_ranges, Dim(2)) == CartesianIndex(0, 1)
+        @test unit_vector(ha) == (CartesianIndex(1, 0), CartesianIndex(0, 1))
+        @test unit_vector(Val(2), 2) == CartesianIndex(0, 1)
+        @test unit_vector(Val(2)) == (CartesianIndex(1, 0), CartesianIndex(0, 1))
 
         one_cell = LocalHaloArray(Int, (1,), 1; boundary_condition=:repeating)
         one_cell_ranges = FaceRanges(one_cell)
@@ -579,6 +582,22 @@ end
         u = LocalHaloArray(Float64, (5,), 1; boundary_condition=:periodic)
         @test tile_count(u) == 1
         @test tile_parent(u, 1) === parent(u)
+    end
+
+    @testset "mutating drivers return their array on every backend" begin
+        # Backend-agnostic chaining relies on `f!(u) === u` — one convention.
+        nthreads = max(1, Threads.nthreads())
+        us = Any[LocalHaloArray(Float64, (4, 4), 1; boundary_condition=:periodic),
+                 ThreadedHaloArray(Float64, (4, 4), 1;
+                     dims=(nthreads, 1), boundary_condition=:periodic)]
+        for u in us
+            @test halo_exchange!(u) === u
+            @test start_halo_exchange!(u) === u
+            @test finish_halo_exchange!(u) === u
+            @test boundary_condition!(u) === u
+            @test synchronize_halo!(u) === u
+            @test fill_from_global_indices!(I -> Float64(I[1] + I[2]), u) === u
+        end
     end
 
 end

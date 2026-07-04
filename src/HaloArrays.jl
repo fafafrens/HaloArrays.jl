@@ -105,8 +105,7 @@ export interior_view,
     is_cell_index_inbounds,
     unit_vector,
     interior_to_global_index,
-    fill_from_global_indices!,
-    fill_from_local_indices!
+    fill_from_global_indices!
 
 # Boundary conditions
 export boundary_condition!,

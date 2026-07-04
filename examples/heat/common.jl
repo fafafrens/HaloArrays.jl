@@ -43,7 +43,7 @@ function heat_step!(u_next, u_old, alpha, dt, dx)
     dxs = _as_tuple(dx, Val(N))
     data_old = parent(u_old)
     data_next = parent(u_next)
-    offsets = CartesianIndex.(HaloArrays.versors(u_old))
+    offsets = unit_vector(u_old)
 
     @inbounds for I in CartesianIndices(interior_range(u_old))
         laplacian = zero(eltype(data_old))
@@ -71,7 +71,7 @@ end
 function heat_step!(u_next::ThreadedHaloArray, u_old::ThreadedHaloArray, alpha, dt, dx)
     N = ndims(u_old)
     dxs = _as_tuple(dx, Val(N))
-    offsets = CartesianIndex.(HaloArrays.versors(Val(N)))
+    offsets = unit_vector(Val(N))
     range = interior_range(u_old)
 
     @tasks for tile_id in 1:tile_count(u_old)

@@ -91,7 +91,7 @@ end
 # Non-Int dims are normalized to Dims by Base's generic similar fallbacks.
 
 # Base.copy, Base.zero, Base.fill!, Base.copyto!,
-# fill_from_local_indices!, Base.foreach, arithmetic, norm,
+# Base.foreach, arithmetic, norm,
 # interior_axes, eachindex, iterate, versors, Base.similar dispatchers,
 # Base.map!/map — all inherited from AbstractSingleHaloArray
 

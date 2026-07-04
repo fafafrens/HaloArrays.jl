@@ -66,7 +66,7 @@ function boundary_condition!(halo::HaloArray{T,N,A,Halo,B,BCondition},
     if nbrank < 0   # MPI.PROC_NULL == -1 → physical boundary
         boundary_condition!(halo, s, dim, mode)
     end
-    return nothing
+    return halo
 end
 
 # Adapter: `_foreach_face` calls `f(halo, Dim, Side)`, while the per-face
@@ -91,7 +91,7 @@ edges), so it is safe to call on a decomposed grid. The condition per
 """
 function boundary_condition!(halo::AbstractSingleHaloArray{T,N}) where {T,N}
     _foreach_face(_boundary_face!, halo, Val(N))
-    return nothing
+    return halo
 end
 
 # ============================================================
@@ -101,7 +101,7 @@ end
 function boundary_condition!(halo::LocalHaloArray, s::Side{side}, dim::Dim{d}) where {side,d}
     mode = halo.boundary_condition[d][side]
     boundary_condition!(halo, s, dim, mode)
-    return nothing
+    return halo
 end
 
 # ============================================================
@@ -150,7 +150,7 @@ boundary_condition!(::ThreadedHaloArray, ::Integer, ::Side, ::Dim, ::NoBoundaryC
 
 function boundary_condition!(c::AbstractHaloCollection)
     foreach_field!(boundary_condition!, c)
-    return nothing
+    return c
 end
 
 # ============================================================

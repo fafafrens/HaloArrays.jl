@@ -347,7 +347,7 @@ end
 
 # Base.copy, Base.zero, Base.fill!, Base.copyto! inherited from AbstractSingleHaloArray
 
-# fill_from_local_indices!, Base.foreach, arithmetic,
+# Base.foreach, arithmetic,
 # LinearAlgebra.norm inherited from AbstractSingleHaloArray
 
 # Base.map!/map inherited from AbstractSingleHaloArray
@@ -358,15 +358,15 @@ end
 """
     fill_from_global_indices!(f, u)
 
-Set each interior cell from `f(I, J, …)` evaluated at its **global** grid index
+Set each interior cell from `f(I)`, where `I` is the **global** grid index tuple
 (1-based over the whole domain). Each rank/tile fills only the cells it owns, so
 the same `f` produces a consistent global field across MPI ranks and threads —
-the idiomatic way to set an initial condition. Cf. [`fill_from_local_indices!`](@ref).
+the idiomatic way to set an initial condition. Returns `u`.
 
 # Example
 ```julia
-fill_from_global_indices!(u) do i, j
-    exp(-((i - nx/2)^2 + (j - ny/2)^2) / 50)
+fill_from_global_indices!(u) do I
+    exp(-((I[1] - nx/2)^2 + (I[2] - ny/2)^2) / 50)
 end
 ```
 """

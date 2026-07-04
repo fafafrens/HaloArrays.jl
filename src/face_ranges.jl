@@ -20,7 +20,7 @@ Return every face touching the interior in dimension `dim`, identified by its
 lower-index cell: the low-boundary `ghost | interior` face, all internal
 `interior | interior` faces, and the high-boundary `interior | ghost` face. This
 is one contiguous span — `(first_interior - 1):last_interior` along `dim`, full in
-every transverse dimension. Pair each `IL` with `IR = IL + face_offset(halo, dim)`;
+every transverse dimension. Pair each `IL` with `IR = IL + unit_vector(halo, dim)`;
 a conservative flux loop scatters each face's flux onto both cells (the harmless
 ghost writes at the two boundary faces fall on allocated halo cells).
 """
@@ -71,7 +71,7 @@ function FaceRanges(halo)
     spatial_ndims = _spatial_ndims(halo)
     return FaceRanges(
         ntuple(d -> CartesianIndices(interior_face_range(halo, d)), spatial_ndims),
-        ntuple(d -> face_offset(halo, d), Val(spatial_ndims)),
+        ntuple(d -> unit_vector(halo, d), Val(spatial_ndims)),
         halo_width(halo),
     )
 end
@@ -89,16 +89,28 @@ argument, returns one race-free checkerboard color (for parallel scatter).
 interior_faces(ranges::FaceRanges, dim::Int) = ranges.faces[dim]
 interior_faces(ranges::FaceRanges, ::Dim{D}) where {D} = interior_faces(ranges, D)
 """
-    unit_vector(ranges[, dim])
+    unit_vector(x[, dim])
 
-The `CartesianIndex` unit step along dimension `dim` for these `ranges` (with no
-argument, the tuple of unit steps for every dimension). Add it to a lower-face
-index `IL` to reach the cell across the face, `IL + unit_vector(ranges, dim)`.
-`dim` may be an `Int` or a `Dim{D}`.
+The `CartesianIndex` unit step along dimension `dim` (with no `dim`, the tuple
+of unit steps for every dimension). `x` can be a `FaceRanges`, a halo array, or
+a `Val(N)` dimension count; `dim` may be an `Int` or a `Dim{D}`. Add it to a
+lower-face index `IL` to reach the cell across the face,
+`IL + unit_vector(x, dim)`, or use it as a stencil offset,
+`u[I + unit_vector(u, dim)]`.
 """
 unit_vector(ranges::FaceRanges) = ranges.unit_vector
 unit_vector(ranges::FaceRanges, dim::Int) = ranges.unit_vector[dim]
 unit_vector(ranges::FaceRanges, ::Dim{D}) where {D} = unit_vector(ranges, D)
+
+@inline unit_vector(::Val{N}) where {N} = map(CartesianIndex, versors(Val(N)))
+@inline unit_vector(::Val{N}, dim::Int) where {N} = CartesianIndex(versors(Val(N))[dim])
+
+@inline function unit_vector(halo, dim::Int)
+    _check_face_dim(halo, dim)
+    return unit_vector(Val(_spatial_ndims(halo)), dim)
+end
+@inline unit_vector(halo, ::Dim{D}) where {D} = unit_vector(halo, D)
+@inline unit_vector(halo::AbstractSingleHaloArray) = unit_vector(Val(_spatial_ndims(halo)))
 
 # Default cell accessors for scalar fields.
 @inline _scalar_face_read(data, I) = @inbounds data[I]
@@ -188,15 +200,3 @@ interior_faces(ranges::FaceRanges, dim::Int, color::Integer) =
 interior_faces(ranges::FaceRanges, ::Dim{D}, color::Integer) where {D} =
     interior_faces(ranges, D, color)
 
-"""
-    face_offset(halo, dim)
-
-Return the `CartesianIndex` offset from the lower-index cell to the upper-index
-cell across a face in dimension `dim`.
-"""
-@inline function face_offset(halo, dim::Int)
-    _check_face_dim(halo, dim)
-    return CartesianIndex(versors(Val(_spatial_ndims(halo)))[dim])
-end
-
-@inline face_offset(halo, ::Dim{D}) where {D} = face_offset(halo, D)

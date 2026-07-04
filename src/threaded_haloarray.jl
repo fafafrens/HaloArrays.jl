@@ -360,7 +360,7 @@ end
 
 function boundary_condition!(halo::ThreadedHaloArray, tile_id::Integer, side::Side{S}, dim::Dim{D}) where {S,D}
     _threaded_boundary_side!(halo, tile_id, dim, side)
-    return nothing
+    return halo
 end
 
 # Per-tile BC: delegate to the shared ghost-fill kernels (boundary.jl) with the
@@ -382,13 +382,13 @@ function boundary_condition!(halo::ThreadedHaloArray)
     @inbounds for tile_id in eachindex(parent(halo))
         _threaded_boundary_tile!(halo, tile_id)
     end
-    return nothing
+    return halo
 end
 
 function boundary_condition_threads!(halo::ThreadedHaloArray)
     tile_foreach(thread_backend(halo), tile_id -> _threaded_boundary_tile!(halo, tile_id),
         eachindex(parent(halo)); scheduler=:static)
-    return nothing
+    return halo
 end
 
 function synchronize_halo!(halo::ThreadedHaloArray)
@@ -515,14 +515,4 @@ function fill_from_global_indices!(f, halo::ThreadedHaloArray{T,N,A,Halo}) where
         end
     end
     return halo
-end
-
-function fill_from_local_indices!(f, halo::ThreadedHaloArray)
-    for tile_id in 1:tile_count(halo)
-        interior = interior_view(halo, tile_id)
-        for I in CartesianIndices(interior)
-            interior[I] = f(Tuple(I)...)
-        end
-    end
-    return nothing
 end

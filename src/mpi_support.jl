@@ -374,11 +374,12 @@ function _finish_halo_exchange_safe!(halo::HaloArray{T,N}) where {T,N}
 end
 
 # ---- public exchange API ----------------------------------------------
+# All return `halo`, like every other backend's mutating driver.
 
-halo_exchange!(halo::HaloArray) = halo_exchange_waitall_unsafe!(halo)
+halo_exchange!(halo::HaloArray) = (halo_exchange_waitall_unsafe!(halo); halo)
 
-start_halo_exchange!(halo::HaloArray)  = start_halo_exchange_async_unsafe!(halo)
-finish_halo_exchange!(halo::HaloArray) = end_halo_exchange_async_wait_unsafe!(halo)
+start_halo_exchange!(halo::HaloArray)  = (start_halo_exchange_async_unsafe!(halo); halo)
+finish_halo_exchange!(halo::HaloArray) = (end_halo_exchange_async_wait_unsafe!(halo); halo)
 
 # ---- compatibility wrappers (used by MPI tests and benchmarks) --------
 
