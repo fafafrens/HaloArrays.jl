@@ -107,9 +107,14 @@ LinearAlgebra.axpby!(s::Number, x::AbstractHaloArray, t::Number, y::AbstractHalo
 # interior-only broadcast: no communication, correct on every backend.
 const _HaloDiagonal = LinearAlgebra.Diagonal{<:Any,<:AbstractHaloArray}
 
+LinearAlgebra.mul!(out::AbstractHaloArray, D::_HaloDiagonal, b::AbstractHaloArray) =
+    (out .= D.diag .* b; out)
+
 function LinearAlgebra.mul!(out::AbstractHaloArray, D::_HaloDiagonal, b::AbstractHaloArray,
         α::Number, β::Number)
     d = D.diag
+    # β == 0 must not *read* `out` (BLAS contract): `out` is often fresh
+    # `similar` memory, and 0.0 * NaN would poison the result.
     if iszero(β)
         out .= α .* (d .* b)
     else
@@ -117,8 +122,6 @@ function LinearAlgebra.mul!(out::AbstractHaloArray, D::_HaloDiagonal, b::Abstrac
     end
     return out
 end
-LinearAlgebra.mul!(out::AbstractHaloArray, D::_HaloDiagonal, b::AbstractHaloArray) =
-    LinearAlgebra.mul!(out, D, b, true, false)
 
 LinearAlgebra.ldiv!(out::AbstractHaloArray, D::_HaloDiagonal, b::AbstractHaloArray) =
     (out .= b ./ D.diag; out)
