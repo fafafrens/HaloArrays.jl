@@ -263,6 +263,36 @@ using LinearAlgebra: dot, norm
         end
     end
 
+    # The Local (single-block) path must stay allocation-free: the tile drivers
+    # take closures, and a regression (e.g. a Core.Box from a reassigned capture,
+    # or a lost @inline) would show up as heap allocations on the Krylov hot path.
+    # Older Julia versions leave small allocations even for correct code, so the
+    # guarantee is asserted on 1.12+ only (cf. the threaded path, which inherently
+    # allocates task objects and is not asserted).
+    if VERSION >= v"1.12"
+        @testset "Local path is allocation-free (closure elimination)" begin
+            x = LocalHaloArray(Float64, (64, 64), 1; boundary_condition=:periodic)
+            fill!(x, 1.0)
+            y = similar(x); fill!(y, 2.0)
+            alloc(f, args...) = (f(args...); @allocated f(args...))   # warm, then measure
+            @test alloc(rmul!, x, 1.000001) == 0
+            @test alloc(lmul!, 1.000001, x) == 0
+            @test alloc(axpy!, 1e-9, x, y) == 0
+            @test alloc(axpby!, 1e-9, x, 0.999999, y) == 0
+            @test alloc(swap!, x, y) == 0
+            @test alloc((a, b) -> rotate!(a, b, 0.8, 0.6), x, y) == 0
+            @test alloc((a, b) -> reflect!(a, b, 0.8, 0.6), x, y) == 0
+            @test alloc(fill!, x, 1.5) == 0
+            @test alloc(copyto!, y, x) == 0
+            @test alloc(sum, x) == 0
+            @test alloc(norm, x) == 0
+            @test alloc(dot, x, y) == 0
+            @test alloc(u -> mapreduce(abs2, +, u), x) == 0
+            @test alloc(u -> any(>(0.5), u), x) == 0
+            @test alloc(u -> all(>(0.0), u), x) == 0
+        end
+    end
+
     @testset "p-norm special cases match Base (p = 1, 3, ±Inf, 0)" begin
         vals = [3.0, -4.0, 0.0, 1.0, -2.0, 5.0]
         for u in Any[LocalHaloArray(Float64, (6,), 1; boundary_condition=:periodic),

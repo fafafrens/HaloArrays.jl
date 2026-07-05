@@ -169,15 +169,15 @@ ghost-safe offsets, e.g. `for I in CartesianIndices(interior_range(u))`. For
 [`ThreadedHaloArray`](@ref) the range is the same for every tile.
 See also [`interior_view`](@ref).
 """
-# Padded-storage index (ghosts included) → owned/interior-local index (1-based,
-# ghost-free): the inverse of the `+halo` shift `interior_range` encodes.
-@inline storage_to_owned_index(I::CartesianIndex{N}, hw::Int) where {N} =
-    ntuple(d -> I[d] - hw, Val(N))
-
 @inline function interior_range(halo::AbstractSingleHaloArray)
     hw = halo_width(halo)
     return ntuple(i -> (hw + 1):(size(parent(halo), i) - hw), Val(ndims(halo)))
 end
+
+# Padded-storage index (ghosts included) → owned/interior-local index (1-based,
+# ghost-free): the inverse of the `+halo` shift `interior_range` encodes.
+@inline storage_to_owned_index(I::CartesianIndex{N}, hw::Int) where {N} =
+    ntuple(d -> I[d] - hw, Val(N))
 
 """
     interior_size(halo[, i])
@@ -252,6 +252,8 @@ function is_root end
 # written once against these instead of once per backend. `f::F` forces closure
 # specialization. NOTE: tiles may run concurrently — `f` must only touch its own
 # tile. `_mapreduce_tile` combines the per-tile results with `op` (≥1 tile).
+# (`f(1)`: a single-block array IS one tile — tile id 1, the whole padded
+# parent; ThreadedHaloArray overrides these to run its tiles in parallel.)
 @inline _foreach_tile(f::F, ::AbstractSingleHaloArray) where {F} = (f(1); nothing)
 @inline _mapreduce_tile(f::F, op, ::AbstractSingleHaloArray) where {F} = f(1)
 

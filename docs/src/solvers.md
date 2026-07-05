@@ -45,6 +45,13 @@ solve(prob, FBDF(linsolve = HaloKrylov(:gmres), concrete_jac = false))   # 1-D s
 solve(prob, FBDF(linsolve = HaloGMRES(),        concrete_jac = false))   # N-D state
 ```
 
+This works on **distributed states** too: OrdinaryDiffEq automatically wraps the
+iterative solver with error-weight preconditioners (`Diagonal(weight)` where
+`weight` is a halo array), and HaloArrays supplies elementwise `mul!`/`ldiv!`
+methods for them, so the whole implicit solve — Newton, GMRES, preconditioning,
+and the convergence-controlling `norm`/`dot` reductions — stays collective and
+correct across MPI ranks.
+
 !!! warning "You must select an iterative linsolve"
     With the *default* `linsolve` (a factorization), the integrator builds a
     *dense* Jacobian matrix — which can't be formed column-by-column from a

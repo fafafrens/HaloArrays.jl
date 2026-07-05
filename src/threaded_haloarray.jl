@@ -86,7 +86,9 @@ each tile can be updated independently on its own thread.
 - `halo::Int`: ghost-cell width on each side.
 - `dims::NTuple{N,Int}`: number of tiles in each dimension (the tile layout).
   Defaults to `(1, …, Threads.nthreads())` — one tile per thread along the last
-  dimension. The global interior size is `tile_size .* dims`.
+  dimension. The global interior size is `tile_size .* dims`. Prefer layouts
+  with `dims[1] = 1`: dimension 1 is the contiguous (SIMD/prefetch) direction,
+  and splitting it shortens the vectorized runs and makes edge copies strided.
 - `boundary_condition`: applied at the physical domain edges (see
   [`LocalHaloArray`](@ref) for the accepted forms).
 - `thread_backend::`[`ThreadBackend`](@ref): how per-tile work is dispatched

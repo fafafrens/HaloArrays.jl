@@ -63,6 +63,11 @@ neighbors. For `LocalHaloArray`, it only applies boundary conditions.
 Use the split async API ([`start_halo_exchange!`](@ref) + [`finish_halo_exchange!`](@ref))
 to overlap communication with independent computation.
 
+All mutating drivers (`halo_exchange!`, `synchronize_halo!`,
+`boundary_condition!`, `fill!`, `copyto!`, the BLAS-1 updates, …) return their
+array on **every** backend, so backend-agnostic chaining like
+`u = synchronize_halo!(u)` always works.
+
 For `ThreadedHaloArray`, the default `halo_exchange!`, `boundary_condition!`, and
 `synchronize_halo!` use a serial tile loop because this is allocation-free and
 fastest for small halo surfaces. Explicit threaded variants
@@ -168,6 +173,17 @@ interior_view(u) .= 1.0
 synchronize_halo!(u)
 ```
 
+For position-dependent initial conditions, use
+[`fill_from_global_indices!`](@ref) — the callback receives the **global** index
+tuple, so the same `f` produces one consistent field regardless of how the
+domain is decomposed across ranks or tiles:
+
+```julia
+fill_from_global_indices!(u) do I
+    exp(-((I[1] - 32)^2 + (I[2] - 32)^2) / 50)
+end
+```
+
 `ThreadedHaloArray` splits the domain into local tiles and exchanges halos across
 tiles using threads:
 
@@ -175,6 +191,14 @@ tiles using threads:
 u = ThreadedHaloArray(Float64, (32, 32, 32), 2; dims=(2, 2, 2), boundary_condition=:periodic)
 synchronize_halo!(u)
 ```
+
+!!! tip "Choosing the tile layout `dims`"
+    Julia arrays are column-major: dimension 1 is the contiguous, SIMD/prefetch
+    direction. Prefer decompositions that keep it intact — `dims[1] = 1`, balance
+    the remaining dimensions (e.g. 8 threads in 3-D → `dims = (1, 2, 4)`). The
+    default (`nthreads()` tiles along the **last** dimension) already follows
+    this rule; splitting dimension 1 chops the contiguous runs and turns the
+    inter-tile edge copies into strided gathers.
 
 ### When multi-field containers are useful
 
