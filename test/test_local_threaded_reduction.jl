@@ -293,6 +293,22 @@ using LinearAlgebra: dot, norm
         end
     end
 
+    @testset "== compares interiors, ignores ghosts" begin
+        for mk in (n -> LocalHaloArray(Float64, (n, 4), 1; boundary_condition=:periodic),
+                   n -> ThreadedHaloArray(Float64, (n ÷ 2, 4), 1;
+                       dims=(2, 1), boundary_condition=:periodic))
+            u = mk(6); v = mk(6)
+            fill_from_global_indices!(I -> Float64(I[1] * I[2]), u)
+            fill_from_global_indices!(I -> Float64(I[1] * I[2]), v)
+            @test u == v
+            synchronize_halo!(u)          # u ghosts valid, v ghosts stale
+            @test u == v                  # ghosts must not affect equality
+            v[3, 2] = -99.0
+            @test !(u == v)               # one interior cell differs
+            @test !(u == mk(4))           # size mismatch → false, no throw
+        end
+    end
+
     @testset "p-norm special cases match Base (p = 1, 3, ±Inf, 0)" begin
         vals = [3.0, -4.0, 0.0, 1.0, -2.0, 5.0]
         for u in Any[LocalHaloArray(Float64, (6,), 1; boundary_condition=:periodic),

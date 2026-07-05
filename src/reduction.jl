@@ -66,6 +66,7 @@ _local_dot(x, y) =
     _mapreduce_tile(t -> _interior_dot(tile_parent(x, t), tile_parent(y, t), interior_range(x, t)), +, x)
 _local_any(f::F, u) where {F} = _mapreduce_tile(t -> any(f, interior_view(u, t)), |, u)
 _local_all(f::F, u) where {F} = _mapreduce_tile(t -> all(f, interior_view(u, t)), &, u)
+_local_equal(x, y) = _mapreduce_tile(t -> interior_view(x, t) == interior_view(y, t), &, x)
 
 # Reduce each tile (serially, with the user's kwargs), then combine the
 # per-tile results with `op` across tiles. One definition per reducer covers
@@ -88,6 +89,21 @@ end
 
 Base.any(f::F, u::AbstractSingleHaloArray) where {F<:Function} = _local_any(f, u)
 Base.all(f::F, u::AbstractSingleHaloArray) where {F<:Function} = _local_all(f, u)
+
+# `==` compares the interiors (ghosts excluded, like every reduction). Without
+# this method Base's generic AbstractArray `==` iterates the arrays — which is
+# interior-LOCAL, so under MPI each rank would compare only its own subdomain
+# and ranks could silently disagree. The HaloArray method (mpi_support.jl)
+# Allreduces the same local part so every rank returns the same answer.
+function Base.:(==)(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray)
+    size(x) == size(y) || return false
+    return _local_equal(x, y)
+end
+
+function Base.:(==)(x::AbstractHaloCollection, y::AbstractHaloCollection)
+    length(eachfield(x)) == length(eachfield(y)) || return false
+    return all(fxy -> fxy[1] == fxy[2], zip(eachfield(x), eachfield(y)))
+end
 
 # mapreduce/mapfoldl/mapfoldr over a multi-field container reduce each field
 # across the inputs, then reduce the per-field results. One definition covers any

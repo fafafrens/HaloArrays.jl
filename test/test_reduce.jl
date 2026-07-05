@@ -131,3 +131,31 @@ end
         @test !is_active(maybe_fields)
     end
 end
+
+@testset "collective == (all ranks agree)" begin
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+
+    topology = CartesianTopology(comm, (0,); periodic=(true,))
+    u = HaloArray(Float64, (4,), 1, topology; boundary_condition=_periodic_bc(Val(1)))
+    v = HaloArray(Float64, (4,), 1, topology; boundary_condition=_periodic_bc(Val(1)))
+    fill_from_global_indices!(I -> Float64(I[1]^2), u)
+    fill_from_global_indices!(I -> Float64(I[1]^2), v)
+
+    @test u == v                       # identical → true everywhere
+
+    # ghosts must not affect equality (u synced, v stale)
+    synchronize_halo!(u)
+    @test u == v
+
+    # perturb ONE interior cell on ONE rank: the generic iterate-based ==
+    # would return true on every other rank; the collective == must return
+    # false on ALL ranks, and agree.
+    if rank == 0
+        interior_view(v)[2] = -99.0
+    end
+    eq = (u == v)
+    @test eq == false
+    agreement = MPI.Allgather(eq, comm)
+    @test all(==(false), agreement)
+end

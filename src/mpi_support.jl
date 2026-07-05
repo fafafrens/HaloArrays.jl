@@ -452,6 +452,13 @@ function Base.all(f::F, u::HaloArray) where {F<:Function}
     MPI.Allreduce(_local_all(f, u) :: Bool, &, communicator(u))
 end
 
+# Collective equality: every rank compares its own interior, then combines with
+# a logical-AND Allreduce, so all ranks agree (see the note in reduction.jl).
+function Base.:(==)(x::HaloArray, y::HaloArray)
+    size(x) == size(y) || return false
+    MPI.Allreduce(_local_equal(x, y) :: Bool, &, communicator(x))
+end
+
 # Global inner product / norm / sum: the SAME contiguous-aware local part every
 # backend uses (`_local_dot`/`_local_sum`, reduction.jl — for this rank's single
 # tile that is `_interior_dot`/`_interior_acc` over the padded parent), then a
