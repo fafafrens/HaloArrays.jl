@@ -6,10 +6,10 @@ using StaticArrays
 # ============================================================
 # Ghost-fill kernels (one source of truth for the index math)
 #
-# Each takes the ghost slab to fill and the interior to read from, both as
-# already-resolved views, plus the compile-time `Side`/`Dim`. The single-array
-# and threaded backends differ only in *which* views they pass (whole-array vs
-# per-tile), so they all delegate to these.
+# Each takes a face's ghost slab to fill and the same face's edge slab to read
+# from, both as already-resolved views, plus the compile-time `Side`/`Dim`. The
+# single-array and threaded backends differ only in *which* views they pass
+# (whole-array vs per-tile), so they all delegate to these.
 #
 # `N` is captured as a type parameter (from the ghost-slab view), so `Val(N)` is
 # a static-parameter splat with no runtime→`Val` conversion — guaranteeing the
@@ -17,42 +17,36 @@ using StaticArrays
 # version (rather than relying on `Val(ndims(x))` constant-folding).
 # ============================================================
 
-# Mirror the interior into the ghost layer. `scale = 1` → Reflecting (keep sign),
-# `scale = -1` → Antireflecting (flip sign). The source index is the mirror of
-# the ghost index about the wall.
-@inline function _reflect_into!(halo_region::AbstractArray{<:Any,N}, interior_region,
-        ::Side{S}, ::Dim{dim}, h, scale) where {N,S,dim}
-    n = size(interior_region, dim)
-    for i in 1:size(halo_region, dim)
-        src_i = S == 1 ? h - i + 1 : n - (i - 1)
-        @views halo_region[_slice_index(Val(N), dim, i)...] .=
-               scale .* interior_region[_slice_index(Val(N), dim, src_i)...]
-    end
+# Each kernel pairs a face's ghost slab with the SAME face's edge slab (an
+# [`edge_view`](@ref)/[`ghost_view`](@ref) pair, both `h` wide along `dim`), so
+# the index math is slab-local — no global sizes, and (for the mirror) no side
+# branch: reflection about the wall is the same index reversal on either side.
+
+# Mirror the edge band into the ghost band. `scale = 1` → Reflecting (keep sign),
+# `scale = -1` → Antireflecting (flip sign). Cells pair up at equal distance
+# from the wall, which in slab-local coordinates is a reversal along `dim` —
+# a reversed-range view, so the whole mirror is one fused broadcast.
+@inline function _reflect_into!(ghost::AbstractArray{<:Any,N}, edge,
+        ::Dim{dim}, scale) where {N,dim}
+    mirror = view(edge, ntuple(j -> j == dim ? reverse(axes(edge, j)) : Colon(), Val(N))...)
+    ghost .= scale .* mirror
     return nothing
 end
 
-# Zero-gradient: copy the nearest interior edge cell into every ghost cell.
-@inline function _repeating_into!(halo_region::AbstractArray{<:Any,N}, interior_region,
+# Zero-gradient: copy the wall-adjacent edge cell into every ghost cell. The
+# wall slice keeps a size-1 extent along `dim` (`i:i` indexing), so broadcast
+# expands it across the ghost band's thickness — no loop.
+@inline function _repeating_into!(ghost::AbstractArray{<:Any,N}, edge,
         ::Side{S}, ::Dim{dim}) where {N,S,dim}
-    edge_i = S == 1 ? 1 : size(interior_region, dim)
-    edge = @view interior_region[_slice_index(Val(N), dim, edge_i)...]
-    for i in 1:size(halo_region, dim)
-        @views halo_region[_slice_index(Val(N), dim, i)...] .= edge
-    end
+    isempty(ghost) && return nothing   # halo width 0 → no ghost band, no wall slice
+    wall_i = S == 1 ? 1 : size(edge, dim)
+    @views ghost .= edge[_slice_index(Val(N), dim, wall_i)...]
     return nothing
 end
 
-# Wrap the opposite interior edge into the ghost layer (single-process periodic).
-@inline function _periodic_into!(halo_region::AbstractArray{<:Any,N}, interior_region,
-        ::Side{S}, ::Dim{dim}, h) where {N,S,dim}
-    n = size(interior_region, dim)
-    for i in 1:size(halo_region, dim)
-        src_i = S == 1 ? n - h + i : i
-        @views halo_region[_slice_index(Val(N), dim, i)...] .=
-               interior_region[_slice_index(Val(N), dim, src_i)...]
-    end
-    return nothing
-end
+# Single-process periodic needs no kernel: a side's ghost band IS the opposite
+# side's edge band — the same copy the MPI/tile exchange performs (see the
+# LocalHaloArray Periodic method below).
 
 # ============================================================
 # HaloArray top-level dispatcher
@@ -110,21 +104,22 @@ end
 # ============================================================
 
 # ---- Reflecting / Antireflecting / Repeating ------------------
-# Delegate to the shared kernels with the whole-array views. `S`/`scale` are
-# compile-time, so these inline to the same code as a hand-written per-side method.
+# Delegate to the shared kernels with this face's ghost/edge views. `S`/`scale`
+# are compile-time, so these inline to the same code as a hand-written per-side
+# method.
 @inline boundary_condition!(halo::AbstractSingleHaloArray, s::Side, d::Dim, ::Reflecting) =
-    _reflect_into!(ghost_view(halo, s, d), interior_view(halo), s, d, halo_width(halo), 1)
+    _reflect_into!(ghost_view(halo, s, d), edge_view(halo, s, d), d, 1)
 @inline boundary_condition!(halo::AbstractSingleHaloArray, s::Side, d::Dim, ::Antireflecting) =
-    _reflect_into!(ghost_view(halo, s, d), interior_view(halo), s, d, halo_width(halo), -1)
+    _reflect_into!(ghost_view(halo, s, d), edge_view(halo, s, d), d, -1)
 @inline boundary_condition!(halo::AbstractSingleHaloArray, s::Side, d::Dim, ::Repeating) =
-    _repeating_into!(ghost_view(halo, s, d), interior_view(halo), s, d)
+    _repeating_into!(ghost_view(halo, s, d), edge_view(halo, s, d), s, d)
 
 # ---- Periodic -------------------------------------------------
 # HaloArray: MPI exchange fills halos → no-op here.
 # LocalHaloArray: must physically wrap the interior data (both sides in one method).
 boundary_condition!(::HaloArray, ::Side, ::Dim, ::Periodic) = nothing
-@inline boundary_condition!(halo::LocalHaloArray, s::Side, d::Dim, ::Periodic) =
-    _periodic_into!(ghost_view(halo, s, d), interior_view(halo), s, d, halo_width(halo))
+@inline boundary_condition!(halo::LocalHaloArray, ::Side{S}, d::Dim, ::Periodic) where {S} =
+    (ghost_view(halo, Side(S), d) .= edge_view(halo, Side(3 - S), d); nothing)
 
 # ---- NoBoundaryCondition ----------------------------------------
 # Ghost cells are left unchanged; the user fills them via a custom function.

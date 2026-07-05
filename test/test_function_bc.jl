@@ -27,7 +27,7 @@ end
         # Reflecting via the shared kernel, fed the edge (send) view
         ub = LocalHaloArray(Float64, (8, 8), hw; boundary_condition = Reflecting())
         uf = LocalHaloArray(Float64, (8, 8), hw;
-                boundary_condition = FunctionBC((g, e, s, d, h, o) -> _reflect_into!(g, e, s, d, h, 1)))
+                boundary_condition = FunctionBC((g, e, s, d, h, o) -> _reflect_into!(g, e, d, 1)))
         interior_view(ub) .= data; interior_view(uf) .= data
         boundary_condition!(ub); boundary_condition!(uf)
         @test parent(uf) == parent(ub)

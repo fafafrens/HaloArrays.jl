@@ -366,11 +366,11 @@ end
 # tile-aware views — the same code the single-array backends use, only the views
 # differ. Periodic is a no-op (the inter-tile exchange already wraps the edges).
 @inline boundary_condition!(h::ThreadedHaloArray, t::Integer, s::Side, d::Dim, ::Reflecting) =
-    _reflect_into!(ghost_view(h, s, d, t), interior_view(h, t), s, d, halo_width(h), 1)
+    _reflect_into!(ghost_view(h, s, d, t), edge_view(h, s, d, t), d, 1)
 @inline boundary_condition!(h::ThreadedHaloArray, t::Integer, s::Side, d::Dim, ::Antireflecting) =
-    _reflect_into!(ghost_view(h, s, d, t), interior_view(h, t), s, d, halo_width(h), -1)
+    _reflect_into!(ghost_view(h, s, d, t), edge_view(h, s, d, t), d, -1)
 @inline boundary_condition!(h::ThreadedHaloArray, t::Integer, s::Side, d::Dim, ::Repeating) =
-    _repeating_into!(ghost_view(h, s, d, t), interior_view(h, t), s, d)
+    _repeating_into!(ghost_view(h, s, d, t), edge_view(h, s, d, t), s, d)
 boundary_condition!(::ThreadedHaloArray, ::Integer, ::Side, ::Dim, ::Periodic) = nothing
 # FunctionBC: tile-local views + per-tile global origin, same closure as the single
 # backends (see haloarray.jl `FunctionBC`).
