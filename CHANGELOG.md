@@ -35,6 +35,29 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `tile === nothing` on Local/MPI fields and the boundary tile id on threaded
   fields — mirroring `FunctionBC`'s backend-uniform design. The legacy split
   4-arg / per-tile 5-arg methods still dispatch.
+- **Every per-tile operation is written once over the tile drivers.** Two tiny
+  drivers over the one-tile decomposition (single-block arrays are a one-tile
+  decomposition; `ThreadedHaloArray` splits its tiles across the thread
+  backend) — `_foreach_tile` and its reduce sibling `_mapreduce_tile` — replace
+  the per-backend method pairs: `fill!`, `copyto!`, `fill_from_global_indices!`,
+  the BLAS-1 family (`rmul!`/`lmul!`/`axpy!`/`axpby!` and
+  `swap!`/`rotate!`/`reflect!`), and the reductions' local parts
+  (`mapreduce`/`mapfoldl`/`mapfoldr`, `any`/`all`, `sum`, `norm`, `dot`). The
+  MPI `HaloArray` reductions are now literally `Allreduce(local part)`, so each
+  reduction's local math exists in exactly one place. A/B benchmarked: values
+  bit-identical, Local path 0-alloc and time-identical, threaded within noise.
+- **`copyto!` between halo arrays now validates shape on every backend** — one
+  uniform guard (global size, tile layout, per-tile padded storage). This
+  subsumes the old threaded-only checks and newly rejects copies between arrays
+  with **different halo widths**, which the single-block path previously
+  performed as a silently misaligned raw-storage copy.
+- **Boundary-condition ghost-fill kernels pair `ghost_view` with `edge_view`.**
+  Each is a single fused broadcast: Reflecting/Antireflecting mirror via a
+  reversed-range view (the reversal is side-independent in slab-local
+  coordinates), Repeating broadcast-expands the wall slice across the ghost
+  thickness, and local Periodic is one copy from the opposite side's edge —
+  visibly the same operation as the halo exchange (`_periodic_into!` deleted).
+  On GPU parents each face is one kernel launch instead of one per halo layer.
 
 ### Deprecated
 - `get_send_view`, `get_recv_view` (all arities, old argument order), `get_comm`,
@@ -54,6 +77,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **CI actually runs the distributed implicit regression test** — the MPI job now
   installs OrdinaryDiffEq/LinearSolve/Krylov; previously the runtests gate
   silently skipped `test_mpi_implicit.jl` while the job stayed green.
+- **`norm(u, p)` honors Base's contract for the special exponents**: `p = -Inf`
+  (minimum `|x|`) and `p = 0` (count of nonzeros) previously went through the
+  generic `abs(x)^p` branch and returned garbage; `p = 1` no longer pays a float
+  power per element. Collection p-norms mirrored. (The p-norm stays expressed in
+  global `mapreduce` vocabulary, which is what makes the MPI p-norm correct by
+  inheritance.)
 
 ### Added
 - **`benchmark/` harness** — stencil throughput (Local vs Threaded, Mcell/s) and
@@ -63,6 +92,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Jacobi/error-weight preconditioning works on every backend.
 - **`FieldCollection` is exported** (the concrete type behind the
   `MultiHaloArray`/`ArrayOfHaloArray` aliases).
+- **Device-array test coverage for the reductions** — `sum`/`norm`/`dot`/
+  `mapreduce`/`fill!`/`copyto!` on a JLArray-backed array (scalar indexing
+  forbidden), locking the generic non-`Array` fallbacks of
+  `_interior_acc`/`_interior_dot`; previously only the BLAS-1 ops were
+  device-tested.
 
 ## [0.2.0]
 
