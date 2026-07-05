@@ -102,14 +102,6 @@ function Base.map(f, src::Vararg{LocalHaloArray,N}) where {N}
 end
 
 
-function fill_from_global_indices!(f, halo::LocalHaloArray)
-    interior = interior_view(halo)
-    for I in CartesianIndices(interior)
-        interior[I] = f(Tuple(I))
-    end
-    return halo
-end
-
 interior_to_global_index(::LocalHaloArray, owned_idx::NTuple{N,<:Integer}) where {N} = owned_idx
 @inline function ghost_origin(halo::LocalHaloArray{T,N}, ::Side{S}, ::Dim{D}) where {T,N,S,D}
     owned = interior_size(halo)

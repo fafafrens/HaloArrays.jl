@@ -366,31 +366,8 @@ end
 
 # ---- fill helpers -----------------------------------------------------
 
-"""
-    fill_from_global_indices!(f, u)
-
-Set each interior cell from `f(I)`, where `I` is the **global** grid index tuple
-(1-based over the whole domain). Each rank/tile fills only the cells it owns, so
-the same `f` produces a consistent global field across MPI ranks and threads —
-the idiomatic way to set an initial condition. Returns `u`.
-
-# Example
-```julia
-fill_from_global_indices!(u) do I
-    exp(-((I[1] - nx/2)^2 + (I[2] - ny/2)^2) / 50)
-end
-```
-"""
-function fill_from_global_indices!(f, halo::HaloArray{T,N,A,Halo}) where {T,N,A,Halo}
-    local_shape = interior_range(halo)
-    for local_I in CartesianIndices(local_shape)
-        full_I = Tuple(local_I)
-        local_interior_I = ntuple(i -> full_I[i]-Halo, Val(N))
-        global_I = interior_to_global_index(halo, local_interior_I)
-        halo.data[local_I] = f(global_I)
-    end
-    return halo
-end
+# fill_from_global_indices! is generic over the one-tile decomposition
+# (abstract_haloarray.jl); interior_to_global_index below supplies the rank offset.
 
 
 # ---- show -------------------------------------------------------------

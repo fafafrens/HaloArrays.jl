@@ -169,6 +169,11 @@ ghost-safe offsets, e.g. `for I in CartesianIndices(interior_range(u))`. For
 [`ThreadedHaloArray`](@ref) the range is the same for every tile.
 See also [`interior_view`](@ref).
 """
+# Padded-storage index (ghosts included) → owned/interior-local index (1-based,
+# ghost-free): the inverse of the `+halo` shift `interior_range` encodes.
+@inline storage_to_owned_index(I::CartesianIndex{N}, hw::Int) where {N} =
+    ntuple(d -> I[d] - hw, Val(N))
+
 @inline function interior_range(halo::AbstractSingleHaloArray)
     hw = halo_width(halo)
     return ntuple(i -> (hw + 1):(size(parent(halo), i) - hw), Val(ndims(halo)))
@@ -195,6 +200,38 @@ this process can update directly.
 
 function storage_size end
 function interior_to_global_index end
+
+# Per-tile form: single-block backends are a one-tile decomposition, so the
+# tile id is irrelevant (ThreadedHaloArray provides the real per-tile method).
+@inline interior_to_global_index(halo::AbstractSingleHaloArray, ::Integer,
+    owned_idx::NTuple{N,<:Integer}) where {N} = interior_to_global_index(halo, owned_idx)
+
+"""
+    fill_from_global_indices!(f, u)
+
+Set each interior cell from `f(I)`, where `I` is the **global** grid index tuple
+(1-based over the whole domain). Each rank/tile fills only the cells it owns, so
+the same `f` produces a consistent global field across MPI ranks and threads —
+the idiomatic way to set an initial condition. Returns `u`.
+
+# Example
+```julia
+fill_from_global_indices!(u) do I
+    exp(-((I[1] - nx/2)^2 + (I[2] - ny/2)^2) / 50)
+end
+```
+"""
+function fill_from_global_indices!(f, halo::AbstractSingleHaloArray{T,N}) where {T,N}
+    hw  = halo_width(halo)
+    rng = interior_range(halo)          # same padded range for every tile
+    for t in 1:tile_count(halo)         # Local/MPI: one tile (= parent)
+        data = tile_parent(halo, t)
+        for I in CartesianIndices(rng)
+            data[I] = f(interior_to_global_index(halo, t, storage_to_owned_index(I, hw)))
+        end
+    end
+    return halo
+end
 function global_to_storage_index end
 function is_root end
 
@@ -205,6 +242,7 @@ function is_root end
 # a ThreadedHaloArray (many tiles, which overrides these two methods).
 @inline tile_count(::AbstractSingleHaloArray) = 1
 @inline tile_parent(halo::AbstractSingleHaloArray, ::Integer) = parent(halo)
+@inline interior_range(halo::AbstractSingleHaloArray, ::Integer) = interior_range(halo)
 
 @inline halo_width(arr::AbstractArray{<:AbstractSingleHaloArray}) = halo_width(first(arr))
 @inline tile_count(arr::AbstractArray{<:AbstractSingleHaloArray}) = tile_count(first(arr))
