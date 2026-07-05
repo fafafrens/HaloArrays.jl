@@ -26,19 +26,21 @@ Base.:*(x::Number, halo::AbstractSingleHaloArray) = x .* halo
 # ---- norm (global reduction) ------------------------------------------------
 # The 2-norm (the Krylov hot path) is its own branch-free method; the general-`p`
 # method carries the `p == Inf` / else dispatch and reuses the 2-norm for p == 2.
-LinearAlgebra.norm(halo::AbstractSingleHaloArray) = sqrt(mapreduce(abs2, +, halo))
+LinearAlgebra.norm(halo::AbstractSingleHaloArray) = sqrt(_local_sum(abs2, halo))
+# Expressed in GLOBAL primitives (mapreduce), not the _local_* helpers, so the
+# MPI HaloArray inherits a globally-correct p-norm through its Allreduce-backed
+# mapreduce — only the hot 2-norm gets a specialized MPI method.
 function LinearAlgebra.norm(halo::AbstractSingleHaloArray, p::Real)
-    p == 2   && return norm(halo)
-    p == Inf && return mapreduce(abs, max, halo)
+    p == 2    && return norm(halo)
+    p == 1    && return mapreduce(abs, +, halo)
+    p == Inf  && return mapreduce(abs, max, halo)
+    p == -Inf && return mapreduce(abs, min, halo)
+    p == 0    && return convert(float(real(eltype(halo))), mapreduce(x -> !iszero(x), +, halo))
     return mapreduce(x -> abs(x)^p, +, halo)^(1 / p)
 end
-# Fast 2-norm: contiguous-aware Σ|·|² over the parent (see `_interior_acc`) instead
-# of `mapreduce(abs2, +, strided interior_view)`. The general-p method above still
-# routes p == 2 here via `norm(halo)` (dynamic dispatch picks the concrete type).
-LinearAlgebra.norm(u::LocalHaloArray) = sqrt(_interior_acc(abs2, parent(u), interior_range(u)))
-LinearAlgebra.norm(u::ThreadedHaloArray) = sqrt(tile_mapreduce(thread_backend(u),
-    t -> _interior_acc(abs2, tile_parent(u, t), interior_range(u, t)), +,
-    1:tile_count(u); scheduler=:static))
+# The 2-norm above IS the fast path: `_local_sum` runs the contiguous-aware
+# `_interior_acc` per tile (single-block inline, threaded across the backend);
+# the MPI HaloArray method (mpi_support.jl) Allreduces the same local part.
 
 # Collections: combine the per-field norms (each field already does its own global
 # reduction — MPI Allreduce / tile combine). Forwarding per field avoids Base's
@@ -48,8 +50,11 @@ LinearAlgebra.norm(u::ThreadedHaloArray) = sqrt(tile_mapreduce(thread_backend(u)
 # ‖x‖_∞ = maxₚ ‖x_f‖_∞, ‖x‖_p = (Σ_f ‖x_f‖_p^p)^{1/p}.
 LinearAlgebra.norm(x::AbstractHaloCollection) = sqrt(sum(f -> norm(f)^2, eachfield(x)))
 function LinearAlgebra.norm(x::AbstractHaloCollection, p::Real)
-    p == 2   && return norm(x)
-    p == Inf && return maximum(f -> norm(f, Inf), eachfield(x))
+    p == 2    && return norm(x)
+    p == 1    && return sum(f -> norm(f, 1), eachfield(x))
+    p == Inf  && return maximum(f -> norm(f, Inf), eachfield(x))
+    p == -Inf && return minimum(f -> norm(f, -Inf), eachfield(x))
+    p == 0    && return sum(f -> norm(f, 0), eachfield(x))
     return sum(f -> norm(f, p)^p, eachfield(x))^(1 / p)
 end
 
@@ -60,12 +65,7 @@ end
 # array, allocating O(N) every call — and `dot` is in every Krylov inner loop.
 # The interior dot is allocation-free (BLAS-backed for contiguous storage) and
 # globally correct (MPI Allreduce; per-tile / per-field combine).
-LinearAlgebra.dot(x::LocalHaloArray, y::LocalHaloArray) =
-    _interior_dot(parent(x), parent(y), interior_range(x))
-LinearAlgebra.dot(x::ThreadedHaloArray, y::ThreadedHaloArray) =
-    tile_mapreduce(thread_backend(x),
-        t -> _interior_dot(tile_parent(x, t), tile_parent(y, t), interior_range(x, t)), +,
-        1:tile_count(x); scheduler=:static)
+LinearAlgebra.dot(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray) = _local_dot(x, y)
 LinearAlgebra.dot(x::AbstractHaloCollection, y::AbstractHaloCollection) =
     sum(fxy -> dot(fxy[1], fxy[2]), zip(eachfield(x), eachfield(y)))
 # MaybeHaloArray: forward to the inner array (its own dot/norm already do the right
@@ -153,14 +153,8 @@ end
 @inline _interior_axpby!(py::AbstractArray, px::AbstractArray, rng::Tuple, s, t) =
     (@views py[rng...] .= s .* px[rng...] .+ t .* py[rng...]; nothing)
 
-# One driver for the one-tile decomposition: a single-block array (Local/MPI)
-# runs the kernel inline on its lone tile; a ThreadedHaloArray splits its tiles
-# across the thread backend. Every per-tile BLAS-1 method below is written once
-# against this, instead of once per backend.
-@inline _foreach_tile(f::F, ::AbstractSingleHaloArray) where {F} = (f(1); nothing)
-@inline _foreach_tile(f::F, x::ThreadedHaloArray) where {F} =
-    (tile_foreach(thread_backend(x), f, 1:tile_count(x); scheduler=:static); nothing)
-
+# Per-tile driving goes through `_foreach_tile` (abstract_haloarray.jl, next to
+# the one-tile decomposition trait it is built on).
 LinearAlgebra.rmul!(x::AbstractSingleHaloArray, s::Number) =
     (_foreach_tile(t -> _interior_scal!(tile_parent(x, t), interior_range(x, t), s), x); x)
 LinearAlgebra.lmul!(s::Number, x::AbstractSingleHaloArray) =

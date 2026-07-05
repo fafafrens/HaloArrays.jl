@@ -137,8 +137,7 @@ end
 
 @inline function Base.copyto!(dest::ThreadedHaloArray, bc::Broadcasted{<:ThreadedHaloArrayStyle})
     bc_flat = Broadcast.flatten(bc)
-    tile_foreach(thread_backend(dest), tile_id -> _copyto_threaded_broadcast_tile!(dest, bc_flat, tile_id),
-        eachindex(parent(dest)); scheduler=:static)
+    _foreach_tile(tile_id -> _copyto_threaded_broadcast_tile!(dest, bc_flat, tile_id), dest)
     return dest
 end
 
@@ -170,8 +169,7 @@ end
 
 function Broadcast.materialize!(dest::ThreadedHaloArray, bc::Broadcasted)
     bc_flat = Broadcast.flatten(bc)
-    tile_foreach(thread_backend(dest), tile_id -> _materialize_threaded_broadcast_tile!(dest, bc_flat, tile_id),
-        eachindex(parent(dest)); scheduler=:static)
+    _foreach_tile(tile_id -> _materialize_threaded_broadcast_tile!(dest, bc_flat, tile_id), dest)
     return dest
 end
 

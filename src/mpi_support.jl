@@ -431,8 +431,7 @@ for (func, commutative) in [:mapreduce => true, :mapfoldl => false, :mapfoldr =>
             "sub-communicators). Use `mapreduce_haloarray_dims(f, op, halo, dims)`, " *
             "which returns the reduced array on its sub-topology."))
         comm   = communicator(halo)
-        ups    = map(interior_view, (halo, etc...))
-        rlocal = _reduce_views($func, f, op, ups; kws...)   # no O(N) materialization for 2+ inputs
+        rlocal = _local_mapreduce($func, f, op, (halo, etc...); kws...)  # shared local part
         op_mpi = MPI.Op(op, typeof(rlocal); iscommutative=$commutative)
         MPI.Allreduce(rlocal, op_mpi, comm)
     end
@@ -446,24 +445,24 @@ for (func, commutative) in [:mapreduce => true, :mapfoldl => false, :mapfoldr =>
 end
 
 function Base.any(f::F, u::HaloArray) where {F<:Function}
-    MPI.Allreduce(any(f, interior_view(u)) :: Bool, |, communicator(u))
+    MPI.Allreduce(_local_any(f, u) :: Bool, |, communicator(u))
 end
 
 function Base.all(f::F, u::HaloArray) where {F<:Function}
-    MPI.Allreduce(all(f, interior_view(u)) :: Bool, &, communicator(u))
+    MPI.Allreduce(_local_all(f, u) :: Bool, &, communicator(u))
 end
 
-# Global inner product / norm / sum: the contiguous-aware local reduction over this
-# rank's interior (see `_interior_acc`/`_interior_dot` — ~5× faster than reducing
-# the strided interior_view), then a single Allreduce. These stay in every Krylov
-# inner loop, so both the SIMD reduction and the single collective matter.
-function LinearAlgebra.dot(x::HaloArray, y::HaloArray)
-    return MPI.Allreduce(_interior_dot(parent(x), parent(y), interior_range(x)), +, communicator(x))
-end
+# Global inner product / norm / sum: the SAME contiguous-aware local part every
+# backend uses (`_local_dot`/`_local_sum`, reduction.jl — for this rank's single
+# tile that is `_interior_dot`/`_interior_acc` over the padded parent), then a
+# single Allreduce. These stay in every Krylov inner loop, so both the SIMD
+# reduction and the single collective matter.
+LinearAlgebra.dot(x::HaloArray, y::HaloArray) =
+    MPI.Allreduce(_local_dot(x, y), +, communicator(x))
 LinearAlgebra.norm(u::HaloArray) =
-    sqrt(MPI.Allreduce(_interior_acc(abs2, parent(u), interior_range(u)), +, communicator(u)))
+    sqrt(MPI.Allreduce(_local_sum(abs2, u), +, communicator(u)))
 Base.sum(u::HaloArray) =
-    MPI.Allreduce(_interior_acc(identity, parent(u), interior_range(u)), +, communicator(u))
+    MPI.Allreduce(_local_sum(identity, u), +, communicator(u))
 
 """
     mapreduce_haloarray_dims(f, op, u, dims) -> HaloArray

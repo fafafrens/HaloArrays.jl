@@ -262,4 +262,16 @@ using LinearAlgebra: dot, norm
             @test norm(u, Inf) ≈ norm(iu, Inf)
         end
     end
+
+    @testset "p-norm special cases match Base (p = 1, 3, ±Inf, 0)" begin
+        vals = [3.0, -4.0, 0.0, 1.0, -2.0, 5.0]
+        for u in Any[LocalHaloArray(Float64, (6,), 1; boundary_condition=:periodic),
+                     ThreadedHaloArray(Float64, (3,), 1;
+                         dims=(2,), boundary_condition=:periodic)]
+            fill_from_global_indices!(I -> vals[I[1]], u)
+            for p in (1, 3, Inf, -Inf, 0)   # -Inf = min |x|, 0 = count of nonzeros
+                @test norm(u, p) ≈ norm(vals, p)
+            end
+        end
+    end
 end

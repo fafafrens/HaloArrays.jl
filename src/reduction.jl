@@ -51,54 +51,43 @@ end
 @inline _interior_dot(px::AbstractArray, py::AbstractArray, rng::Tuple) =
     LinearAlgebra.dot(@view(px[rng...]), @view(py[rng...]))
 
+# ---- local parts, written once over the tile drivers -------------------------
+# The "local part" of every reduction — this array's own cells, reduced per tile
+# and combined with `op` across tiles (`_mapreduce_tile`: single-block = one
+# inline tile; threaded = tile_mapreduce over the thread backend). The MPI
+# HaloArray methods (mpi_support.jl) wrap these SAME local parts in an
+# Allreduce, so each reduction's local math exists in exactly one place.
+_local_mapreduce(reducer::R, f::F, op::OP, arrays::Tuple; kws...) where {R,F,OP} =
+    _mapreduce_tile(t -> _reduce_views(reducer, f, op,
+        map(h -> interior_view(h, t), arrays); kws...), op, first(arrays))
+_local_sum(f::F, u) where {F} =
+    _mapreduce_tile(t -> _interior_acc(f, tile_parent(u, t), interior_range(u, t)), +, u)
+_local_dot(x, y) =
+    _mapreduce_tile(t -> _interior_dot(tile_parent(x, t), tile_parent(y, t), interior_range(x, t)), +, x)
+_local_any(f::F, u) where {F} = _mapreduce_tile(t -> any(f, interior_view(u, t)), |, u)
+_local_all(f::F, u) where {F} = _mapreduce_tile(t -> all(f, interior_view(u, t)), &, u)
+
+# Reduce each tile (serially, with the user's kwargs), then combine the
+# per-tile results with `op` across tiles. One definition per reducer covers
+# LocalHaloArray and ThreadedHaloArray; the MPI HaloArray methods
+# (mpi_support.jl) are more specific and Allreduce the same local part.
 for func in (:mapreduce, :mapfoldl, :mapfoldr)
     @eval function Base.$func(
-            f::F, op::OP, halo::LocalHaloArray, etc::Vararg{LocalHaloArray}; kws...,
+            f::F, op::OP, halo::AbstractSingleHaloArray, etc::Vararg{AbstractSingleHaloArray}; kws...,
         ) where {F<:Function, OP}
-        return _reduce_views($func, f, op, map(interior_view, (halo, etc...)); kws...)
+        return _local_mapreduce($func, f, op, (halo, etc...); kws...)
     end
 
     @eval function Base.$func(
-            f::F, op::OP, z::Iterators.Zip{<:Tuple{LocalHaloArray,Vararg{LocalHaloArray}}}; kws...,
-        ) where {F<:Function, OP}
-        g(args...) = f(args)
-        return $func(g, op, z.is...; kws...)
-    end
-
-    @eval function Base.$func(
-            f::F, op::OP, halo::ThreadedHaloArray, etc::Vararg{ThreadedHaloArray}; kws...,
-        ) where {F<:Function, OP}
-        # Reduce each tile (serially, with the user's kwargs), then combine the
-        # per-tile results with `op` across tiles via the array's thread backend.
-        per_tile(tile_id) = _reduce_views($func, f, op, map(h -> interior_view(h, tile_id), (halo, etc...)); kws...)
-        return tile_mapreduce(thread_backend(halo), per_tile, op, 1:tile_count(halo); scheduler=:static)
-    end
-
-    @eval function Base.$func(
-            f::F, op::OP, z::Iterators.Zip{<:Tuple{ThreadedHaloArray,Vararg{ThreadedHaloArray}}}; kws...,
+            f::F, op::OP, z::Iterators.Zip{<:Tuple{AbstractSingleHaloArray,Vararg{AbstractSingleHaloArray}}}; kws...,
         ) where {F<:Function, OP}
         g(args...) = f(args)
         return $func(g, op, z.is...; kws...)
     end
 end
 
-function Base.any(f::F, u::LocalHaloArray) where {F<:Function}
-    return any(f, interior_view(u))
-end
-
-function Base.all(f::F, u::LocalHaloArray) where {F<:Function}
-    return all(f, interior_view(u))
-end
-
-function Base.any(f::F, u::ThreadedHaloArray) where {F<:Function}
-    return tile_mapreduce(thread_backend(u), tile_id -> any(f, interior_view(u, tile_id)), |,
-        1:tile_count(u); scheduler=:static)
-end
-
-function Base.all(f::F, u::ThreadedHaloArray) where {F<:Function}
-    return tile_mapreduce(thread_backend(u), tile_id -> all(f, interior_view(u, tile_id)), &,
-        1:tile_count(u); scheduler=:static)
-end
+Base.any(f::F, u::AbstractSingleHaloArray) where {F<:Function} = _local_any(f, u)
+Base.all(f::F, u::AbstractSingleHaloArray) where {F<:Function} = _local_all(f, u)
 
 # mapreduce/mapfoldl/mapfoldr over a multi-field container reduce each field
 # across the inputs, then reduce the per-field results. One definition covers any
@@ -173,10 +162,7 @@ Base.minimum(halo::AbstractHaloArray) = mapreduce(identity, min, halo)
 
 # Fast `sum` (no-arg): contiguous-aware interior reduction (see `_interior_acc`).
 # `sum(f, ...)` and max/min keep the generic mapreduce path above.
-Base.sum(u::LocalHaloArray) = _interior_acc(identity, parent(u), interior_range(u))
-Base.sum(u::ThreadedHaloArray) = tile_mapreduce(thread_backend(u),
-    t -> _interior_acc(identity, tile_parent(u, t), interior_range(u, t)), +,
-    1:tile_count(u); scheduler=:static)
+Base.sum(u::AbstractSingleHaloArray) = _local_sum(identity, u)
 
 # dot, norm, and the in-place BLAS-1 ops (rmul!/lmul!/axpy!/axpby!) — all built
 # on the mapreduce/broadcast above — live in vector_space.jl.

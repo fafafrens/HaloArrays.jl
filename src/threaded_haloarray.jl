@@ -112,6 +112,13 @@ end
 
 @inline halo_backend(::Type{<:ThreadedHaloArray}) = ThreadedHaloBackend()
 
+# Tile drivers (see the one-tile-decomposition trait in abstract_haloarray.jl):
+# split the per-tile kernel across this array's thread backend.
+@inline _foreach_tile(f::F, x::ThreadedHaloArray) where {F} =
+    (tile_foreach(thread_backend(x), f, 1:tile_count(x); scheduler=:static); nothing)
+@inline _mapreduce_tile(f::F, op, x::ThreadedHaloArray) where {F} =
+    tile_mapreduce(thread_backend(x), f, op, 1:tile_count(x); scheduler=:static)
+
 """
     thread_backend(u::ThreadedHaloArray) -> ThreadBackend
 
@@ -352,8 +359,7 @@ usually faster for small halo surfaces — reach for these only when benchmarkin
 shows the parallel exchange wins (large surfaces, wide halos, many tiles).
 """
 function halo_exchange_threads!(halo::ThreadedHaloArray)
-    tile_foreach(thread_backend(halo), tile_id -> _threaded_exchange_tile!(halo, tile_id),
-        eachindex(parent(halo)); scheduler=:static)
+    _foreach_tile(tile_id -> _threaded_exchange_tile!(halo, tile_id), halo)
     return halo
 end
 
@@ -385,8 +391,7 @@ function boundary_condition!(halo::ThreadedHaloArray)
 end
 
 function boundary_condition_threads!(halo::ThreadedHaloArray)
-    tile_foreach(thread_backend(halo), tile_id -> _threaded_boundary_tile!(halo, tile_id),
-        eachindex(parent(halo)); scheduler=:static)
+    _foreach_tile(tile_id -> _threaded_boundary_tile!(halo, tile_id), halo)
     return halo
 end
 
@@ -398,8 +403,7 @@ function synchronize_halo!(halo::ThreadedHaloArray)
 end
 
 function synchronize_halo_threads!(halo::ThreadedHaloArray)
-    tile_foreach(thread_backend(halo), tile_id -> _threaded_synchronize_tile!(halo, tile_id),
-        eachindex(parent(halo)); scheduler=:static)
+    _foreach_tile(tile_id -> _threaded_synchronize_tile!(halo, tile_id), halo)
     return halo
 end
 
@@ -410,16 +414,7 @@ start_halo_exchange!(halo::ThreadedHaloArray) = halo_exchange!(halo)
 finish_halo_exchange!(halo::ThreadedHaloArray) = halo
 
 # interior-only, like the generic fill!; per-tile, in parallel
-function Base.fill!(halo::ThreadedHaloArray, value)
-    tile_foreach(thread_backend(halo), tile_id -> _fill_threaded_interior_tile!(halo, tile_id, value),
-        eachindex(parent(halo)); scheduler=:static)
-    return halo
-end
-
-@inline function _fill_threaded_interior_tile!(halo::ThreadedHaloArray, tile_id::Integer, value)
-    fill!(interior_view(halo, tile_id), value)
-    return nothing
-end
+# fill! is generic over the tile drivers (abstract_haloarray.jl).
 
 function _global_to_tile_dims(halo::ThreadedHaloArray{T,N}, dims::NTuple{M,<:Integer}) where {T,N,M}
     M == N || throw(DimensionMismatch("ThreadedHaloArray similar dims must have $N dimensions"))
@@ -451,20 +446,8 @@ function Base.foreach(f, halo::ThreadedHaloArray)
     return nothing
 end
 
-function Base.copyto!(dest::ThreadedHaloArray, src::ThreadedHaloArray)
-    size(dest) == size(src) || throw(DimensionMismatch("ThreadedHaloArray copyto! requires matching global sizes"))
-    tile_size(dest) == tile_size(src) || throw(DimensionMismatch("ThreadedHaloArray copyto! requires matching tile sizes"))
-    tile_count(dest) == tile_count(src) || throw(DimensionMismatch("ThreadedHaloArray copyto! requires matching tile counts"))
-
-    tile_foreach(thread_backend(dest), tile_id -> _copy_threaded_tile_storage!(dest, src, tile_id),
-        eachindex(parent(dest)); scheduler=:static)
-    return dest
-end
-
-@inline function _copy_threaded_tile_storage!(dest::ThreadedHaloArray, src::ThreadedHaloArray, tile_id::Integer)
-    copyto!(tile_parent(dest, tile_id), tile_parent(src, tile_id))
-    return nothing
-end
+# copyto! (incl. its shape guards) is generic over the tile drivers
+# (abstract_haloarray.jl).
 
 # ---- show -------------------------------------------------------------
 #

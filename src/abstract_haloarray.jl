@@ -243,6 +243,17 @@ function is_root end
 @inline tile_count(::AbstractSingleHaloArray) = 1
 @inline tile_parent(halo::AbstractSingleHaloArray, ::Integer) = parent(halo)
 @inline interior_range(halo::AbstractSingleHaloArray, ::Integer) = interior_range(halo)
+@inline interior_view(halo::AbstractSingleHaloArray, ::Integer) = interior_view(halo)
+
+# The two drivers over that decomposition. A single-block array runs the
+# per-tile kernel inline on its lone tile; a ThreadedHaloArray (methods with its
+# type, threaded_haloarray.jl) splits its tiles across the thread backend. Every
+# per-tile operation (BLAS-1, fill!, copyto!, the reductions' local parts) is
+# written once against these instead of once per backend. `f::F` forces closure
+# specialization. NOTE: tiles may run concurrently — `f` must only touch its own
+# tile. `_mapreduce_tile` combines the per-tile results with `op` (≥1 tile).
+@inline _foreach_tile(f::F, ::AbstractSingleHaloArray) where {F} = (f(1); nothing)
+@inline _mapreduce_tile(f::F, op, ::AbstractSingleHaloArray) where {F} = f(1)
 
 @inline halo_width(arr::AbstractArray{<:AbstractSingleHaloArray}) = halo_width(first(arr))
 @inline tile_count(arr::AbstractArray{<:AbstractSingleHaloArray}) = tile_count(first(arr))
@@ -306,12 +317,18 @@ call [`synchronize_halo!`](@ref) before a stencil reads them. Use
 `fill!(parent(u), value)` to overwrite the raw storage including ghosts.
 """
 function Base.fill!(halo::AbstractSingleHaloArray, value)
-    fill!(interior_view(halo), value)
+    _foreach_tile(t -> fill!(interior_view(halo, t), value), halo)
     return halo
 end
 
 function Base.copyto!(dest::AbstractSingleHaloArray, src::AbstractSingleHaloArray)
-    copyto!(parent(dest), parent(src))
+    # One uniform guard for every backend: global shape, decomposition layout,
+    # and per-tile padded storage (storage_size covers tile size AND halo width —
+    # equal interiors with different ghosts would silently misalign a raw copy).
+    (size(dest) == size(src) && tile_count(dest) == tile_count(src) &&
+     storage_size(dest) == storage_size(src)) ||
+        throw(DimensionMismatch("copyto! requires matching global size, tile layout, and halo width"))
+    _foreach_tile(t -> copyto!(tile_parent(dest, t), tile_parent(src, t)), dest)
     return dest
 end
 

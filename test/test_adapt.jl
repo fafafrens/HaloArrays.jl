@@ -86,4 +86,21 @@ MPI.Initialized() || MPI.Init()
             @test Array(interior_view(gy)) ≈ collect(interior_view(hy))
         end
     end
+
+    @testset "reductions on a device parent (generic _interior_acc/_interior_dot fallbacks)" begin
+        using LinearAlgebra: norm, dot
+        mk(v) = (u = LocalHaloArray(Float64, (5,), 1; boundary_condition=:periodic);
+                 interior_view(u) .= v; u)
+        hx, hy = mk([1.0, 2, 3, 4, 5]), mk([10.0, 20, 30, 40, 50])
+        gx, gy = adapt(JLArray, mk([1.0, 2, 3, 4, 5])), adapt(JLArray, mk([10.0, 20, 30, 40, 50]))
+        # the Array-gated SIMD kernels must be bypassed; JLArray forbids scalar indexing
+        @test sum(gx) ≈ sum(hx)
+        @test norm(gx) ≈ norm(hx)
+        @test dot(gx, gy) ≈ dot(hx, hy)
+        @test mapreduce(abs2, +, gx) ≈ mapreduce(abs2, +, hx)
+        @test fill!(gx, 7.0) === gx
+        @test sum(gx) ≈ 5 * 7.0
+        copyto!(gy, gx)
+        @test Array(interior_view(gy)) ≈ fill(7.0, 5)
+    end
 end
