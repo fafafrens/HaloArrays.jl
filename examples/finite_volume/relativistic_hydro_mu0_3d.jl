@@ -185,4 +185,4 @@ function run_mu0_blast_3d(; a=1.0, n=64, cfl=0.3, t_end=0.16,
     return u
 end
 
-#u=run_mu0_blast_3d()
+u = run_mu0_blast_3d()

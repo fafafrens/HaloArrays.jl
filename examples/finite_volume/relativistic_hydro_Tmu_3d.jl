@@ -224,8 +224,9 @@ function run_Tmu_blast_3d(; A=1.0, n=32, cfl=0.3, t_end=0.14,
     return u
 end
 
-#u=run_Tmu_blast_3d(n=64)
+u = run_Tmu_blast_3d()
 
+# To visualize (e.g. with n=64):
 #N, Mx,My, Mz,E = interior_view.(eachfield(u))
 
 #heatmap(N[16,:,:])
