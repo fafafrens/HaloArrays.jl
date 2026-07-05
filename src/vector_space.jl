@@ -153,31 +153,22 @@ end
 @inline _interior_axpby!(py::AbstractArray, px::AbstractArray, rng::Tuple, s, t) =
     (@views py[rng...] .= s .* px[rng...] .+ t .* py[rng...]; nothing)
 
-# Single-block backends (LocalHaloArray, MPI HaloArray): one parent block.
-for HT in (:LocalHaloArray, :HaloArray)
-    @eval begin
-        LinearAlgebra.rmul!(x::$HT, s::Number) = (_interior_scal!(parent(x), interior_range(x), s); x)
-        LinearAlgebra.lmul!(s::Number, x::$HT) = (_interior_scal!(parent(x), interior_range(x), s); x)
-        LinearAlgebra.axpy!(s::Number, x::$HT, y::$HT) =
-            (_interior_axpy!(parent(y), parent(x), interior_range(x), s); y)
-        LinearAlgebra.axpby!(s::Number, x::$HT, t::Number, y::$HT) =
-            (_interior_axpby!(parent(y), parent(x), interior_range(x), s, t); y)
-    end
-end
+# One driver for the one-tile decomposition: a single-block array (Local/MPI)
+# runs the kernel inline on its lone tile; a ThreadedHaloArray splits its tiles
+# across the thread backend. Every per-tile BLAS-1 method below is written once
+# against this, instead of once per backend.
+@inline _foreach_tile(f::F, ::AbstractSingleHaloArray) where {F} = (f(1); nothing)
+@inline _foreach_tile(f::F, x::ThreadedHaloArray) where {F} =
+    (tile_foreach(thread_backend(x), f, 1:tile_count(x); scheduler=:static); nothing)
 
-# ThreadedHaloArray: drive the per-tile kernels across the array's thread backend.
-LinearAlgebra.rmul!(x::ThreadedHaloArray, s::Number) =
-    (tile_foreach(thread_backend(x), t -> _interior_scal!(tile_parent(x, t), interior_range(x, t), s),
-        1:tile_count(x); scheduler=:static); x)
-LinearAlgebra.lmul!(s::Number, x::ThreadedHaloArray) =
-    (tile_foreach(thread_backend(x), t -> _interior_scal!(tile_parent(x, t), interior_range(x, t), s),
-        1:tile_count(x); scheduler=:static); x)
-LinearAlgebra.axpy!(s::Number, x::ThreadedHaloArray, y::ThreadedHaloArray) =
-    (tile_foreach(thread_backend(x), t -> _interior_axpy!(tile_parent(y, t), tile_parent(x, t), interior_range(x, t), s),
-        1:tile_count(x); scheduler=:static); y)
-LinearAlgebra.axpby!(s::Number, x::ThreadedHaloArray, t::Number, y::ThreadedHaloArray) =
-    (tile_foreach(thread_backend(x), tt -> _interior_axpby!(tile_parent(y, tt), tile_parent(x, tt), interior_range(x, tt), s, t),
-        1:tile_count(x); scheduler=:static); y)
+LinearAlgebra.rmul!(x::AbstractSingleHaloArray, s::Number) =
+    (_foreach_tile(t -> _interior_scal!(tile_parent(x, t), interior_range(x, t), s), x); x)
+LinearAlgebra.lmul!(s::Number, x::AbstractSingleHaloArray) =
+    (_foreach_tile(t -> _interior_scal!(tile_parent(x, t), interior_range(x, t), s), x); x)
+LinearAlgebra.axpy!(s::Number, x::AbstractSingleHaloArray, y::AbstractSingleHaloArray) =
+    (_foreach_tile(t -> _interior_axpy!(tile_parent(y, t), tile_parent(x, t), interior_range(x, t), s), x); y)
+LinearAlgebra.axpby!(s::Number, x::AbstractSingleHaloArray, t::Number, y::AbstractSingleHaloArray) =
+    (_foreach_tile(tt -> _interior_axpby!(tile_parent(y, tt), tile_parent(x, tt), interior_range(x, tt), s, t), x); y)
 
 # ---- swap + Givens/Householder on two vectors (elementwise, MPI-safe) --------
 # These complete the BLAS-1 surface (SSWAP, SROT). Each mixes two whole vectors
@@ -186,11 +177,9 @@ LinearAlgebra.axpby!(s::Number, x::ThreadedHaloArray, t::Number, y::ThreadedHalo
 # locals in a single fused pass: no temporary vector, no extra traversal.
 #
 # A single-tile kernel does the cell math on one raw padded array over
-# `interior_range` (so no scalar-getindex on the halo array itself). The
-# per-backend methods just choose how to drive the tiles: a non-threaded array
-# (Local/MPI) is one block, so its method runs the kernel straight on `parent`;
-# a ThreadedHaloArray drives its tiles with `tile_foreach` so they split across
-# threads — matching the threaded broadcast that already backs axpy!/lmul!/…
+# `interior_range` (so no scalar-getindex on the halo array itself); the shared
+# `_foreach_tile` driver runs it inline on a single-block array (Local/MPI) or
+# across the thread backend on a ThreadedHaloArray — one method per operation.
 # Collections delegate per field, so each field picks its own driver.
 
 # Dense Array parents (CPU): scalar fused pass — no temporary, both outputs from
@@ -251,39 +240,17 @@ backend and is MPI-safe (each rank/tile swaps its own cells). On a
 [`ThreadedHaloArray`](@ref) the tiles are processed in parallel.
 """
 function swap!(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray)
-    _swap_tile!(parent(x), parent(y), interior_range(x))   # one block (Local/MPI)
+    _foreach_tile(t -> _swap_tile!(tile_parent(x, t), tile_parent(y, t), interior_range(x, t)), x)
     return x, y
 end
 
 function LinearAlgebra.rotate!(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray, c, s)
-    _rotate_tile!(parent(x), parent(y), interior_range(x), c, s)
+    _foreach_tile(t -> _rotate_tile!(tile_parent(x, t), tile_parent(y, t), interior_range(x, t), c, s), x)
     return x, y
 end
 
 function LinearAlgebra.reflect!(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray, c, s)
-    _reflect_tile!(parent(x), parent(y), interior_range(x), c, s)
-    return x, y
-end
-
-# ThreadedHaloArray: split the tiles across threads (as the threaded broadcast does).
-function swap!(x::ThreadedHaloArray, y::ThreadedHaloArray)
-    rng = interior_range(x)
-    tile_foreach(thread_backend(x), t -> _swap_tile!(tile_parent(x, t), tile_parent(y, t), rng),
-        eachindex(parent(x)); scheduler=:static)
-    return x, y
-end
-
-function LinearAlgebra.rotate!(x::ThreadedHaloArray, y::ThreadedHaloArray, c, s)
-    rng = interior_range(x)
-    tile_foreach(thread_backend(x), t -> _rotate_tile!(tile_parent(x, t), tile_parent(y, t), rng, c, s),
-        eachindex(parent(x)); scheduler=:static)
-    return x, y
-end
-
-function LinearAlgebra.reflect!(x::ThreadedHaloArray, y::ThreadedHaloArray, c, s)
-    rng = interior_range(x)
-    tile_foreach(thread_backend(x), t -> _reflect_tile!(tile_parent(x, t), tile_parent(y, t), rng, c, s),
-        eachindex(parent(x)); scheduler=:static)
+    _foreach_tile(t -> _reflect_tile!(tile_parent(x, t), tile_parent(y, t), interior_range(x, t), c, s), x)
     return x, y
 end
 
