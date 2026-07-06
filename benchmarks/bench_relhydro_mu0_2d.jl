@@ -60,8 +60,8 @@ function rhs_flat!(du, u, dx, dy)
     fill!(du, 0.0)
     synchronize_halo!(u)
     r = FaceRanges(u)
-    accumulate_flux_divergence!(parent(du), parent(u), r, 1, inv(dx), (a, b) -> rusanov(a, b, 1), conserved_cell, add_conserved!)
-    accumulate_flux_divergence!(parent(du), parent(u), r, 2, inv(dy), (a, b) -> rusanov(a, b, 2), conserved_cell, add_conserved!)
+    accumulate_flux_divergence!(field_storages(du), field_storages(u), r, 1, inv(dx), (a, b) -> rusanov(a, b, 1), conserved_cell, add_conserved!)
+    accumulate_flux_divergence!(field_storages(du), field_storages(u), r, 2, inv(dy), (a, b) -> rusanov(a, b, 2), conserved_cell, add_conserved!)
     return du
 end
 

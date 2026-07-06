@@ -85,9 +85,9 @@ end
 function rel_rhs_serial!(du, u, eos, r_min, dr)
     synchronize_halo!(u)
     h = halo_width(u.N)
-    set_source_tile!(parent(du), parent(u), eos, interior_cells(CellRanges(u)),
+    set_source_tile!(field_storages(du), field_storages(u), eos, interior_cells(CellRanges(u)),
         I -> r_min + (I[1] - h - 0.5) * dr)
-    accumulate_flux_divergence!(parent(du), parent(u), FaceRanges(u), 1, inv(dr),
+    accumulate_flux_divergence!(field_storages(du), field_storages(u), FaceRanges(u), 1, inv(dr),
         (UL, UR) -> rusanov_flux(eos, UL, UR), conserved_cell, add_conserved!)
     return du
 end
