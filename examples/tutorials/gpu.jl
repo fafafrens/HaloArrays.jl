@@ -105,7 +105,10 @@ inv_dx2    = Float32((nx)^2)
 inv_dy2    = Float32((ny)^2)
 
 kernel!(parent(du_gpu), parent(u_gpu), inv_dx2, inv_dy2; ndrange=launch_size)
-KA.synchronize(backend)
+KA.synchronize(backend)     # sync because the HOST reads the result next.
+# Rule of thumb: launches on one backend queue run in order, so kernels that
+# feed each other need no sync in between — synchronize only before the host
+# reads device data (skipping the intermediate syncs is ~2x on Metal).
 
 du_cpu = Array(interior_view(du_gpu))
 println("max |Δu|  : ", maximum(abs, du_cpu))   # near 0 for constant field
@@ -188,8 +191,7 @@ ranges    = CellRanges(u_gpu)
 kern_cb!  = checkerboard_kernel!(backend, (16, 16))
 
 for color in 0:1
-    synchronize_halo!(u_gpu)
-    KA.synchronize(backend)
+    synchronize_halo!(u_gpu)   # ghost broadcasts share the queue: ordered, no sync
 
     region_c = interior_cell_window(ranges, color; compressed_dim=2)
     println("color=$color  launch size : ", region_c.size)
@@ -197,8 +199,8 @@ for color in 0:1
     any(==(0), region_c.size) && continue
 
     kern_cb!(parent(u_gpu), region_c; ndrange=region_c.size)
-    KA.synchronize(backend)
 end
+KA.synchronize(backend)        # once, after both colors
 
 # ============================================================
 # 5. FaceWindow — FINITE-VOLUME FLUX KERNELS
@@ -311,16 +313,15 @@ function run_heat_gpu(; n=(128,128), alpha=1.0f0, nt=200, cfl=0.4f0, groupsize=(
 
     cur, nxt = u, u_nxt
     for _ in 1:nt
+        # halo refresh, rhs and update are chained on the backend queue — no
+        # host sync inside the time loop.
         synchronize_halo!(cur)
-        KA.synchronize(bk)
-
         rhs_k!(parent(du), parent(cur), region, inv_dx2, inv_dy2; ndrange=region.size)
         step_k!(parent(nxt), parent(cur), parent(du), region, dt; ndrange=region.size)
-        KA.synchronize(bk)
-
         cur, nxt = nxt, cur
     end
     synchronize_halo!(cur)
+    KA.synchronize(bk)         # the host reads the result below
 
     # Bring a slice back to CPU for inspection
     result_cpu = Array(interior_view(cur))

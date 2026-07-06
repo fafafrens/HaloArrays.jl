@@ -151,8 +151,9 @@ function phi4_sweep!(kernel!, backend, phi, params, buffers::RandomBuffers)
 
     for color in 0:1
         # Before updating one color, halos must reflect the current opposite color.
+        # Ghost-fill broadcasts, Metal.rand! and the kernel all share the backend
+        # queue, so they execute in order — no host sync needed inside the sweep.
         synchronize_halo!(phi)
-        KA.synchronize(backend)
 
         region = interior_cell_window(ranges, color; compressed_dim = 2)
         #any(==(0), region.size) && continue
@@ -167,10 +168,10 @@ function phi4_sweep!(kernel!, backend, phi, params, buffers::RandomBuffers)
             params;
             ndrange = region.size,
         )
-
-        KA.synchronize(backend)
     end
 
+    # One sync per sweep: the sweep returns with device work complete, so
+    # callers may read observables on the host.
     synchronize_halo!(phi)
     KA.synchronize(backend)
 

@@ -315,9 +315,11 @@ function su2_wilson_sweep!(
     )
     ranges = CellRanges(U)
 
+    # Ghost-fill broadcasts and kernels share the backend queue, so each color's
+    # halo refresh is ordered before its kernel without a host sync in between;
+    # one synchronize at the end of the sweep is enough.
     for color in 0:1
         synchronize_halo!(U)
-        KA.synchronize(backend)
 
         region = interior_cell_window(ranges, color; compressed_dim = 2)
         any(iszero, region.size) && continue
@@ -332,13 +334,10 @@ function su2_wilson_sweep!(
             UInt32(color);
             ndrange = region.size,
         )
-
-        KA.synchronize(backend)
     end
 
     for color in 0:1
         synchronize_halo!(U)
-        KA.synchronize(backend)
 
         region = interior_cell_window(ranges, color; compressed_dim = 2)
         any(iszero, region.size) && continue
@@ -353,10 +352,9 @@ function su2_wilson_sweep!(
             UInt32(color);
             ndrange = region.size,
         )
-
-        KA.synchronize(backend)
     end
 
+    # Sweep returns with device work complete, so callers may read observables.
     synchronize_halo!(U)
     KA.synchronize(backend)
 
