@@ -79,15 +79,17 @@ function heat_step!(kernels, u_next, du, u, alpha, dt, dx)
     cell_region = interior_cell_window(CellRanges(u))
     ranges = FaceRanges(u)
 
+    # Launches on the same backend queue execute in order, so the zero → flux
+    # colors → update dependency chain needs no host sync in between; one
+    # synchronize at the end of the step is enough (measured 2x on Metal, where
+    # a per-launch sync costs more than the kernel itself at these sizes).
     launch_cell_kernel!(zero!, parent(du), cell_region)
-    KA.synchronize(backend)
 
     for dim in 1:2
         scale = Float32(alpha / dx[dim]^2)
         for color in 0:1
             region = interior_face_window(ranges, dim, color)
             launch_face_kernel!(flux!, parent(du), parent(u), region, scale)
-            KA.synchronize(backend)
         end
     end
 
@@ -117,8 +119,7 @@ function solve!(u; alpha, dt, dx, steps)
     du = similar(u)
 
     for _ in 1:steps
-        synchronize_halo!(current)
-        KA.synchronize(backend)
+        synchronize_halo!(current)   # ghost broadcasts share the backend queue: ordered
         heat_step!(kernels, next, du, current, alpha, dt, dx)
         current, next = next, current
     end
