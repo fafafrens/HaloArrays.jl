@@ -224,6 +224,18 @@ of CG / BiCGStab / GMRES (reimplemented from the standard algorithms, not copied
 from Krylov.jl). It works on any vector type with `similar`, `copy`,
 broadcasting, `dot`, `norm`, and `mul!` — plain arrays or any HaloArray backend.
 
+`poisson/cg_fused.jl` is the performance counterpoint: the same CG with its six
+per-iteration array sweeps fused into three (the `p·Ap` inner product computed
+inside the stencil sweep; `x`/`r` updates and `‖r‖²` in one pass per tile).
+Fewer memory sweeps and half the task barriers make the threaded backend the
+fastest configuration (1.3–1.4× reproducibly on a laptop at 1024², up to 3×
+when thread placement punishes the unfused version); the script self-checks
+that both solvers agree.
+
+```bash
+julia --project=. -t 4 examples/poisson/cg_fused.jl
+```
+
 ## Notes
 
 - If the machine has fewer cores than MPI ranks, add `--oversubscribe` to

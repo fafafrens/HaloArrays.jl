@@ -13,7 +13,8 @@ using HaloArrays
 # listed. Deliberately excluded:
 #   - MPI scripts          (need `mpiexec -n …`; covered by the MPI CI job)
 #   - Metal / KernelAbstractions GPU scripts
-#   - poisson/*            (needs SciMLOperators, not a test dependency)
+#   - poisson/operator.jl and poisson/mpi.jl (need SciMLOperators, not a test
+#     dependency; poisson/cg_fused.jl has no such dependency and IS run)
 #
 # Gated by HALOARRAYS_RUN_EXAMPLE_TESTS (see runtests.jl); the dedicated CI job
 # runs it with JULIA_NUM_THREADS=2 so the threaded examples exercise >1 tile.
@@ -41,6 +42,7 @@ const SMOKE_EXAMPLES = [
     "hydro/threaded_2d.jl",
     "lattice/scalar_local_threaded_2d.jl",
     "lattice/su2_wilson_local_threaded_2d.jl",
+    "poisson/cg_fused.jl",   # self-checking: errors if fused CG != textbook CG
     "tutorials/local.jl",
     "tutorials/broadcast.jl",
     "tutorials/threaded.jl",

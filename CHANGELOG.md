@@ -4,6 +4,35 @@ All notable changes to HaloArrays.jl are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **`examples/poisson/cg_fused.jl`** — the performance counterpoint to the
+  coordinate-free Krylov solvers: the same CG with its six per-iteration array
+  sweeps fused into three (`p·Ap` accumulated inside the stencil sweep; the
+  `x`/`r` updates and `‖r‖²` in one pass per tile). Fewer sweeps and half the
+  task barriers make the threaded backend the fastest configuration (1.3–1.4×
+  reproducibly on a laptop at 1024², more when thread placement punishes the
+  unfused version); one `Allreduce` hook keeps it MPI-correct, and the script
+  self-checks against the textbook `cg!`. Runs in the CI smoke tests.
+
+### Changed
+- **GPU examples synchronize once per sweep/step instead of after every kernel
+  launch** (`heat/cpu_vs_gpu_2d.jl`, `tutorials/gpu.jl`, both `phi4_metal` and
+  `su2_wilson_metal`): launches on one backend queue execute in order, so only
+  the host-read boundary needs a sync — measured 2× on an M2 GPU, bit-identical
+  results. The GPU tutorial now teaches the rule.
+- `benchmark/stencil.jl` tiles along the last dimension (`dims=(1,nt)`), the
+  layout the `ThreadedHaloArray` docstring recommends (its threaded halo
+  refresh measures ~3.7× cheaper than the first-dimension split).
+
+### Fixed
+- **Three examples never ran their simulation**: `relativistic_hydro_mu0_2d`,
+  `mu0_3d` and `Tmu_3d` had the driver call commented out, so the CI smoke
+  tests only checked that they parse. The drivers auto-run again.
+- The examples environment could not resolve against HaloArrays 0.3.0
+  (`examples/Project.toml` required DiffEqBase 7; the package compat says 6).
+
 ## [0.3.0]
 
 ### Changed (breaking)
