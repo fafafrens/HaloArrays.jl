@@ -32,6 +32,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `unit_vector`; `gather_hdf5.jl` now loads the HDF5 weak dependency it
   needs), and every script was smoke-run (serial, threaded, 2-rank MPI, and
   Metal).
+- **New `benchmark/checkerboard_inout.jl`** compares a checkerboard stencil
+  sweep in-place vs out-of-place vs a single-pass Jacobi, on both CPU and Metal:
+  the single-pass update is ~2–3× faster than the two-pass red-black sweep on
+  both backends (one launch vs two on the GPU; contiguous SIMD vs stride-2
+  access on the CPU), quantifying the cost of the coloring that in-place
+  updates require.
+- **Docs: a "Choosing between OhMyThreads and Polyester" section** in the guide,
+  with the measured guidance (default OhMyThreads for coarse per-tile work;
+  `PolyesterBackend` for many thin per-tile ops, where its `@batch` pool avoids
+  the task-spawn cost — measurably faster and near-allocation-free).
 
 ### Fixed
 - **Three examples never ran their simulation**: `relativistic_hydro_mu0_2d`,

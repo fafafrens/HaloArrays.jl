@@ -213,6 +213,36 @@ compressed launch is ~1.24× faster than the naive full launch with a parity
 branch. The hardcoded manual kernels are ~0.9× (slightly slower), confirming
 the generic helper path is competitive.
 
+## Checkerboard: in-place vs out-of-place
+
+Measures the cost of the red-black coloring in a checkerboard stencil sweep, on
+both the CPU (plain loops) and the Metal GPU (KernelAbstractions). Three ways to
+do one full-grid update:
+
+- `inplace` — two colored passes, read+write the same array (red-black
+  Gauss-Seidel; the coloring is what makes the in-place update race-free);
+- `outplace` — two colored passes, read `u` write `un` (still two passes);
+- `jacobi` — one pass over the whole grid, read `u` write `un` (out-of-place
+  needs no coloring, so the update is a single pass/launch).
+
+```sh
+julia --project=benchmark -t 8 benchmark/checkerboard_inout.jl --sizes=256,512,1024,2048
+julia --project=examples  -t 8 benchmark/checkerboard_inout.jl --sizes=256,512,1024,2048   # also runs Metal
+```
+
+The CPU path always runs; the Metal variants run only if Metal loads (so
+`--project=examples` measures both backends, `--project=benchmark` the CPU).
+
+Reference (Apple M-series; Mcell/s, speedup vs in-place): the **single-pass
+Jacobi is ~2-3× faster than the two-pass checkerboard on both backends** — on
+the GPU because it is one kernel launch instead of two (launch latency dominates
+small GPU workloads), on the CPU because a contiguous `@simd` pass replaces the
+checkerboard's stride-2 access (which defeats vectorization). It shows on the CPU
+even single-threaded, so it is the access pattern, not thread overhead. In-place
+vs out-of-place at the same two-pass structure is within noise (~0.9×): the
+coloring is the cost, not the aliasing. The trade is Jacobi's slower
+per-iteration convergence and 2× the memory.
+
 ## Threaded Synchronization Variants
 
 Compares benchmark-only implementations of threaded halo synchronization:

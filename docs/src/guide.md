@@ -242,6 +242,34 @@ The backend is part of the array's concrete type (compile-time dispatch) and
 propagates through `similar`, broadcast, and reductions. Add your own by defining
 [`tile_foreach`](@ref) and [`tile_mapreduce`](@ref) for a new `<:ThreadBackend`.
 
+### Choosing between OhMyThreads and Polyester
+
+Both parallelize the same per-tile work; they differ in the fixed cost paid per
+operation. `OhMyThreadsBackend` spawns tasks (a few KB and tens of microseconds
+per call) but composes freely — it nests inside other threaded regions and sits
+under schedulers. `PolyesterBackend`'s `@batch` draws from a persistent worker
+pool instead, so it allocates roughly an order of magnitude less and has lower
+per-call overhead — at the cost of not nesting (never put a `@batch` region
+inside another threaded region).
+
+Which one wins depends on how much work each threaded call does:
+
+- **Coarse-grained work** — a full stencil sweep, an RHS evaluation, anything
+  with real arithmetic per tile — amortizes the spawn cost either way, so the
+  default `OhMyThreadsBackend` is the right choice (and the only one that nests
+  and composes with GPU kernels).
+- **Many small per-tile operations** — `fill!`, broadcasts, boundary fills, the
+  halo sync — can spend more time spawning than computing. On these,
+  `PolyesterBackend` is measurably faster and near-allocation-free. If your
+  workload is dominated by thin BLAS-1-style updates (for example a Krylov
+  solver), it is worth trying `thread_backend=PolyesterBackend()`.
+
+`benchmark/thread_backends.jl` measures both (and `SerialBackend`) on exactly
+these operations, so you can check the trade-off on your own machine and problem
+size. As a rule, though, no threaded backend helps a purely memory-bandwidth-
+bound kernel scale past the machine's memory bandwidth — the backend choice only
+changes the *fixed* per-call overhead, not the bandwidth ceiling.
+
 ## Face loops
 
 [`FaceRanges`](@ref)`(u)` gives the index ranges for finite-volume face updates,
