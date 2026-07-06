@@ -48,7 +48,7 @@ end
 
 function run_threaded(n)
     nt   = Threads.nthreads()
-    dims = (nt, 1)
+    dims = (1, nt)   # split along the last dim: keeps dim 1 contiguous (see docs tip)
     all(n .% dims .== 0) || return
     tile = (n[1] ÷ dims[1], n[2] ÷ dims[2])
     u  = ThreadedHaloArray(Float64, tile, 1; dims, boundary_condition=:periodic)
