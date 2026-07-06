@@ -1,7 +1,7 @@
 # ============================================================
 # Benchmark: serial vs threaded cylindrical relativistic hydro RHS+step
 #
-#   for t in 1 2 4 8; do julia -t $t --project benchmarks/bench_cylindrical_threaded.jl; done
+#   for t in 1 2 4 8; do julia -t $t --project benchmark/bench_cylindrical_threaded.jl; done
 #
 # Times the SSP-RK2 step (synchronize + geometric source + Rusanov flux) of the
 # (N,M,E) ultrarelativistic cylindrical blast, for a serial LocalHaloArray state

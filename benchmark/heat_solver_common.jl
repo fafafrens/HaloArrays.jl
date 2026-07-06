@@ -63,7 +63,7 @@ end
 function heat_step!(dest::Union{HaloArray{T,N},LocalHaloArray{T,N}},
         src::Union{HaloArray{S,N},LocalHaloArray{S,N}}, alpha, dt, dx) where {T,S,N}
     dxs = _as_tuple(dx, N)
-    offsets = CartesianIndex.(versors(Val(N)))
+    offsets = unit_vector(Val(N))
     src_data = parent(src)
     dest_data = parent(dest)
     _heat_step_data!(dest_data, src_data, alpha, dt, dxs, offsets, interior_range(src), Val(N))
@@ -73,7 +73,7 @@ end
 
 function heat_step!(dest::ThreadedHaloArray{T,N}, src::ThreadedHaloArray{S,N}, alpha, dt, dx) where {T,S,N}
     dxs = _as_tuple(dx, N)
-    offsets = CartesianIndex.(versors(Val(N)))
+    offsets = unit_vector(Val(N))
     range = interior_range(src)
     src_tiles = parent(src)
     dest_tiles = parent(dest)

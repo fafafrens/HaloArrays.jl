@@ -21,7 +21,7 @@ end
 
 function threaded_stencil_step!(dest::ThreadedHaloArray{T,N}, src::ThreadedHaloArray{T,N}) where {T,N}
     synchronize_halo!(src)
-    offsets = CartesianIndex.(versors(Val(N)))
+    offsets = unit_vector(Val(N))
     range = interior_range(src)
 
     @tasks for tile_id in 1:tile_count(src)

@@ -1,4 +1,5 @@
 include("common.jl")
+using HDF5   # HDF5 is a weak dependency: loading it activates the I/O extension
 
 function remove_output!(base, comm)
     if MPI.Comm_rank(comm) == 0

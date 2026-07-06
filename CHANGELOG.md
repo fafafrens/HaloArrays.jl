@@ -25,6 +25,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `benchmark/stencil.jl` tiles along the last dimension (`dims=(1,nt)`), the
   layout the `ThreadedHaloArray` docstring recommends (its threaded halo
   refresh measures ~3.7× cheaper than the first-dimension split).
+- **The two benchmark directories are unified into `benchmark/`** (the Julia
+  convention): the quick-start throughput harnesses and the former
+  `benchmarks/` CLI micro-suite now live together under one environment and
+  one README. The micro-suite was brought up to the 0.3.0 API (`versors` →
+  `unit_vector`; `gather_hdf5.jl` now loads the HDF5 weak dependency it
+  needs), and every script was smoke-run (serial, threaded, 2-rank MPI, and
+  Metal).
 
 ### Fixed
 - **Three examples never ran their simulation**: `relativistic_hydro_mu0_2d`,

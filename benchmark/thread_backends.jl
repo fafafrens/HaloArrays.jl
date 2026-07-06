@@ -7,7 +7,7 @@ using Base.Threads: nthreads
 # the trait (tile_foreach / tile_mapreduce dispatched on thread_backend(u)):
 # synchronize, boundary condition, fill!, mapreduce, and broadcast. Run with
 # several Julia threads to see the difference, e.g.
-#   julia --project=. -t 4 benchmarks/thread_backends.jl --tile-dims=4,1
+#   julia --project=. -t 4 benchmark/thread_backends.jl --tile-dims=4,1
 
 const _BACKENDS = Dict{Symbol,Any}(
     :ohmythreads => OhMyThreadsBackend(),

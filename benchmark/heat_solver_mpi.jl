@@ -33,7 +33,7 @@ function main()
     rank = MPI.Comm_rank(comm)
     nproc = MPI.Comm_size(comm)
     if nproc == 1
-        error("benchmarks/heat_solver_mpi.jl is an MPI benchmark; run it with mpiexec -n N where N > 1. Use benchmarks/heat_solver_local_threaded.jl for single-process local/threaded comparisons.")
+        error("benchmark/heat_solver_mpi.jl is an MPI benchmark; run it with mpiexec -n N where N > 1. Use benchmark/heat_solver_local_threaded.jl for single-process local/threaded comparisons.")
     end
 
     options = parse_args()

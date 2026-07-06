@@ -122,7 +122,7 @@ println("tile_count on ArrayOfHaloArray: ", tile_count(vel))
 # serial version winning by 7–25×, and allocating nothing.  Reach for
 # synchronize_halo_threads! only when the exchange is genuinely large
 # (3-D domains, wide halos, many tiles).  See
-# benchmarks/threaded_sync_variants.jl.
+# benchmark/threaded_sync_variants.jl.
 
 println()
 println("=" ^ 60)

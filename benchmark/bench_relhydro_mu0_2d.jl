@@ -1,9 +1,9 @@
 # ============================================================
 # Benchmark: 2-D μ=0 conformal relativistic hydro step — serial / threaded / MPI
 #
-#   julia -t 1 --project benchmarks/bench_relhydro_mu0_2d.jl        # serial baseline
-#   julia -t 8 --project benchmarks/bench_relhydro_mu0_2d.jl        # serial vs threaded
-#   mpiexec -n 8 julia --project benchmarks/bench_relhydro_mu0_2d.jl # serial vs MPI
+#   julia -t 1 --project benchmark/bench_relhydro_mu0_2d.jl        # serial baseline
+#   julia -t 8 --project benchmark/bench_relhydro_mu0_2d.jl        # serial vs threaded
+#   mpiexec -n 8 julia --project benchmark/bench_relhydro_mu0_2d.jl # serial vs MPI
 #
 # Conformal (Stefan–Boltzmann, μ=0) gas, p=aT⁴, e=3p, c_s²=1/3, on a periodic
 # square. Conserved variables are the raw stress-energy components (Mx, My, E);

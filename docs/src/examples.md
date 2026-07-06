@@ -54,6 +54,8 @@ julia --project=. -e 'using Pkg; Pkg.test()'
 HALOARRAYS_RUN_UNIT_TESTS=false mpiexec -n 4 julia --project=. test/runtests.jl
 ```
 
-Benchmarks live in [`benchmarks/`](https://github.com/fafafrens/HaloArrays.jl/tree/main/benchmarks)
-(halo exchange, boundary conditions, reductions, gather/HDF5, heat solvers,
-threaded synchronization, thread backends) — see its `README.md`.
+Benchmarks live in [`benchmark/`](https://github.com/fafafrens/HaloArrays.jl/tree/main/benchmark):
+two quick-start throughput harnesses (stencil Mcell/s, MPI exchange/overlap)
+plus a CLI micro-suite (halo exchange, boundary conditions, reductions,
+gather/HDF5, heat solvers, threaded synchronization, thread backends) — see its
+`README.md`.
