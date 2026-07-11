@@ -119,7 +119,10 @@ using LinearAlgebra: dot, norm
     @test all(x -> x > 0, threaded_array_fields)
     @test any(x -> x == 60, threaded_array_fields)
 
-    @test mapreduce(identity, +, threaded_u; dims=1)[] == 21
+    # Reducing along every dimension via dims= is rejected on all backends
+    # (use the scalar reduction); the sum itself is the no-dims form.
+    @test_throws ArgumentError mapreduce(identity, +, threaded_u; dims=1)
+    @test sum(threaded_u) == 21
 
     @testset "tile_mapreduce (cross-tile combine)" begin
         # The per-tile results are combined with `op` via the backend's

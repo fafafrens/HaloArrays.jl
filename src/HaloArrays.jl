@@ -135,6 +135,9 @@ export halo_exchange!,
 
 # Reductions and gather
 export mapreduce_haloarray_dims,
+    DimReductionPlan,
+    reduce!,
+    free!,
     gather_haloarray
 
 # Maybe helpers

@@ -7,6 +7,46 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`DimReductionPlan` / `reduce!` / `free!`** — a reusable dimensional
+  reduction for distributed `HaloArray`s. `mapreduce_haloarray_dims` used to
+  pay two `MPI.Comm_split` collectives plus a `Cart_create` on *every* call
+  and leak the communicators embedded in the returned topology (repeated
+  calls — e.g. saving a profile each step — eventually exhaust MPI context
+  ids). The plan builds the slice and root communicators once with
+  `MPI.Cart_sub` (the purpose-built sub-grid call, replacing the hand-rolled
+  color/key splits), preallocates the reduced output array, and each
+  `reduce!(plan, f, op, u)` then costs a single `MPI.Reduce` — build it once
+  outside a hot loop, `free!(plan)` when done. The plan is geometry-only, so
+  one plan serves any `f`/`op` over arrays sharing the topology and interior
+  size. `benchmark/reduction_plan.jl` measures plan reuse against the one-shot
+  path (3.5–3.8× per call at 4 ranks).
+- **`sum(u; dims=…)` (and `prod`/`maximum`/`minimum`/`mapreduce`) now work on a
+  distributed `HaloArray`** instead of throwing: the `dims=` keyword runs a
+  transient `DimReductionPlan` — built, used, and released within the call —
+  and returns a fresh reduced array each time, with the reduced dimensions
+  dropped, on the coordinate-0 slice of the topology (a `MaybeHaloArray`),
+  matching `mapreduce_haloarray_dims` semantics rather than Base's
+  kept-singleton-dims shape. **The result owns its sub-communicator**:
+  `free!(result)` releases it (optional; reclaimed at `MPI.Finalize`), keeping
+  communicator use bounded when reducing in a loop. `mapfoldl`/`mapfoldr` with
+  `dims=` still throw (a cross-rank slice reduction reorders the fold), and
+  `init=` is rejected (it would be folded in once per rank).
+- **`dims=` reductions are backend-preserving**: `LocalHaloArray` returns a
+  reduced `LocalHaloArray`; `ThreadedHaloArray` returns a reduced
+  `ThreadedHaloArray` whose tile layout is the original layout with the
+  reduced dimensions dropped (same thread backend — and the assembly runs in
+  parallel over the reduced tiles through it, race-free since each task owns
+  one output tile); collections
+  (`MultiHaloArray`, `ArrayOfHaloArray`, any backend) reduce every field and
+  rebuild the same collection kind. Only the distributed backend wraps in
+  `MaybeHaloArray` — the one case where the result may be absent on a rank.
+  `is_active`/`interior_view`/`free!` behave uniformly on all of them
+  (`interior_view` now passes through `MaybeHaloArray`, active-guarded;
+  `free!` is a safe no-op on serial results), so backend-generic code needs
+  no branches. `mapreduce_haloarray_dims` gained the matching methods (and
+  `mapreduce_mhaloarray_dims` now covers both collection kinds through it).
+  Breaking detail: `mapreduce(f, op, u::LocalHaloArray; dims)` previously
+  leaked Base's semantics (a plain `Array` with kept singleton dims).
 - **`examples/poisson/cg_fused.jl`** — the performance counterpoint to the
   coordinate-free Krylov solvers: the same CG with its six per-iteration array
   sweeps fused into three (`p·Ap` accumulated inside the stencil sweep; the
@@ -16,7 +56,38 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unfused version); one `Allreduce` hook keeps it MPI-correct, and the script
   self-checks against the textbook `cg!`. Runs in the CI smoke tests.
 
+- **`DimReductionPlan` is backend-generic**: `DimReductionPlan(u, dims)` +
+  `reduce!` + `free!` now compile and run unchanged on `LocalHaloArray` and
+  `ThreadedHaloArray` too (a lightweight serial plan holding the preallocated
+  reduced output; `free!` is a no-op and the plan stays usable), so hot-loop
+  code that hoists a plan is write-once across backends. A plan's output
+  element type is fixed at construction — `eltype(u)` unless overridden with
+  the new `output_eltype` keyword — and promoting reductions against it throw
+  a descriptive `ArgumentError` instead of an `InexactError`/MPI type
+  mismatch. The one-shot forms are now literally transient plans (built with
+  the `Base.promote_op`-predicted element type, one `reduce!`, released), so
+  they promote like Base on **every** backend: `sum(::Bool array; dims=…)`
+  counts in `Int` on Local, Threaded, and MPI alike. `reduce!` also
+  normalizes `Base.add_sum`/`mul_prod` itself, so driving a plan with Base's
+  internal reducers works on non-Intel MPI just like the keyword forms.
+
 ### Changed
+- **`mapreduce_haloarray_dims` is reimplemented over the transient
+  `DimReductionPlan`** (identical results and return type): communicator
+  construction drops from two `Comm_split`s plus a `Cart_create` to two
+  `Cart_sub`s, the reduce-side communicator is freed within the call instead
+  of leaking, and the one remaining communicator is owned by the returned
+  array (`free!`-able, see above). The internal `subcomm_for_slices`,
+  `root_topology_multi`, and `coords_to_color_multi` helpers this replaced
+  are removed.
+- The scalar (no-`dims`) `mapreduce` path normalizes `Base.add_sum`/
+  `Base.mul_prod` to `+`/`*` before building the `MPI.Op`, so the builtin
+  `MPI_SUM`/`MPI_PROD` apply — required on non-Intel architectures, where
+  MPI.jl cannot register custom reduction operators (previously
+  `sum(u; dims=:)` errored there).
+- `CartesianTopology` prints compactly (`dims`/`coords`/`periodic`) instead of
+  dumping raw communicator handles and neighbor tables into every `HaloArray`
+  display.
 - **GPU examples synchronize once per sweep/step instead of after every kernel
   launch** (`heat/cpu_vs_gpu_2d.jl`, `tutorials/gpu.jl`, both `phi4_metal` and
   `su2_wilson_metal`): launches on one backend queue execute in order, so only
@@ -44,6 +115,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the task-spawn cost — measurably faster and near-allocation-free).
 
 ### Fixed
+- **`ThreadedHaloArray` dims-reductions returned silently wrong values**: the
+  generic tile driver combined the per-tile reduced arrays with `op` across
+  *all* tiles — elementwise-mixing tiles that lie along kept dimensions (e.g.
+  column sums over a `(2,1)` tiling summed the two tile halves together). The
+  tiled backend now reduces each tile and assembles: tiles along removed
+  dimensions combine with `op`, tiles along kept dimensions land at their
+  global offset. `mapfoldl`/`mapfoldr` with `dims=` on a tiled array throw
+  instead of going through the same broken combine.
 - **Three examples never ran their simulation**: `relativistic_hydro_mu0_2d`,
   `mu0_3d` and `Tmu_3d` had the driver call commented out, so the CI smoke
   tests only checked that they parse. The drivers auto-run again.

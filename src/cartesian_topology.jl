@@ -28,6 +28,14 @@ struct CartesianTopology{N,C} <: AbstractCartesianTopology{N}
     active::Bool
 end
 
+# Compact show: the default struct printer dumps raw communicator handles and
+# neighbor tables into every HaloArray display.
+function Base.show(io::IO, t::CartesianTopology)
+    print(io, "CartesianTopology{", ndims(t), "}(dims=", t.dims,
+          ", coords=", t.cart_coords, ", periodic=", t.periodic_boundary_condition,
+          is_active(t) ? "" : ", inactive", ")")
+end
+
 """
     is_active(cart::CartesianTopology)
 
@@ -43,22 +51,3 @@ Return `true` on the root rank (default 0) of an active topology.
 """
 is_root(cart::CartesianTopology; root::Integer=0) =
     is_active(cart) && cart.global_rank == root
-
-"""
-    coords_to_color_multi(coords, dims, dims_to_remove) -> Int
-
-Compute an integer color for MPI.Comm_split by compressing coordinates
-that are NOT in `dims_to_remove`.
-"""
-function coords_to_color_multi(coords::NTuple{N,Int}, dims::NTuple{N,Int},
-        dims_to_remove) where {N}
-    tuple_dims_to_remove = Tuple(dims_to_remove)
-    rem = (i for i in 1:N if !(i in tuple_dims_to_remove))
-    color = 0
-    mul = 1
-    for i in rem
-        color += coords[i] * mul
-        mul *= dims[i]
-    end
-    return color
-end

@@ -43,6 +43,15 @@ Base.length(m::MaybeHaloArray) = m.active ? length(m.data) : 0
 Base.eachindex(m::MaybeHaloArray{T,N,A}) where {T,N,A} =
     is_active(m) ? eachindex(m.data) : CartesianIndices(ntuple(_ -> 1:0, Val(N)))
 
+# The interior accessors pass through (guarded like getindex), so consumers of
+# a reduced result never unwrap: `is_active(r) && interior_view(r)` works
+# whether `r` is a bare serial array or a Maybe-wrapped distributed one.
+function interior_view(m::MaybeHaloArray, args...)
+    is_active(m) || throw(ErrorException("MaybeHaloArray: attempt to view inactive value"))
+    return interior_view(m.data, args...)
+end
+interior_range(m::MaybeHaloArray, args...) = interior_range(m.data, args...)
+
 function Base.getindex(m::MaybeHaloArray, I::Vararg{Integer})
     is_active(m) || throw(ErrorException("MaybeHaloArray: attempt to index inactive value"))
     return getindex(m.data, I...)
@@ -68,6 +77,7 @@ is_root(m::MaybeHaloArray; root::Integer=0) =
     is_active(m) && is_root(getdata(m); root=root)
 halo_backend(m::MaybeHaloArray) = halo_backend(getdata(m))
 getdata(m::MaybeHaloArray) = m.data
+getdata(x::AbstractHaloArray) = x   # identity on bare arrays: unwrap uniformly
 active(x::AbstractHaloArray)   = MaybeHaloArray(x, true)
 inactive(x::AbstractHaloArray) = MaybeHaloArray(x, false)
 

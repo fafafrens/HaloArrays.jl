@@ -77,39 +77,6 @@ function CartesianTopology(comm::MPI.Comm, n_dimension::Integer;
     CartesianTopology(comm, ntuple(_ -> 0, Int(n_dimension)); periodic=periodic, active=active)
 end
 
-# ---- sub-communicator helpers -----------------------------------------
-
-function subcomm_for_slices(cart::CartesianTopology{N}, dims_to_reduce) where {N}
-    coords = cart.cart_coords
-    tuple_dims_to_reduce = Tuple(dims_to_reduce)
-    color = coords_to_color_multi(coords, cart.dims, tuple_dims_to_reduce)
-    key = 0; mul = 1
-    for i in tuple_dims_to_reduce
-        key += coords[i] * mul
-        mul *= cart.dims[i]
-    end
-    sub_comm = MPI.Comm_split(cart.cart_comm, color, key)
-    subrank  = (sub_comm == MPI.COMM_NULL) ? MPI.PROC_NULL : MPI.Comm_rank(sub_comm)
-    return (sub_comm, coords, subrank)
-end
-
-function root_topology_multi(cart::CartesianTopology{N}, dims_to_reduce;
-        root_coord::Int=0) where {N}
-    coords = cart.cart_coords
-    tuple_dims_to_reduce = Tuple(dims_to_reduce)
-    is_root_rank = all(i -> coords[i] == root_coord, tuple_dims_to_reduce)
-    color = is_root_rank ? 0 : nothing
-    root_comm = MPI.Comm_split(cart.cart_comm, color, cart.global_rank)
-    rem = (i for i in 1:N if !(i in tuple_dims_to_reduce))
-    new_dims    = Tuple(cart.dims[i] for i in rem)
-    new_periods = Tuple(cart.periodic_boundary_condition[i] for i in rem)
-    if !is_root_rank || root_comm == MPI.COMM_NULL
-        return CartesianTopology(root_comm, new_dims; periodic=new_periods, active=false)
-    else
-        return CartesianTopology(root_comm, new_dims; periodic=new_periods, active=true)
-    end
-end
-
 # ============================================================
 # HaloArray construction
 # ============================================================
@@ -420,22 +387,43 @@ end
 # Reductions
 # ============================================================
 
-for (func, commutative) in [:mapreduce => true, :mapfoldl => false, :mapfoldr => false]
+# `mapreduce` (and through it `sum`/`prod`/`maximum`/`minimum`) supports the
+# `dims=` keyword: it runs a transient `DimReductionPlan` (built, used, and
+# released within the call) and returns a fresh reduced array every time. The
+# result has the reduced dimensions DROPPED and lives on the coordinate-0 slice
+# of the topology (a `MaybeHaloArray`, inactive elsewhere) — same semantics as
+# `mapreduce_haloarray_dims`, unlike Base's kept-singleton-dims shape. The
+# result owns its sub-communicator: `free!` it when reducing in a loop.
+function Base.mapreduce(
+        f::F, op::OP, halo::HaloArray, etc::Vararg{HaloArray}; kws...,
+    ) where {F<:Function,OP}
+    dims = _dims_kwarg(kws, 1 + length(etc))
+    dims === nothing || return mapreduce_haloarray_dims(f, op, halo, dims)
+    comm   = communicator(halo)
+    rlocal = _local_mapreduce(mapreduce, f, op, (halo, etc...); kws...)  # shared local part
+    # Normalize AFTER the local part (add_sum's integer widening already
+    # happened in rlocal): the builtin MPI_SUM/MPI_PROD then applies — required
+    # on non-Intel, where MPI.jl cannot register custom reduction ops.
+    op_mpi = MPI.Op(_normalize_reduction_op(op), typeof(rlocal); iscommutative=true)
+    MPI.Allreduce(rlocal, op_mpi, comm)
+end
+
+for func in (:mapfoldl, :mapfoldr)
     @eval function Base.$func(
             f::F, op::OP, halo::HaloArray, etc::Vararg{HaloArray}; kws...,
         ) where {F<:Function,OP}
         :dims in keys(kws) && throw(ArgumentError(
-            "Dimensional reduction with `dims=` is not supported on a distributed " *
-            "HaloArray through mapreduce/sum/maximum/minimum: it would combine the " *
-            "wrong cells across MPI ranks (a global per-slice reduction needs " *
-            "sub-communicators). Use `mapreduce_haloarray_dims(f, op, halo, dims)`, " *
-            "which returns the reduced array on its sub-topology."))
+            "`$($(string(func)))` with `dims=` is not supported on a distributed HaloArray: " *
+            "a per-slice reduction across ranks reorders the fold. Use `mapreduce`/`sum`/… " *
+            "with `dims=` (commutative ops only)."))
         comm   = communicator(halo)
         rlocal = _local_mapreduce($func, f, op, (halo, etc...); kws...)  # shared local part
-        op_mpi = MPI.Op(op, typeof(rlocal); iscommutative=$commutative)
+        op_mpi = MPI.Op(op, typeof(rlocal); iscommutative=false)
         MPI.Allreduce(rlocal, op_mpi, comm)
     end
+end
 
+for func in (:mapreduce, :mapfoldl, :mapfoldr)
     @eval function Base.$func(
             f::F, op::OP, z::Iterators.Zip{<:Tuple{HaloArray,Vararg{HaloArray}}}; kws...,
         ) where {F<:Function,OP}
@@ -443,6 +431,13 @@ for (func, commutative) in [:mapreduce => true, :mapfoldl => false, :mapfoldr =>
         $func(g, op, z.is...; kws...)
     end
 end
+
+# Base's reduction kwargs arrive as its internal wrappers; unwrap them so
+# MPI.Op resolves to the builtin MPI_SUM/MPI_PROD instead of registering a
+# custom callback op on every call.
+@inline _normalize_reduction_op(op) = op
+@inline _normalize_reduction_op(::typeof(Base.add_sum)) = +
+@inline _normalize_reduction_op(::typeof(Base.mul_prod)) = *
 
 function Base.any(f::F, u::HaloArray) where {F<:Function}
     MPI.Allreduce(_local_any(f, u) :: Bool, |, communicator(u))
@@ -471,50 +466,191 @@ LinearAlgebra.norm(u::HaloArray) =
 Base.sum(u::HaloArray) =
     MPI.Allreduce(_local_sum(identity, u), +, communicator(u))
 
-"""
-    mapreduce_haloarray_dims(f, op, u, dims) -> HaloArray
+# mapreduce_haloarray_dims (all backends + collections) lives in reduction.jl.
 
-Map `f` over the interior cells of halo array `u` and reduce with `op` along the
-spatial dimensions in `dims`, returning a halo array of the reduced shape. For a
-distributed `HaloArray` the reduction is collective across the topology
-(combining partial results with `op` over the ranks that span the reduced
-dimensions), so the result is globally correct on every rank. This backs the
-`dims`-keyword forms of `sum`/`prod`/`maximum`/… on halo arrays.
-"""
-function mapreduce_haloarray_dims(f, op, ha::HaloArray{T,N,A,Halo}, dims) where {T,N,A,Halo}
-    topo           = ha.topology
-    root_coord     = 0
-    dims_to_remove = Tuple(dims)
-    dims_to_keep   = Tuple(i for i in 1:N if !(i in dims_to_remove))
-    M = length(dims_to_keep)
-    M == 0 && throw(ArgumentError("Reducing all dimensions to a scalar is not supported"))
 
-    (sub_comm, coords, subrank) = subcomm_for_slices(topo, dims_to_remove)
-    mpi_op      = MPI.Op(op, T; iscommutative=true)
-    local_value = dropdims(mapreduce(f, op, interior_view(ha), dims=dims_to_remove),
-                           dims=dims_to_remove)
-    sum_on_root = MPI.Reduce(local_value, mpi_op, sub_comm, root=root_coord)
+# ============================================================
+# DimReductionPlan — reusable dims-reduction over the topology
+#
+# The slice/root communicators are built once with `MPI.Cart_sub` (the
+# purpose-built call for extracting sub-grids from a Cartesian communicator —
+# no hand-rolled color/key splits), the reduced output array is preallocated,
+# and each `reduce!` costs a single `MPI.Reduce`. `free!` releases the
+# communicators deterministically. The one-shot forms (`sum(u; dims=…)`,
+# `mapreduce_haloarray_dims`) run a transient plan per call and transfer the
+# output — with its sub-communicator — to the caller; reusing a plan skips the
+# per-call communicator construction entirely.
+# ============================================================
 
-    root_topo    = root_topology_multi(topo, dims_to_remove; root_coord=root_coord)
-    new_boundary = ntuple(i -> ha.boundary_condition[dims_to_keep[i]], Val(M))
-    reduced_size = size(local_value)
-    new_ha = HaloArray(T, reduced_size, Halo, root_topo; boundary_condition=new_boundary)
-
-    is_active(root_topo) && (interior_view(new_ha) .= sum_on_root)
-    sub_comm != MPI.COMM_NULL && MPI.free(sub_comm)
-
-    return MaybeHaloArray(new_ha)
+# The MPI plan (see the `DimReductionPlan` docstring on the abstract type in
+# reduction.jl): sub-communicators built once, one MPI.Reduce per reduce!.
+struct MPIDimReductionPlan{K,N,Topo,B,O<:MaybeHaloArray} <: DimReductionPlan
+    dims_to_remove::NTuple{K,Int}
+    source_topology::Topo
+    source_interior_size::NTuple{N,Int}
+    reduce_comm::MPI.Comm       # Cart_sub over the removed dims (this rank's slice group)
+    is_slice_root::Bool         # this rank's coords are 0 along every removed dim
+    recv_buf::B                 # Reduce! target; interior-sized with singleton removed dims
+    output::O                   # preallocated reduced array (inactive off the root slice)
+    freed::Base.RefValue{Bool}
 end
 
-function mapreduce_mhaloarray_dims(f, op, mha::MultiHaloArray, dims)
-    names = keys(mha.arrays)
-    list_of_maybe = map_over_field(mha) do field
-        mapreduce_haloarray_dims(f, op, field, dims)
-    end
-    active_states = map(is_active, values(list_of_maybe))
-    if any(active_states) && !all(active_states)
-        error("Inconsistent active state across reduced MultiHaloArray fields")
-    end
-    nt = NamedTuple{names}(map(getdata, values(list_of_maybe)))
-    return MaybeHaloArray(MultiHaloArray(nt))
+# Validate and canonicalize a `dims` argument (Int, tuple, or iterable) into a
+# sorted duplicate-free tuple — the form the plan stores and the cache keys on.
+function _normalize_reduce_dims(::Val{N}, dims) where {N}
+    dims_t = Tuple(sort!(unique!(collect(Int, dims isa Integer ? (dims,) : dims))))
+    all(d -> 1 <= d <= N, dims_t) ||
+        throw(ArgumentError("dims $dims out of range for a $N-dimensional array"))
+    isempty(dims_t) && throw(ArgumentError("dims must select at least one dimension"))
+    length(dims_t) < N ||
+        throw(ArgumentError("Reducing all dimensions to a scalar is not supported; " *
+                            "use the no-dims reduction (`sum(u)`, `mapreduce(f, op, u)`, …)"))
+    return dims_t
 end
+
+DimReductionPlan(u::HaloArray, dims; kwargs...) = MPIDimReductionPlan(u, dims; kwargs...)
+
+function MPIDimReductionPlan(u::HaloArray{T,N,A,Halo}, dims;
+        output_eltype=T) where {T,N,A,Halo}
+    topo = u.topology
+    is_active(topo) ||
+        throw(ArgumentError("DimReductionPlan requires an active topology on every rank"))
+    dims_to_remove = _normalize_reduce_dims(Val(N), dims)
+    K = length(dims_to_remove)
+    dims_to_keep = Tuple(d for d in 1:N if !(d in dims_to_remove))
+    M = N - K
+
+    # One Cart_sub per role: the REDUCE comm spans the removed dims (each slice
+    # group reduces internally, root = sub-rank 0 = coords 0 along removed dims);
+    # the KEPT comm spans the kept dims (the topology the reduced array lives on).
+    reduce_comm = MPI.Cart_sub(topo.cart_comm, Cint[d in dims_to_remove for d in 1:N])
+    kept_comm   = MPI.Cart_sub(topo.cart_comm, Cint[d in dims_to_keep   for d in 1:N])
+
+    coords = topo.cart_coords
+    is_slice_root = all(d -> coords[d] == 0, dims_to_remove)
+
+    new_dims     = ntuple(i -> topo.dims[dims_to_keep[i]], Val(M))
+    new_periodic = ntuple(i -> topo.periodic_boundary_condition[dims_to_keep[i]], Val(M))
+    root_topo = if is_slice_root
+        # kept_comm is already Cartesian (Cart_sub keeps grid info), so build the
+        # topology from it directly — no extra Cart_create.
+        kept_rank   = MPI.Comm_rank(kept_comm)
+        kept_coords = Tuple(MPI.Cart_coords(kept_comm, kept_rank))
+        neighbors   = ntuple(i -> MPI.Cart_shift(kept_comm, i - 1, 1), Val(M))
+        CartesianTopology{M,MPI.Comm}(MPI.Comm_size(kept_comm), new_dims, kept_rank,
+            kept_coords, neighbors, kept_comm, kept_comm, new_periodic, true)
+    else
+        # Every member of a non-root kept-subgrid is non-root, so freeing here is
+        # collectively consistent within that subgrid.
+        MPI.free(kept_comm)
+        inactive_cartesian_topology(new_dims)
+    end
+
+    owned         = interior_size(u)
+    reduced_owned = ntuple(i -> owned[dims_to_keep[i]], Val(M))
+    new_boundary  = ntuple(i -> u.boundary_condition[dims_to_keep[i]], Val(M))
+    output = MaybeHaloArray(HaloArray(output_eltype, reduced_owned, Halo, root_topo;
+        boundary_condition=new_boundary))
+
+    # Same shape mapreduce(...; dims) produces locally (singleton removed dims);
+    # allocated like u's storage so a GPU-backed array gets a device buffer.
+    buf_shape = ntuple(d -> d in dims_to_remove ? 1 : owned[d], Val(N))
+    recv_buf  = similar(parent(u), output_eltype, buf_shape)
+
+    MPIDimReductionPlan(dims_to_remove, topo, owned, reduce_comm, is_slice_root,
+        recv_buf, output, Ref(false))
+end
+
+"""
+    reduce!(plan::DimReductionPlan, f, op, u) -> reduced array
+
+Map `f` over the interior cells of `u` and reduce with `op` along the plan's
+dimensions, into the output array prepared by [`DimReductionPlan`](@ref).
+Returns the plan's preallocated output (**overwritten on every call**; `copy`
+it to keep a snapshot) — the same kind of reduced array the one-shot forms
+produce, except that its element type was fixed at plan construction, so
+`f`/`op` must preserve `eltype(u)` (a promoting reduction like `+` on `Bool`
+throws with a pointer to the one-shot forms). `u` must share the plan's
+geometry (and, on MPI, its topology; there each call costs a single
+`MPI.Reduce` and is collective — every rank of the topology must call it).
+Same result as [`mapreduce_haloarray_dims`](@ref).
+"""
+function reduce!(plan::MPIDimReductionPlan, f::F, op::OP, u::HaloArray{T,N}) where {F,OP,T,N}
+    plan.freed[] && throw(ArgumentError("reduce! on a freed DimReductionPlan"))
+    u.topology === plan.source_topology ||
+        throw(ArgumentError("array topology does not match the plan's source topology"))
+    interior_size(u) == plan.source_interior_size ||
+        throw(DimensionMismatch("array interior size $(interior_size(u)) does not match plan's $(plan.source_interior_size)"))
+
+    op_n = _normalize_reduction_op(op)
+    local_value = mapreduce(f, op_n, interior_view(u); dims=plan.dims_to_remove)
+    _check_plan_eltype(eltype(local_value), eltype(plan.recv_buf))
+    op_mpi = MPI.Op(op_n, eltype(plan.recv_buf); iscommutative=true)
+    MPI.Reduce!(local_value, plan.recv_buf, op_mpi, plan.reduce_comm; root=0)
+    if plan.is_slice_root
+        # Same linear order (only singleton dims differ), so a flat copy is exact.
+        copyto!(interior_view(getdata(plan.output)), plan.recv_buf)
+    end
+    return plan.output
+end
+
+"""
+    free!(plan::DimReductionPlan) -> plan
+
+Release the MPI communicators owned by `plan` (collective over the plan's
+topology; idempotent, and a no-op after `MPI.Finalize`). The plan and its
+output array must not be used afterwards.
+"""
+function free!(plan::MPIDimReductionPlan)
+    plan.freed[] && return plan
+    plan.freed[] = true
+    MPI.Finalized() && return plan
+    MPI.free(plan.reduce_comm)
+    # The kept-dims communicator lives inside the output's topology (root slice
+    # ranks only; elsewhere it was freed at construction).
+    plan.is_slice_root && MPI.free(getdata(plan.output).topology.cart_comm)
+    return plan
+end
+
+# One-shot release (the generic one-shot lives in reduction.jl): free the
+# plan's own reduce communicator; the output — with ownership of the
+# sub-communicator its topology lives on — is the caller's now.
+function _release_transient!(plan::MPIDimReductionPlan)
+    plan.freed[] = true
+    MPI.free(plan.reduce_comm)   # guards COMM_NULL / Finalized itself
+    return nothing
+end
+
+"""
+    free!(m::MaybeHaloArray) -> m
+
+Release the MPI sub-communicator owned by a reduced array returned by a
+`dims=` keyword reduction or [`mapreduce_haloarray_dims`](@ref) (a no-op for
+serial-backed results, which own no communicator, so backend-generic code can
+call it unconditionally). Optional —
+unreleased communicators are reclaimed at `MPI.Finalize` — but calling it when
+you are done with the result keeps communicator use bounded when reducing in a
+loop (MPI implementations cap live communicators). Collective across the ranks
+where the result is active; a no-op on inactive ranks, on repeat calls, and
+after `MPI.Finalize`. The array's data stays readable; only collective
+operations on it (further reductions, gather, parallel HDF5 saves) become
+invalid.
+"""
+free!(m::MaybeHaloArray) = (_free_result_comm!(getdata(m)); m)
+
+# Serial-backed reduction results are bare arrays/collections owning no MPI
+# resources — free! is a safe no-op on them, so backend-generic code calls it
+# unconditionally. (Never frees a primary array's communicator: distributed
+# results are always Maybe-wrapped, and bare HaloArrays are not accepted.)
+free!(u::AbstractSerialHaloArray) = u
+free!(c::AbstractHaloCollection)  = c
+
+_free_result_comm!(h::HaloArray) = (MPI.free(h.topology.cart_comm); nothing)
+_free_result_comm!(::AbstractSerialHaloArray) = nothing   # serial fields own no comm
+_free_result_comm!(c::AbstractHaloCollection) =
+    (foreach(_free_result_comm!, _fields(c)); nothing)
+
+# Compatibility name; the generic collection method above covers both
+# MultiHaloArray and ArrayOfHaloArray.
+mapreduce_mhaloarray_dims(f, op, mha::MultiHaloArray, dims) =
+    mapreduce_haloarray_dims(f, op, mha, dims)
