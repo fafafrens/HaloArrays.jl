@@ -129,7 +129,9 @@ end
         v_interior[i, j] = 10_000 * rank + 100 * i + j
     end
 
-    maybe_fields = HaloArrays.mapreduce_mhaloarray_dims(identity, +, MultiHaloArray((; u, v)), (1,))
+    # dims are collection-global: field axis is 1, spatial axes 2… — so spatial
+    # dim 1 is dims=(2,) here (fields u,v are 2-D).
+    maybe_fields = HaloArrays.mapreduce_mhaloarray_dims(identity, +, MultiHaloArray((; u, v)), (2,))
     if topology.cart_coords[1] == 0
         @test is_active(maybe_fields)
         fields = HaloArrays.unwrap(maybe_fields)

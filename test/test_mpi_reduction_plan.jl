@@ -139,16 +139,33 @@ using HaloArrays
     end
 
     @testset "dims= on an MPI-backed MultiHaloArray" begin
+        # collection-global dims: field axis 1, spatial axes 2,3. Spatial dim 2
+        # of the fields is collection dim 3.
         m     = MultiHaloArray((; p=u, q=copy(u)))
-        rm    = sum(m; dims=2)
+        rm    = sum(m; dims=3)
         r_ref = mapreduce_haloarray_dims(identity, +, u, 2)
-        @test rm isa MaybeHaloArray
+        @test rm isa MaybeHaloArray                       # spatial → Maybe{collection}
         @test is_active(rm) == is_active(r_ref)
         if is_active(rm)
             @test collect(interior_view(parent(rm).arrays.p)) ≈ collect(interior_view(parent(r_ref)))
             @test collect(interior_view(parent(rm).arrays.q)) ≈ collect(interior_view(parent(r_ref)))
         end
         foreach(free!, (rm, r_ref))   # collection free! walks every field
+
+        # Field-axis reduction is LOCAL: bare HaloArray on the full topology,
+        # active everywhere (no sub-communicator, nothing to free!).
+        rf = sum(m; dims=1)
+        @test rf isa HaloArray && is_active(rf)
+        @test collect(interior_view(rf)) ≈ 2 .* collect(interior_view(u))
+
+        # Mixed field+spatial → Maybe{HaloArray}; a reused plan matches the one-shot.
+        rmix = sum(m; dims=(1, 3))
+        @test rmix isa MaybeHaloArray
+        pmix = DimReductionPlan(m, (1, 3))
+        rp   = reduce!(pmix, identity, +, m)
+        @test is_active(rp) == is_active(rmix)
+        is_active(rp) && @test collect(interior_view(parent(rp))) ≈ collect(interior_view(parent(rmix)))
+        free!(rmix); free!(pmix)
     end
 
     @testset "3-D, remove two dims at once" begin

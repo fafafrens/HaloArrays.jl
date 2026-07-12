@@ -114,6 +114,28 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `PolyesterBackend` for many thin per-tile ops, where its `@batch` pool avoids
   the task-spawn cost — measurably faster and near-allocation-free).
 
+### Changed (breaking)
+- **Collection `dims=` reductions use collection-global coordinates and can
+  reduce the field axis.** A `MultiHaloArray`/`ArrayOfHaloArray` presents as an
+  array with axes `(field…, spatial…)`, but `sum(c; dims=d)` previously
+  forwarded `d` to each field's *spatial* reduction — so the field axis was
+  unreachable and `dims` was off by the field-axis count versus `size(c)`.
+  Now `dims` is interpreted in the collection's own coordinates: field axes
+  (`1:F`) reduce **locally** (an elementwise fold across fields — no
+  communication, no plan, a bare result), collapsing all fields into one
+  `HaloArray` (`MultiHaloArray` drops the names) or a partial set into a
+  smaller collection; spatial axes (`F+1:D`) reduce per field as before.
+  `MaybeHaloArray` wraps the result (outermost) only when a spatial axis was
+  reduced on MPI. Migration: shift spatial `dims` up by the number of field
+  axes — e.g. for 2-D fields `sum(c; dims=2)` (old spatial-1) becomes
+  `sum(c; dims=3)`. `mapreduce_mhaloarray_dims` and the collection form of
+  `mapreduce_haloarray_dims` follow the same coordinates.
+- **`DimReductionPlan` extends to collections.** `DimReductionPlan(c, dims)`
+  returns a plan that classifies the axes once and holds one reused per-field
+  array plan for the spatial axes, so a hoisted collection reduction rebuilds
+  no MPI communicators; the collection one-shot (`sum(c; dims=…)`) is a
+  transient such plan, mirroring the array path.
+
 ### Fixed
 - **`mapfoldl`/`mapfoldr` with `dims=` throw a clean error on every backend**:
   the guard covered only `ThreadedHaloArray`, so on a `LocalHaloArray` the

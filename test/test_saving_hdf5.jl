@@ -258,7 +258,8 @@ end
 
         fill!(rho, rank + 50)
         fill!(mom, rank + 150)
-        maybe_fields = HaloArrays.mapreduce_mhaloarray_dims(identity, +, MultiHaloArray((; rho, mom)), (1,))
+        # collection-global dims: field axis 1, spatial axes 2… → spatial dim 1 is (2,)
+        maybe_fields = HaloArrays.mapreduce_mhaloarray_dims(identity, +, MultiHaloArray((; rho, mom)), (2,))
         gather_and_save_haloarray(filename_base, maybe_fields)
         MPI.Barrier(comm)
 

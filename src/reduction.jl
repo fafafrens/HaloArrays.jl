@@ -387,9 +387,14 @@ equivalent to the `dims=` keyword forms (`sum(u; dims=…)`,
   elsewhere) and **owns the sub-communicator** its topology lives on —
   [`free!`](@ref) it when done to keep communicator use bounded when reducing
   in a loop (otherwise it is reclaimed at `MPI.Finalize`).
-- `MultiHaloArray` / `ArrayOfHaloArray` → every field reduced, same collection
-  kind rebuilt around the reduced fields (`MaybeHaloArray`-wrapped only when
-  the fields are MPI-backed).
+- `MultiHaloArray` / `ArrayOfHaloArray` → `dims` is in **collection**
+  coordinates: field axes come first (`1:F`), then the shared spatial axes
+  (`F+1:D`). Field axes reduce **locally** (an elementwise fold across fields —
+  no communication, always a bare result), collapsing every field axis into one
+  `HaloArray` (`MultiHaloArray` drops the field names) or a partial set into a
+  smaller collection. Spatial axes reduce per field as above. The result is
+  `MaybeHaloArray`-wrapped (outermost) only when a spatial axis was reduced on
+  MPI; a pure field reduction is never wrapped.
 
 Implemented as a transient [`DimReductionPlan`](@ref) — built with the
 promoted output element type (so `Bool` sums count in `Int`, like Base), used
@@ -444,19 +449,161 @@ end
 # stays usable — releasing is meaningful only on the MPI backend.
 free!(plan::SerialDimReductionPlan) = plan
 
-# Collections: reduce each field along `dims` and rebuild the same collection
-# kind around the reduced fields (unwrapped — a distributed field's topology
-# still carries its active flag). Whether the rebuilt collection needs the
-# MaybeHaloArray wrapper is the backend's decision (MPI only); its active
-# state is read from the fields' topologies by the 1-arg constructor
-# (is_active(collection) = all(is_active, fields)), not tracked by hand.
+# ---- collection dims reductions: classify field vs spatial axes ----------
+#
+# A collection's axes are (field axes 1..F, then spatial axes F+1..D). `dims`
+# is given in these collection coordinates. The two axis kinds reduce with
+# different machinery:
+#   • FIELD axes reduce LOCALLY — every rank holds all its fields (they share a
+#     topology), so it is an elementwise fold across fields: no communication,
+#     no plan, and the result is a bare array/collection (never MaybeHaloArray).
+#     Collapsing every field axis yields one HaloArray (MultiHaloArray drops the
+#     field names); a partial reduction yields a smaller collection.
+#   • SPATIAL axes reduce through the per-field array machinery (a transient
+#     DimReductionPlan each), MaybeHaloArray-wrapped on MPI.
+# A mixed reduction folds fields first, then spatial-reduces the result; the
+# MaybeHaloArray, when present, is always outermost (a collection cannot hold
+# Maybe fields). `op` must be commutative — the field and spatial passes reduce
+# in separate phases — which the `dims=` reductions already require.
+
+function _classify_collection_dims(c::AbstractHaloCollection, dims)
+    D = ndims(c); S = _spatial_ndims(c); Fax = D - S
+    dn = Tuple(sort!(unique!(collect(Int, dims isa Integer ? (dims,) : dims))))
+    all(d -> 1 <= d <= D, dn) ||
+        throw(ArgumentError("dims $dims out of range for a $D-dimensional collection"))
+    isempty(dn) && throw(ArgumentError("dims must select at least one dimension"))
+    fdims = Tuple(d for d in dn if d <= Fax)
+    sdims = Tuple(d - Fax for d in dn if d > Fax)   # shifted to field-local coords
+    (length(fdims) == Fax && length(sdims) == S) && throw(ArgumentError(
+        "Reducing every axis of a collection to a scalar is not supported; use `sum(c)` etc."))
+    return fdims, sdims
+end
+
+# The collection one-shot is a transient CollectionDimReductionPlan (built with
+# the promoted output eltype, one reduce!, released) — mirroring the array
+# one-shot, so `sum(c; dims=…)` and a hoisted plan share one code path.
 function mapreduce_haloarray_dims(f::F, op::OP, c::AbstractHaloCollection, dims) where {F,OP}
-    reduced = _map_fields(field -> getdata(mapreduce_haloarray_dims(f, op, field, dims)), c)
-    return _wrap_reduced(halo_backend(c), reduced)
+    op_n = _normalize_reduction_op(op)
+    plan = DimReductionPlan(c, dims; output_eltype=_reduced_eltype(f, op_n, eltype(c)))
+    out  = reduce!(plan, f, op_n, c)
+    _release_transient!(plan)
+    return out
 end
 
 # Trait-dispatched wrap: only the distributed backend's results may be absent
-# on a rank, so only it wraps in MaybeHaloArray (activity read from the
-# fields' topologies by the 1-arg constructor).
+# on a rank, so only it wraps in MaybeHaloArray.
 _wrap_reduced(::MPIHaloBackend, reduced)      = MaybeHaloArray(reduced)
 _wrap_reduced(::AbstractHaloBackend, reduced) = reduced
+
+# ---- CollectionDimReductionPlan ------------------------------------------
+# Classifies `dims` into field/spatial axes once, and — for the spatial axes —
+# holds one reused per-field array DimReductionPlan (which owns the expensive
+# MPI sub-communicators). `reduce!` folds the field axes locally each call and
+# drives the reused plans for the spatial axes, so a hoisted collection plan
+# rebuilds no communicators. The field fold and the small result wrapper are
+# rebuilt per call (both cheap and local); the communicator reuse is the win.
+struct CollectionDimReductionPlan{FD,SD,SP} <: DimReductionPlan
+    fdims::FD          # field axes (collection coords), may be ()
+    sdims::SD          # spatial axes (field-local coords), may be ()
+    spatial_plans::SP  # () for a pure-field reduction; else one array plan per (intermediate) field
+end
+
+@inline _source_fields(x::AbstractSingleHaloArray) = (x,)
+@inline _source_fields(c::AbstractHaloCollection)  = Tuple(_fields(c))
+
+function DimReductionPlan(c::AbstractHaloCollection, dims; output_eltype=nothing)
+    fdims, sdims = _classify_collection_dims(c, dims)
+    isempty(sdims) && return CollectionDimReductionPlan(fdims, sdims, ())  # pure field: no plans
+    # The fields the spatial plans reduce: the source fields (pure spatial) or a
+    # geometry template of the field-folded intermediate (values irrelevant — a
+    # fresh fold at each reduce! shares the same topology, `similar` reusing it).
+    fields = isempty(fdims) ? _source_fields(c) :
+             _source_fields(_reduce_field_axes(identity, +, c, fdims))
+    splans = map(fields) do fld
+        DimReductionPlan(fld, sdims; output_eltype = output_eltype === nothing ? eltype(fld) : output_eltype)
+    end
+    return CollectionDimReductionPlan(fdims, sdims, splans)
+end
+
+"""
+    reduce!(plan::CollectionDimReductionPlan, f, op, c) -> reduced array/collection
+
+Reduce collection `c` along the plan's dimensions. Field axes fold locally each
+call; spatial axes reuse the plan's per-field [`DimReductionPlan`](@ref)s (no
+communicator rebuild). Returns a bare array/collection, or a `MaybeHaloArray`
+around one when spatial axes were reduced on MPI — the same shape the one-shot
+[`mapreduce_haloarray_dims`](@ref) produces. `op` must be commutative.
+"""
+function reduce!(plan::CollectionDimReductionPlan, f::F, op::OP, c::AbstractHaloCollection) where {F,OP}
+    op_n = _normalize_reduction_op(op)
+    isempty(plan.spatial_plans) && return _reduce_field_axes(f, op_n, c, plan.fdims)  # pure field (bare)
+    fs, src = isempty(plan.fdims) ? (f, c) : (identity, _reduce_field_axes(f, op_n, c, plan.fdims))
+    srcfields = _source_fields(src)
+    length(srcfields) == length(plan.spatial_plans) ||
+        throw(DimensionMismatch("collection field layout does not match the plan"))
+    reduced = map((sp, fld) -> getdata(reduce!(sp, fs, op_n, fld)), plan.spatial_plans, srcfields)
+    return _rewrap_reduced(src, reduced)
+end
+
+# Single folded field spatially reduced → wrap that one field; a (smaller)
+# collection → rebuild the same kind around the reduced fields. Maybe outermost.
+_rewrap_reduced(::AbstractSingleHaloArray, reduced) =
+    _wrap_reduced(halo_backend(reduced[1]), reduced[1])
+_rewrap_reduced(src::AbstractHaloCollection, reduced) =
+    _wrap_reduced(halo_backend(src), _rebuild_like(src, reduced))
+
+_rebuild_like(c::MultiHaloArray, fields) =
+    MultiHaloArray(NamedTuple{keys(getfield(c, :arrays))}(Tuple(fields)))
+_rebuild_like(c::ArrayOfHaloArray, fields) =
+    ArrayOfHaloArray(reshape(collect(fields), field_shape(c)))
+
+free!(plan::CollectionDimReductionPlan) = (foreach(free!, plan.spatial_plans); plan)
+_release_transient!(plan::CollectionDimReductionPlan) =
+    (foreach(_release_transient!, plan.spatial_plans); nothing)
+
+# ---- local field-axis fold ------------------------------------------------
+# Fold an ordered set of same-geometry fields into one fresh field, elementwise:
+# `result[cell] = mapreduce(f, op, (field₁[cell], …, fieldₖ[cell]))`. One
+# `map!` per tile over the interior views (backend-uniform — `interior_view(x, t)`
+# ignores the tile id on single-block backends, selects the tile on a
+# ThreadedHaloArray — and GPU-safe, `mapreduce` folding the per-cell tuple).
+function _fold_fields(f::F, op::OP, S_elt::Type, fields) where {F,OP}
+    fs  = Tuple(fields)                       # ≥ 1 field
+    acc = similar(first(fs), S_elt)
+    combine(xs::Vararg) = mapreduce(f, op, xs)
+    for t in 1:tile_count(acc)
+        map!(combine, interior_view(acc, t), map(fld -> interior_view(fld, t), fs)...)
+    end
+    return acc
+end
+
+# MultiHaloArray has one field axis, so a field reduction always collapses every
+# named field into a single (name-free) HaloArray.
+_reduce_field_axes(f::F, op::OP, c::MultiHaloArray, ::Any) where {F,OP} =
+    _fold_fields(f, op, _reduced_eltype(f, op, eltype(c)), eachfield(c))
+
+# ArrayOfHaloArray field axes may be multi-dimensional: fold along `fdims`,
+# each kept-index group becoming one field. All field axes consumed → a single
+# HaloArray; a partial reduction → a smaller ArrayOfHaloArray.
+function _reduce_field_axes(f::F, op::OP, c::ArrayOfHaloArray, fdims) where {F,OP}
+    container = getfield(c, :arrays)
+    S_elt = _reduced_eltype(f, op, eltype(c))
+    Fax   = ndims(container)
+    kept  = Tuple(d for d in 1:Fax if !(d in fdims))
+    redshape  = ntuple(i -> size(container, fdims[i]), length(fdims))
+    keptshape = ntuple(i -> size(container, kept[i]), length(kept))
+    fibre(ok) = _fold_fields(f, op, S_elt,
+        (container[_weave_index(fdims, kept, Fax, rk, ok)...] for rk in CartesianIndices(redshape)))
+    isempty(kept) && return fibre(CartesianIndex())      # every field axis → one field
+    outfields = [fibre(ok) for ok in CartesianIndices(keptshape)]
+    return ArrayOfHaloArray(reshape(outfields, keptshape))
+end
+
+# Reconstruct a full container index from the reduced-axis index `rk` (over
+# `fdims`) and the kept-axis index `ok` (over `kept`).
+@inline function _weave_index(fdims, kept, Fax::Int, rk, ok)
+    ntuple(Fax) do d
+        j = findfirst(==(d), fdims)
+        j === nothing ? Tuple(ok)[findfirst(==(d), kept)::Int] : Tuple(rk)[j]
+    end
+end

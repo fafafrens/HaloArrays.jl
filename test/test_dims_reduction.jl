@@ -70,25 +70,70 @@ _fill_global!(u, g) = (for I in CartesianIndices(axes(u)); u[Tuple(I)...] = g(Tu
         tu = ThreadedHaloArray(Float64, (GX ÷ 2, GY), 1; dims=(2, 1), boundary_condition=:periodic)
         _fill_global!(tu, g)
 
-        m = MultiHaloArray((; a=lu, b=copy(lu)))
-        rm = sum(m; dims=2)
-        @test rm isa MultiHaloArray                           # bare, same kind
-        @test is_active(rm)
+        # Collection dims are GLOBAL: field axis is 1, spatial axes 2… . For a
+        # MultiHaloArray of 2 2-D fields, size is (2, GX, GY); spatial dim 2
+        # (→ ref_d2) is collection dim 3, spatial dim 1 (→ ref_d1) is dim 2.
+        m = MultiHaloArray((; a=lu, b=copy(lu)))   # b = a, so field sum = 2a
+        @test size(m) == (2, GX, GY)
+
+        rm = sum(m; dims=3)                                    # spatial → same-kind collection
+        @test rm isa MultiHaloArray && is_active(rm)
         @test vec(collect(interior_view(rm.arrays.a))) ≈ ref_d2
         @test vec(collect(interior_view(rm.arrays.b))) ≈ ref_d2
         @test free!(rm) === rm
 
-        aoh = ArrayOfHaloArray([tu, copy(tu)])
-        ra = sum(aoh; dims=2)
-        @test ra isa ArrayOfHaloArray
+        rf = sum(m; dims=1)                                    # field axis → bare HaloArray
+        @test rf isa LocalHaloArray
+        @test collect(interior_view(rf)) ≈ 2 .* collect(interior_view(lu))
+
+        rmix = sum(m; dims=(1, 3))                             # field + spatial → HaloArray
+        @test rmix isa LocalHaloArray
+        @test vec(collect(interior_view(rmix))) ≈ 2 .* ref_d2
+
+        aoh = ArrayOfHaloArray([tu, copy(tu)])   # field_shape (2,)
+        ra = sum(aoh; dims=3)                                  # spatial → same-kind collection
+        @test ra isa ArrayOfHaloArray && field_shape(ra) == (2,)
         for fld in HaloArrays._fields(ra)
-            @test fld isa ThreadedHaloArray
-            @test vec(collect(fld)) ≈ ref_d2
+            @test fld isa ThreadedHaloArray && vec(collect(fld)) ≈ ref_d2
         end
+        raf = sum(aoh; dims=1)                                 # field axis → bare ThreadedHaloArray
+        @test raf isa ThreadedHaloArray && vec(collect(raf)) ≈ 2 .* vec([g((i, j)) for i in 1:GX, j in 1:GY])
+
+        # Multi-axis ArrayOfHaloArray: partial vs full field reduction.
+        grid = [(u = LocalHaloArray(Float64, (GX, GY), 1; boundary_condition=:periodic);
+                 fill!(interior_view(u), Float64(10p + q)); u) for p in 1:2, q in 1:3]
+        aog = ArrayOfHaloArray(grid)                           # field_shape (2,3)
+        @test field_shape(sum(aog; dims=2)) == (2,)           # partial field → smaller collection
+        @test sum(aog; dims=(1, 2)) isa LocalHaloArray        # all field → single field
+        @test interior_view(sum(aog; dims=(1, 2)))[1, 1] ≈ sum(10p + q for p in 1:2, q in 1:3)
 
         # Explicit collection form agrees with the kwarg form.
-        rme = mapreduce_haloarray_dims(identity, +, m, 2)
+        rme = mapreduce_haloarray_dims(identity, +, m, 3)
         @test vec(collect(interior_view(rme.arrays.a))) ≈ ref_d2
+
+        # Reducing every axis is rejected (use sum(c)).
+        @test_throws ArgumentError sum(m; dims=(1, 2, 3))
+    end
+
+    @testset "collection DimReductionPlan (reuse across calls)" begin
+        lu = LocalHaloArray(Float64, (GX, GY), 1; boundary_condition=:periodic)
+        fill_from_global_indices!(g, lu)
+        m = MultiHaloArray((; a=lu, b=copy(lu)))
+
+        ps = DimReductionPlan(m, 3)                            # pure spatial
+        r1 = reduce!(ps, identity, +, m)
+        @test r1 isa MultiHaloArray
+        @test vec(collect(interior_view(r1.arrays.a))) ≈ ref_d2
+        @test vec(collect(interior_view(reduce!(ps, identity, +, m).arrays.a))) ≈ ref_d2
+        @test free!(ps) === ps
+
+        pf = DimReductionPlan(m, 1)                            # pure field (no spatial plans)
+        @test collect(interior_view(reduce!(pf, identity, +, m))) ≈ 2 .* collect(interior_view(lu))
+        free!(pf)
+
+        pmix = DimReductionPlan(m, (1, 3))                     # mixed → HaloArray
+        @test vec(collect(interior_view(reduce!(pmix, identity, +, m)))) ≈ 2 .* ref_d2
+        free!(pmix)
     end
 
     @testset "serial DimReductionPlan (backend-uniform hot loop)" begin
