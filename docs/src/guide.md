@@ -208,6 +208,115 @@ synchronize_halo!(u)
 single `synchronize_halo!(state)` for the whole state. Keep independent arrays
 when fields need different halo widths, layouts, or topologies.
 
+## Reductions
+
+Broadcast and reductions operate on the **interior** cells (halos excluded), and
+the whole-array reductions are **global** — an MPI `HaloArray` combines every
+rank's contribution internally, so the same code returns the same scalar on
+every backend:
+
+```julia
+sum(u)             # global sum over all interior cells
+maximum(u)         # global maximum
+mapreduce(abs2, +, u)
+using LinearAlgebra
+dot(u, v)          # global inner product
+norm(u)            # global 2-norm
+```
+
+`sum`/`prod`/`maximum`/`minimum` and `mapreduce` all work; `dot`/`norm` and the
+in-place BLAS‑1 updates make a halo array a drop-in Krylov/`OrdinaryDiffEq`
+vector. `mapfoldl`/`mapfoldr` also work, but their strict ordering makes them
+incompatible with the `dims=` keyword below (use the commutative `mapreduce`
+forms there).
+
+### Reducing along dimensions
+
+Passing `dims=` collapses only some axes and keeps a distributed array. Every
+backend returns a reduced array of **the same backend** with the reduced
+dimensions **dropped** (kept dimensions keep their halo width and boundary
+conditions):
+
+```julia
+# the same call, returning a reduced array of u's own backend:
+#   LocalHaloArray    → LocalHaloArray
+#   ThreadedHaloArray → ThreadedHaloArray (tiled by the kept dimensions)
+#   HaloArray (MPI)   → MaybeHaloArray    (see below)
+r = sum(u; dims=2)
+r = mapreduce_haloarray_dims(abs2, +, u, 2)   # explicit form, same result
+```
+
+For an MPI `HaloArray` the collapsed result lives only on the **coordinate‑0
+slice** of the reduced dimensions and is returned as a [`MaybeHaloArray`](@ref):
+`is_active(r)` is `true` on the ranks that hold it (and always `true` for serial
+backends), `interior_view(r)` reads it there, and [`free!`](@ref)`(r)` releases
+the sub-communicator it owns (optional — otherwise reclaimed at `MPI.Finalize`;
+call it to keep communicator use bounded when reducing in a loop). These three
+behave uniformly on every return kind, so reduction-consuming code needs no
+backend branches:
+
+```julia
+r = sum(u; dims=2)
+if is_active(r)
+    save(interior_view(r))
+end
+free!(r)
+```
+
+One-shot reductions promote the element type like Base (so `sum` of a `Bool`
+array counts in `Int`).
+
+### Reusing a plan in a loop
+
+Each `sum(u; dims=…)` builds and releases MPI sub-communicators. For a reduction
+that runs every step, build a [`DimReductionPlan`](@ref) **once** and
+[`reduce!`](@ref) into it — one `MPI.Reduce` per call, no communicator churn, and
+the same call compiles on every backend:
+
+```julia
+plan = DimReductionPlan(u, 2)          # once, outside the loop
+for step in 1:nsteps
+    step!(u)
+    profile = reduce!(plan, identity, +, u)   # overwrites the plan's output
+    is_active(profile) && save(profile)
+end
+free!(plan)
+```
+
+A plan fixes its output element type at construction (pass `output_eltype` to
+override); a promoting reduction against it errors with a pointer to the
+one-shot forms. On `LocalHaloArray`/`ThreadedHaloArray` the plan build and the
+whole reduction are type-stable and allocation-free (even for a runtime
+`dims::Int`).
+
+### Reducing collections
+
+On a [`MultiHaloArray`](@ref)/[`ArrayOfHaloArray`](@ref), `dims=` uses
+**collection coordinates**: the field axes come first (`1:F`), then the shared
+spatial axes (`F+1:D`) — the same order as `size(c)`. Field axes reduce
+**locally** (an elementwise fold across the fields — no communication), so
+reducing every field axis returns one bare `HaloArray` (a `MultiHaloArray` drops
+the field names); spatial axes reduce per field and rebuild the same collection
+kind. The `MaybeHaloArray` wrapper, when a spatial axis was reduced on MPI, is
+always outermost.
+
+```julia
+state = MultiHaloArray((; rho, mom))    # 2-D fields → size (2, nx, ny)
+sum(state; dims=1)                       # sum over fields → one HaloArray (nx, ny)
+sum(state; dims=3)                       # reduce spatial-y → collection (nx,)
+sum(state; dims=(1, 3))                  # both → one HaloArray (nx,)
+```
+
+`mapreduce_haloarray_dims(f, op, c, dims)` and `DimReductionPlan(c, dims)` accept
+collections the same way.
+
+### Gather and output
+
+[`gather_haloarray`](@ref)`(u)` collects a distributed array's global data onto
+the root rank; [`gather_and_save_haloarray`](@ref) and the collective
+`append_haloarray_to_file!` write reduced or full arrays to HDF5 (weak
+dependency). See [Arrays, layout & reductions](@ref) for the full API.
+
 ## Backend traits
 
 Use [`halo_backend`](@ref)`(u)` when an algorithm needs separate implementations
