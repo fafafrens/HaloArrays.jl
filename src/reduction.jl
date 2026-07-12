@@ -601,7 +601,10 @@ function _fold_fields(f::F, op::OP, S_elt::Type, fields) where {F,OP}
     fs  = Tuple(fields)                       # ≥ 1 field
     acc = similar(first(fs), S_elt)
     combine(xs::Vararg) = mapreduce(f, op, xs)
-    for t in 1:tile_count(acc)
+    # Per-tile and independent (each tile writes only its own cells), so it runs
+    # through the same tile driver as the rest of the reductions — parallel on a
+    # ThreadedHaloArray's thread backend, inline on single-block backends.
+    _foreach_tile(acc) do t
         map!(combine, interior_view(acc, t), map(fld -> interior_view(fld, t), fs)...)
     end
     return acc
