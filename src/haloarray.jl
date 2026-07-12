@@ -241,6 +241,21 @@ function Base.setindex!(halo::HaloArray, value, I::Vararg{Integer})
     return halo
 end
 
+# A distributed HaloArray reports its GLOBAL shape (`size`/`axes`/`length`) for
+# the vector-space interface, but only this rank's block lives here — so a
+# generic whole-array materialization is ambiguous and, done naively, fills a
+# global-shaped array from local iteration (half garbage across ranks). Rather
+# than lie, `iterate`/`collect` error and name the two explicit escape hatches.
+# (Broadcast, reductions, `dot`/`norm`, and the BLAS-1 ops are all overridden,
+# so they never reach here; `foreach` iterates `interior_view` directly.)
+const _HALOARRAY_MATERIALIZE_MSG =
+    "cannot iterate/collect a distributed HaloArray: it reports its global " *
+    "shape but holds only this rank's block. Use `gather_haloarray(u)` for the " *
+    "global array (collective, root-only) or `interior_view(u)` / " *
+    "`collect(interior_view(u))` for this rank's local block."
+Base.iterate(::HaloArray, args...) = error(_HALOARRAY_MATERIALIZE_MSG)
+Base.collect(::HaloArray)          = error(_HALOARRAY_MATERIALIZE_MSG)
+
 # ---- versors ----------------------------------------------------------
 
 @inline function versors(::Val{N}) where {N}

@@ -20,14 +20,24 @@ MaybeHaloArray(a::A) where {T,N,A<:AbstractHaloArray{T,N}} =
 
 
 
-Base.size(m::MaybeHaloArray) = global_size(m)
+# An inactive value holds no data, so it reports an empty shape — keeping the
+# `AbstractArray` invariant `length == prod(size)` (active: global shape; a
+# global-shaped `size` with `length == 0` would make `collect` return
+# uninitialized garbage). Use `is_active` to gate before touching the data.
+Base.size(m::MaybeHaloArray{T,N}) where {T,N} =
+    is_active(m) ? global_size(m) : ntuple(_ -> 0, Val(N))
 interior_axes(m::MaybeHaloArray) = interior_axes(m.data)
 interior_size(m::MaybeHaloArray) = interior_size(m.data)
 global_size(m::MaybeHaloArray) = global_size(m.data)
 storage_size(m::MaybeHaloArray) = storage_size(m.data)
 Base.parent(m::MaybeHaloArray) = m.data
-Base.axes(m::MaybeHaloArray) = axes(m.data)
-Base.axes(m::MaybeHaloArray, i::Int) = axes(m.data, i)
+# axes must agree with `size` (empty when inactive), or `collect`/`similar` —
+# which allocate from `axes` — would rebuild the inner shape and fill garbage.
+Base.axes(m::MaybeHaloArray{T,N}) where {T,N} =
+    is_active(m) ? axes(m.data) : ntuple(_ -> Base.OneTo(0), Val(N))
+# Trailing dims beyond ndims are OneTo(1) (the AbstractArray contract, e.g.
+# `A[i, 1]` on a vector) — same as the AbstractSingleHaloArray `axes(u, i)`.
+Base.axes(m::MaybeHaloArray, i::Int) = i <= ndims(m) ? axes(m)[i] : Base.OneTo(1)
 
 Base.ndims(::Type{<:MaybeHaloArray{T,N,A}}) where {T,N,A} = N
 
