@@ -155,6 +155,69 @@ end
 ThreadedHaloArray(tile_size::NTuple{N,<:Integer}, halo::Integer; kwargs...) where {N} =
     ThreadedHaloArray(Float64, tile_size, halo; kwargs...)
 
+# ---- conversion between the two single-process backends ----------------
+# Both live entirely in one process, so converting is a pure memory re-layout
+# (no communication): copy the interior cells into the other layout and leave
+# the ghosts for the next `synchronize_halo!`. Element type, halo width, and
+# boundary conditions carry over; storage follows the source's device
+# (`_on_device_of`), and the interior copies are broadcasts (GPU-safe). For a
+# distributed `HaloArray` there is no such free conversion — use
+# `gather_haloarray` / explicit construction (a convert would hide a collective).
+
+# The interior sub-range of tile `coord` (1-based tile coordinate) in a global
+# interior gridded by `tile_size` — shared by both directions.
+@inline _tile_interior_range(coord::NTuple{N,Int}, ts::NTuple{N,Int}) where {N} =
+    ntuple(d -> ((coord[d] - 1) * ts[d] + 1):(coord[d] * ts[d]), Val(N))
+
+"""
+    LocalHaloArray(u::ThreadedHaloArray)
+
+Assemble a shared-memory [`ThreadedHaloArray`](@ref)'s tiles into a single-block
+[`LocalHaloArray`](@ref) of the same interior data (ghosts left for the next
+[`synchronize_halo!`](@ref)). Same element type, halo width, and boundary
+conditions; in-process, no communication.
+"""
+function LocalHaloArray(u::ThreadedHaloArray{T,N,A,Halo}) where {T,N,A,Halo}
+    isz  = interior_size(u)
+    full = ntuple(d -> isz[d] + 2Halo, Val(N))
+    data = fill!(similar(tile_parent(u, 1), T, full), zero(T))   # device follows the source
+    out  = LocalHaloArray(data, Halo, u.boundary_condition)
+    ov   = interior_view(out)
+    ts   = tile_size(u)
+    for tid in 1:tile_count(u)
+        rng = _tile_interior_range(tile_coordinates(u, tid), ts)
+        @views ov[rng...] .= interior_view(u, tid)
+    end
+    return out
+end
+
+"""
+    ThreadedHaloArray(u::LocalHaloArray; dims, thread_backend=OhMyThreadsBackend())
+
+Split a single-block [`LocalHaloArray`](@ref) into a `dims` grid of tiles as a
+[`ThreadedHaloArray`](@ref) holding the same interior data (ghosts left for the
+next [`synchronize_halo!`](@ref)). `interior_size(u)` must be divisible by
+`dims`. Same element type, halo width, and boundary conditions; in-process, no
+communication.
+"""
+function ThreadedHaloArray(u::LocalHaloArray{T,N,A,Halo};
+        dims::NTuple{N,<:Integer}=ntuple(d -> d == N ? Threads.nthreads() : 1, Val(N)),
+        thread_backend::ThreadBackend=OhMyThreadsBackend()) where {T,N,A,Halo}
+    isz = interior_size(u)
+    all(d -> isz[d] % dims[d] == 0, 1:N) ||
+        throw(ArgumentError("interior size $isz is not divisible by the tile layout $dims"))
+    ts  = ntuple(d -> isz[d] ÷ Int(dims[d]), Val(N))
+    out = _on_device_of(parent(u),
+        ThreadedHaloArray(T, ts, Halo; dims=dims,
+            boundary_condition=u.boundary_condition, thread_backend=thread_backend))
+    iv  = interior_view(u)
+    for tid in 1:tile_count(out)
+        rng = _tile_interior_range(tile_coordinates(out, tid), ts)
+        @views interior_view(out, tid) .= iv[rng...]
+    end
+    return out
+end
+
 # eltype/ndims come from AbstractArray{T,N}; parent from AbstractSingleHaloArray.
 @inline interior_size(halo::ThreadedHaloArray) = ntuple(d -> halo.tile_size[d] * halo.topology.dims[d], Val(ndims(halo)))
 # size, axes, length inherited from AbstractSingleHaloArray

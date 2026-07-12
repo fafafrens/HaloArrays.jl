@@ -442,4 +442,26 @@
             fields=(:p, :q), boundary_condition=:repeating)
         @test eltype(mha_f64) === Float64
     end
+
+    @testset "Local <-> Threaded conversion (in-process re-layout)" begin
+        g(I) = Float64(I[1] + 100 * I[2])
+        lu = LocalHaloArray(Float64, (4, 6), 2; boundary_condition=:periodic)
+        fill_from_global_indices!(g, lu)
+
+        # Local -> Threaded: layout, geometry, and interior data preserved.
+        tu = ThreadedHaloArray(lu; dims=(2, 2))
+        @test tu isa ThreadedHaloArray
+        @test tu.topology.dims == (2, 2) && tile_size(tu) == (2, 3)
+        @test halo_width(tu) == 2 && tu.boundary_condition == lu.boundary_condition
+        @test all(tu[i, j] == g((i, j)) for i in 1:4, j in 1:6)
+
+        # Threaded -> Local round-trips the interior exactly.
+        back = LocalHaloArray(tu)
+        @test back isa LocalHaloArray
+        @test interior_size(back) == (4, 6) && halo_width(back) == 2
+        @test collect(interior_view(back)) == collect(interior_view(lu))
+
+        # Indivisible tile layout is rejected.
+        @test_throws ArgumentError ThreadedHaloArray(lu; dims=(3, 2))
+    end
 end
