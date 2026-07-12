@@ -147,6 +147,7 @@ _fill_global!(u, g) = (for I in CartesianIndices(axes(u)); u[Tuple(I)...] = g(Tu
         @test interior_range(ma) == interior_range(lu)
         mi = HaloArrays.inactive(lu)
         @test_throws ErrorException interior_view(mi)
+        @test_throws ErrorException interior_range(mi)   # guarded like interior_view
     end
 
     @testset "argument guards" begin
@@ -157,5 +158,13 @@ _fill_global!(u, g) = (for I in CartesianIndices(axes(u)); u[Tuple(I)...] = g(Tu
         @test_throws ArgumentError sum(lu; dims=2, init=0.0)     # init rejected
         @test_throws ArgumentError sum(m; dims=2, init=0.0)
         @test_throws ArgumentError mapreduce(tuple, +, lu, lu; dims=2)  # multi-array
+
+        # Order-sensitive folds reject dims= on EVERY backend with the clean
+        # ArgumentError (not Base's obscure "no method matching mapfoldl(…;dims)").
+        tu = ThreadedHaloArray(Float64, (GX ÷ 2, GY), 1; dims=(2, 1), boundary_condition=:periodic)
+        for u in (lu, tu)
+            @test_throws ArgumentError mapfoldl(identity, +, u; dims=2)
+            @test_throws ArgumentError mapfoldr(identity, +, u; dims=1)
+        end
     end
 end

@@ -97,11 +97,14 @@ for func in (:mapfoldl, :mapfoldr)
     @eval function Base.$func(
             f::F, op::OP, halo::AbstractSingleHaloArray, etc::Vararg{AbstractSingleHaloArray}; kws...,
         ) where {F<:Function, OP}
-        # A per-tile fold with dims= would combine same-shaped per-tile arrays
-        # across ALL tiles — wrong for tiles that lie along kept dimensions.
-        # (A single-block LocalHaloArray keeps Base's semantics on its one view.)
-        (:dims in keys(kws) && halo isa ThreadedHaloArray) && throw(ArgumentError(
-            "`$($(string(func)))` with `dims=` is not supported on a tiled ThreadedHaloArray; " *
+        # `dims=` is rejected for order-sensitive folds on every halo array: a
+        # per-tile / per-rank reduction reorders the fold (and on a tiled array
+        # would combine same-shaped per-tile results across ALL tiles, mixing
+        # tiles that lie along kept dimensions). Use `mapreduce`/`sum`/… with
+        # `dims=` (commutative ops only). Guard here rather than letting the
+        # call fall through to Base's dims-less `$func`, which errors obscurely.
+        :dims in keys(kws) && throw(ArgumentError(
+            "`$($(string(func)))` with `dims=` is not supported on a halo array; " *
             "use `mapreduce`/`sum`/… with `dims=` (commutative ops only)."))
         return _local_mapreduce($func, f, op, (halo, etc...); kws...)
     end

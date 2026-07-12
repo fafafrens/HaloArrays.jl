@@ -650,6 +650,15 @@ free!(m::MaybeHaloArray) = (_free_result_comm!(getdata(m)); m)
 free!(u::AbstractSerialHaloArray) = u
 free!(c::AbstractHaloCollection)  = c
 
+# A bare, distributed `HaloArray` owns its topology's communicator — freeing it
+# would break the array. `free!` only releases the sub-communicator a reduction
+# hands out (wrapped in a `MaybeHaloArray`), so reject the primary array with a
+# story rather than a MethodError if generic code unwraps a result and frees it.
+free!(::HaloArray) = throw(ArgumentError(
+    "free! releases the sub-communicator of a reduction result (a MaybeHaloArray); " *
+    "a primary HaloArray owns its topology and must not be freed. If this is a " *
+    "reduction result you unwrapped, call free! on the MaybeHaloArray instead."))
+
 _free_result_comm!(h::HaloArray) = (MPI.free(h.topology.cart_comm); nothing)
 _free_result_comm!(::AbstractSerialHaloArray) = nothing   # serial fields own no comm
 _free_result_comm!(c::AbstractHaloCollection) =

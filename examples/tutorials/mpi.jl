@@ -140,10 +140,13 @@ boundary_condition!(u)
 #
 #   sum(u)   maximum(u)   minimum(u)   mapreduce(f, op, u)
 #
-# To collapse only SOME axes (and keep a distributed array) use
-# mapreduce_haloarray_dims(f, op, u, dims).  Passing `dims=` to the
-# scalar functions above is intentionally rejected — a per-slice
-# global reduction needs sub-communicators, which that helper builds.
+# To collapse only SOME axes (and keep a distributed array) pass `dims=`
+# to the ordinary functions — sum(u; dims), maximum(u; dims), … — or call
+# mapreduce_haloarray_dims(f, op, u, dims) directly.  The result is a
+# MaybeHaloArray on the sub-topology that spans the kept axes (active only
+# on the coordinate-0 slice of the reduced axes); free! it when done to
+# release its sub-communicator.  For a reduction run every step, build a
+# DimReductionPlan once and reduce! into it.
 #
 # gather_haloarray collects all subdomain data onto rank 0.
 

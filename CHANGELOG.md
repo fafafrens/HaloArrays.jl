@@ -115,6 +115,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the task-spawn cost — measurably faster and near-allocation-free).
 
 ### Fixed
+- **`mapfoldl`/`mapfoldr` with `dims=` throw a clean error on every backend**:
+  the guard covered only `ThreadedHaloArray`, so on a `LocalHaloArray` the
+  call fell through to Base's dims-less `mapfoldl`, producing an obscure
+  "no method matching mapfoldl(…; dims)" `MethodError` instead of the intended
+  "folds with `dims=` are not supported" `ArgumentError`.
+- **`interior_range(m::MaybeHaloArray)` is active-guarded** like
+  `interior_view`: an inactive reduction result used to return valid-looking
+  ranges into its placeholder data (silently reading zeros) while
+  `interior_view` correctly errored — the two accessors now agree.
+- **`free!` on a primary `HaloArray` gives a descriptive error** instead of a
+  `MethodError`: `free!` releases only the sub-communicator of a reduction
+  result (a `MaybeHaloArray`); calling it on a bare, unwrapped `HaloArray`
+  (which owns its topology) now explains that rather than failing on dispatch.
 - **`dims=` reductions keep GPU-backed arrays on the device**: the reduced
   output (and, on MPI, its exchange buffers) is allocated with `similar` on
   the source's parent instead of the CPU `zeros` constructors, and the

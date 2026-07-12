@@ -119,6 +119,10 @@ using HaloArrays
             @test parent(r_sum).topology.cart_comm == MPI.COMM_NULL
             @test collect(interior_view(parent(r_sum))) ≈ collect(interior_view(parent(r_ref)))
         end
+
+        # free! on a bare (primary) HaloArray is a descriptive error, not a
+        # MethodError or a topology-communicator free.
+        @test_throws ArgumentError free!(u)
     end
 
     @testset "one-shot promotion on MPI (Bool counts like Base)" begin

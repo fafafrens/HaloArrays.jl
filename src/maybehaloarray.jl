@@ -45,12 +45,17 @@ Base.eachindex(m::MaybeHaloArray{T,N,A}) where {T,N,A} =
 
 # The interior accessors pass through (guarded like getindex), so consumers of
 # a reduced result never unwrap: `is_active(r) && interior_view(r)` works
-# whether `r` is a bare serial array or a Maybe-wrapped distributed one.
+# whether `r` is a bare serial array or a Maybe-wrapped distributed one. Both
+# guard on activity so they agree — an inactive result has no addressable
+# interior, so returning ranges into the placeholder would silently read zeros.
 function interior_view(m::MaybeHaloArray, args...)
     is_active(m) || throw(ErrorException("MaybeHaloArray: attempt to view inactive value"))
     return interior_view(m.data, args...)
 end
-interior_range(m::MaybeHaloArray, args...) = interior_range(m.data, args...)
+function interior_range(m::MaybeHaloArray, args...)
+    is_active(m) || throw(ErrorException("MaybeHaloArray: attempt to range inactive value"))
+    return interior_range(m.data, args...)
+end
 
 function Base.getindex(m::MaybeHaloArray, I::Vararg{Integer})
     is_active(m) || throw(ErrorException("MaybeHaloArray: attempt to index inactive value"))
