@@ -54,6 +54,30 @@ MPI.Initialized() || MPI.Init()
         @test norm(td) ≈ norm(t)
     end
 
+    @testset "dims= reductions stay on the device" begin
+        g(i, j) = Float64(i + 100j)
+        ref = [sum(g(i, j) for j in 1:6) for i in 1:4]
+
+        u = LocalHaloArray(Float64, (4, 6), 1; boundary_condition=:periodic)
+        fill_from_global_indices!(I -> g(I...), u)
+        ud = adapt(JLArray, u)
+        rd = sum(ud; dims=2)                                  # scalar-free end to end
+        @test parent(rd) isa JLArray                          # result lives on the device
+        @test vec(Array(parent(rd))[interior_range(rd)...]) ≈ ref
+
+        plan = DimReductionPlan(ud, 2)                        # plan output too
+        @test parent(reduce!(plan, identity, +, ud)) isa JLArray
+        @test reduce!(plan, identity, +, ud) === plan.output
+        free!(plan)
+
+        t = ThreadedHaloArray(Float64, (2, 6), 1; dims=(2, 1), boundary_condition=:periodic)
+        for I in CartesianIndices(axes(t)); t[Tuple(I)...] = g(Tuple(I)...); end
+        td = adapt(JLArray, t)
+        rt = sum(td; dims=2)
+        @test rt isa ThreadedHaloArray && tile_parent(rt, 1) isa JLArray
+        @test vcat((vec(Array(tile_parent(rt, k))[interior_range(rt)...]) for k in 1:tile_count(rt))...) ≈ ref
+    end
+
     @testset "BLAS-1 on a device parent (Array-gated kernels fall back correctly)" begin
         using LinearAlgebra: axpy!, axpby!, rmul!, lmul!, rotate!, reflect!
         mk(v) = (u = LocalHaloArray(Float64, (5,), 1; boundary_condition=:periodic);

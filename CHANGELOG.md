@@ -115,6 +115,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the task-spawn cost — measurably faster and near-allocation-free).
 
 ### Fixed
+- **`dims=` reductions keep GPU-backed arrays on the device**: the reduced
+  output (and, on MPI, its exchange buffers) is allocated with `similar` on
+  the source's parent instead of the CPU `zeros` constructors, and the
+  result assembly uses broadcast assignments instead of strided `copyto!`.
+  Previously `sum(adapt(JLArray, u); dims=2)` threw "Scalar indexing is
+  disallowed" and any GPU dims-reduction would have landed on the host.
 - **`ThreadedHaloArray` dims-reductions returned silently wrong values**: the
   generic tile driver combined the per-tile reduced arrays with `op` across
   *all* tiles — elementwise-mixing tiles that lie along kept dimensions (e.g.

@@ -293,8 +293,11 @@ function DimReductionPlan(u::LocalHaloArray{T,N,A,Halo}, dims;
     dims_n = _normalize_reduce_dims(Val(N), dims)
     keep   = _kept_dims(Val(N), dims_n)
     M      = length(keep)
-    out    = LocalHaloArray(output_eltype, ntuple(i -> interior_size(u)[keep[i]], Val(M)), Halo;
-        boundary_condition=ntuple(i -> u.boundary_condition[keep[i]], Val(M)))
+    # Storage allocated like the source's (`similar` on the parent), so a
+    # GPU-backed array gets a device-resident reduced output.
+    data = fill!(similar(parent(u), output_eltype,
+        ntuple(i -> interior_size(u)[keep[i]] + 2Halo, Val(M))), zero(output_eltype))
+    out  = LocalHaloArray(data, Halo, ntuple(i -> u.boundary_condition[keep[i]], Val(M)))
     SerialDimReductionPlan(dims_n, interior_size(u), out, nothing)
 end
 
@@ -305,10 +308,11 @@ function DimReductionPlan(u::ThreadedHaloArray{T,N,A,Halo}, dims;
     M      = length(keep)
     ts     = tile_size(u)
     layout = u.topology.dims
-    out = ThreadedHaloArray(output_eltype, ntuple(i -> ts[keep[i]], Val(M)), Halo;
-        dims=ntuple(i -> layout[keep[i]], Val(M)),
-        boundary_condition=ntuple(i -> u.boundary_condition[keep[i]], Val(M)),
-        thread_backend=thread_backend(u))
+    out = _on_device_of(tile_parent(u, 1),
+        ThreadedHaloArray(output_eltype, ntuple(i -> ts[keep[i]], Val(M)), Halo;
+            dims=ntuple(i -> layout[keep[i]], Val(M)),
+            boundary_condition=ntuple(i -> u.boundary_condition[keep[i]], Val(M)),
+            thread_backend=thread_backend(u)))
     # Group the source tiles by kept coordinate = output tile (ascending id, so
     # the op-combine order is deterministic).
     out_tiles = LinearIndices(out.topology.dims)
@@ -337,8 +341,9 @@ function reduce!(plan::SerialDimReductionPlan, f::F, op::OP, u::LocalHaloArray) 
         throw(DimensionMismatch("array geometry $(interior_size(u)) does not match the plan's $(plan.source_geometry)"))
     red = mapreduce(f, _normalize_reduction_op(op), interior_view(u); dims=plan.dims_to_remove)
     _check_plan_eltype(eltype(red), eltype(plan.output))
-    # Same linear order (only singleton dims dropped), so a flat copy is exact.
-    copyto!(interior_view(plan.output), red)
+    # Broadcast assignment (GPU-safe; only singleton dims differ).
+    iv = interior_view(plan.output)
+    iv .= reshape(red, size(iv))
     return plan.output
 end
 
@@ -401,6 +406,12 @@ end
 
 _release_transient!(::SerialDimReductionPlan) = nothing
 
+# Rebuild `x`'s storage on the device `proto` lives on (no-op for host arrays):
+# a reduced output must live where its source lives. The typename-wrapper is
+# the base array constructor Adapt targets (JLArray{Float64,2} → JLArray).
+_on_device_of(::Array, x) = x
+_on_device_of(proto::AbstractArray, x) = Adapt.adapt(Base.typename(typeof(proto)).wrapper, x)
+
 # Shared threaded assembly: each OUTPUT tile is the `op`-combination of its
 # precomputed source tiles (grouped by kept coordinate at plan construction),
 # reduced along `dims_n`. (Combining every tile with `op`, as the generic tile
@@ -417,8 +428,8 @@ function _assemble_reduced_tiles!(out::ThreadedHaloArray, f::F, op::OP,
         _check_plan_eltype(eltype(first), eltype(out))
         # The first slab ASSIGNS (a generic op has no known neutral element to
         # pre-fill with — combining into the zeroed tile would be wrong for
-        # *, max, …); the rest combine.
-        copyto!(dest, first)
+        # *, max, …); the rest combine. Broadcasts throughout: GPU-safe.
+        dest .= first
         for t in Iterators.drop(tiles, 1)
             dest .= op.(dest, slab(t))
         end

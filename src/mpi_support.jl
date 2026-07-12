@@ -549,8 +549,12 @@ function MPIDimReductionPlan(u::HaloArray{T,N,A,Halo}, dims;
     owned         = interior_size(u)
     reduced_owned = ntuple(i -> owned[dims_to_keep[i]], Val(M))
     new_boundary  = ntuple(i -> u.boundary_condition[dims_to_keep[i]], Val(M))
-    output = MaybeHaloArray(HaloArray(output_eltype, reduced_owned, Halo, root_topo;
-        boundary_condition=new_boundary))
+    # Storage allocated like the source's (`similar` on the parent), so a
+    # GPU-backed array gets a device-resident reduced output (and, through
+    # build_haloarray_from_data, device send/recv buffers).
+    out_data = fill!(similar(parent(u), output_eltype,
+        ntuple(i -> reduced_owned[i] + 2Halo, Val(M))), zero(output_eltype))
+    output = MaybeHaloArray(HaloArray(out_data, Halo, root_topo, new_boundary))
 
     # Same shape mapreduce(...; dims) produces locally (singleton removed dims);
     # allocated like u's storage so a GPU-backed array gets a device buffer.
@@ -589,7 +593,8 @@ function reduce!(plan::MPIDimReductionPlan, f::F, op::OP, u::HaloArray{T,N}) whe
     MPI.Reduce!(local_value, plan.recv_buf, op_mpi, plan.reduce_comm; root=0)
     if plan.is_slice_root
         # Same linear order (only singleton dims differ), so a flat copy is exact.
-        copyto!(interior_view(getdata(plan.output)), plan.recv_buf)
+        iv = interior_view(getdata(plan.output))
+        iv .= reshape(plan.recv_buf, size(iv))   # broadcast: GPU-safe
     end
     return plan.output
 end
