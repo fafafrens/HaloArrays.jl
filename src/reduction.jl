@@ -242,8 +242,38 @@ Base.sum(u::AbstractSingleHaloArray) = _local_sum(identity, u)
 # DimReductionPlan.
 
 # Geometry of the reduced array: kept dims' sizes and boundary conditions.
-@inline _kept_dims(::Val{N}, dims_n) where {N} =
-    Tuple(d for d in 1:N if !(d in dims_n))
+# Const-foldable tuple filter (recursive, no Vector/generator): with a literal
+# `dims` the whole reduction infers a concrete NTuple; a `Tuple(gen if …)` would
+# type as `Tuple{Vararg}` and block that. `pred::P` forces specialization.
+@inline _tfilter(::P, ::Tuple{}) where {P} = ()
+@inline _tfilter(pred::P, t::Tuple) where {P} =
+    pred(first(t)) ? (first(t), _tfilter(pred, Base.tail(t))...) : _tfilter(pred, Base.tail(t))
+
+# Sorted, duplicate-free Int tuple of dims — tuple-based and const-foldable
+# (the Vector `sort!∘unique!∘collect` stays only as the fallback for a tuple
+# that is not already strictly increasing — a rare, non-literal case).
+@inline _canonical_dims(d::Integer) = (Int(d),)
+@inline _canonical_dims(dims::Tuple) =
+    _is_increasing(map(Int, dims)) ? map(Int, dims) : Tuple(sort!(unique!(collect(Int, dims))))
+@inline _canonical_dims(dims) = Tuple(sort!(unique!(collect(Int, dims))))
+@inline _is_increasing(::Tuple{}) = true
+@inline _is_increasing(::Tuple{Any}) = true
+@inline _is_increasing(t::Tuple) = (first(t) < t[2]) && _is_increasing(Base.tail(t))
+
+# The kept dims are exactly `N - K` of them (`K = |dims_n|`, known from the
+# tuple type), so build them with `ntuple` — a type-known length — instead of a
+# value-dependent filter (whose length the compiler can't prove, forcing a
+# `Union` and an `Any` result). `dims_n` is sorted ascending (`_canonical_dims`),
+# so the i-th kept dim is `i` shifted up past each removed dim at or below it.
+# This makes the reduction infer a concrete result even for a runtime `dims::Int`.
+@inline _kept_dims(::Val{N}, dims_n::NTuple{K,Int}) where {N,K} =
+    ntuple(Val(N - K)) do i
+        d = i
+        for r in dims_n
+            d += (r <= d)
+        end
+        d
+    end
 
 """
     DimReductionPlan(u, dims) -> plan
@@ -295,26 +325,26 @@ function DimReductionPlan(u::LocalHaloArray{T,N,A,Halo}, dims;
         output_eltype=T) where {T,N,A,Halo}
     dims_n = _normalize_reduce_dims(Val(N), dims)
     keep   = _kept_dims(Val(N), dims_n)
-    M      = length(keep)
+    # `map` over `keep` (an NTuple{N-K}) keeps the length from its type — no
+    # `Val(length(keep))`, which would be a value-level (unstable) construction.
     # Storage allocated like the source's (`similar` on the parent), so a
     # GPU-backed array gets a device-resident reduced output.
     data = fill!(similar(parent(u), output_eltype,
-        ntuple(i -> interior_size(u)[keep[i]] + 2Halo, Val(M))), zero(output_eltype))
-    out  = LocalHaloArray(data, Halo, ntuple(i -> u.boundary_condition[keep[i]], Val(M)))
+        map(k -> interior_size(u)[k] + 2Halo, keep)), zero(output_eltype))
+    out  = LocalHaloArray(data, Halo, map(k -> u.boundary_condition[k], keep))
     SerialDimReductionPlan(dims_n, interior_size(u), out, nothing)
 end
 
 function DimReductionPlan(u::ThreadedHaloArray{T,N,A,Halo}, dims;
         output_eltype=T) where {T,N,A,Halo}
     dims_n = _normalize_reduce_dims(Val(N), dims)
-    keep   = _kept_dims(Val(N), dims_n)
-    M      = length(keep)
+    keep   = _kept_dims(Val(N), dims_n)     # NTuple{N-K}; `map` over it preserves length
     ts     = tile_size(u)
     layout = u.topology.dims
     out = _on_device_of(tile_parent(u, 1),
-        ThreadedHaloArray(output_eltype, ntuple(i -> ts[keep[i]], Val(M)), Halo;
-            dims=ntuple(i -> layout[keep[i]], Val(M)),
-            boundary_condition=ntuple(i -> u.boundary_condition[keep[i]], Val(M)),
+        ThreadedHaloArray(output_eltype, map(k -> ts[k], keep), Halo;
+            dims=map(k -> layout[k], keep),
+            boundary_condition=map(k -> u.boundary_condition[k], keep),
             thread_backend=thread_backend(u)))
     # Group the source tiles by kept coordinate = output tile (ascending id, so
     # the op-combine order is deterministic).
@@ -322,7 +352,7 @@ function DimReductionPlan(u::ThreadedHaloArray{T,N,A,Halo}, dims;
     source_tiles = [Int[] for _ in 1:tile_count(out)]
     for t in 1:tile_count(u)
         c = tile_coordinates(u, t)
-        push!(source_tiles[out_tiles[ntuple(i -> c[keep[i]], Val(M))...]], t)
+        push!(source_tiles[out_tiles[map(k -> c[k], keep)...]], t)
     end
     SerialDimReductionPlan(dims_n, (ts, layout), out, source_tiles)
 end
@@ -468,12 +498,12 @@ free!(plan::SerialDimReductionPlan) = plan
 
 function _classify_collection_dims(c::AbstractHaloCollection, dims)
     D = ndims(c); S = _spatial_ndims(c); Fax = D - S
-    dn = Tuple(sort!(unique!(collect(Int, dims isa Integer ? (dims,) : dims))))
+    dn = _canonical_dims(dims)
     all(d -> 1 <= d <= D, dn) ||
         throw(ArgumentError("dims $dims out of range for a $D-dimensional collection"))
     isempty(dn) && throw(ArgumentError("dims must select at least one dimension"))
-    fdims = Tuple(d for d in dn if d <= Fax)
-    sdims = Tuple(d - Fax for d in dn if d > Fax)   # shifted to field-local coords
+    fdims = _tfilter(d -> d <= Fax, dn)
+    sdims = map(d -> d - Fax, _tfilter(d -> d > Fax, dn))   # shifted to field-local coords
     (length(fdims) == Fax && length(sdims) == S) && throw(ArgumentError(
         "Reducing every axis of a collection to a scalar is not supported; use `sum(c)` etc."))
     return fdims, sdims

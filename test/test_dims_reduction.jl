@@ -184,6 +184,29 @@ _fill_global!(u, g) = (for I in CartesianIndices(axes(u)); u[Tuple(I)...] = g(Tu
         @test vec(collect(rbt)) == fill(GY, GX)
     end
 
+    @testset "type stability (array path)" begin
+        # A K-dim reduction always drops exactly K dims, so the kept count is
+        # type-known (`ntuple(Val(N-K))`, not a value-length filter) — the whole
+        # array reduction infers concretely, even for a runtime `dims::Int`.
+        lu = LocalHaloArray(Float64, (GX, GY), 1; boundary_condition=:periodic)
+        fill_from_global_indices!(g, lu)
+        tu = ThreadedHaloArray(Float64, (GX ÷ 2, GY), 1; dims=(2, 1), boundary_condition=:periodic)
+        _fill_global!(tu, g)
+        red_local(u, d)  = mapreduce_haloarray_dims(identity, +, u, d)
+
+        @test @inferred(red_local(lu, 2)) isa LocalHaloArray            # runtime Int arg
+        @test @inferred(sum(lu; dims=2)) isa LocalHaloArray             # literal
+        @test @inferred(DimReductionPlan(lu, 2)) isa DimReductionPlan   # construction
+        plan = DimReductionPlan(lu, 2); reduce!(plan, identity, +, lu)
+        @test @inferred(reduce!(plan, identity, +, lu)) isa LocalHaloArray   # reusable hot path
+        pt = DimReductionPlan(tu, 2); reduce!(pt, identity, +, tu)
+        @test @inferred(reduce!(pt, identity, +, tu)) isa ThreadedHaloArray
+
+        # canonicalization is allocation-free (no Vector via collect/sort!).
+        HaloArrays._normalize_reduce_dims(Val(2), 2)
+        @test (@allocated HaloArrays._normalize_reduce_dims(Val(2), 2)) == 0
+    end
+
     @testset "MaybeHaloArray accessor pass-through" begin
         lu = LocalHaloArray(Float64, (GX, GY), 1; boundary_condition=:periodic)
         fill_from_global_indices!(g, lu)

@@ -498,7 +498,7 @@ end
 # Validate and canonicalize a `dims` argument (Int, tuple, or iterable) into a
 # sorted duplicate-free tuple — the form the plan stores and the cache keys on.
 function _normalize_reduce_dims(::Val{N}, dims) where {N}
-    dims_t = Tuple(sort!(unique!(collect(Int, dims isa Integer ? (dims,) : dims))))
+    dims_t = _canonical_dims(dims)
     all(d -> 1 <= d <= N, dims_t) ||
         throw(ArgumentError("dims $dims out of range for a $N-dimensional array"))
     isempty(dims_t) && throw(ArgumentError("dims must select at least one dimension"))

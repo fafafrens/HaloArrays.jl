@@ -136,6 +136,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   no MPI communicators; the collection one-shot (`sum(c; dims=…)`) is a
   transient such plan, mirroring the array path.
 
+### Performance
+- **Array `dims=` reductions are now type-stable and allocation-free in setup.**
+  `dims` canonicalization (`_canonical_dims`) is tuple-based and constant-
+  foldable — a fast `(Int(d),)` path plus an already-sorted-tuple path, with
+  the `collect/sort!/unique!` Vector kept only as a fallback for unsorted/
+  duplicate input — so it no longer allocates and a literal `dims` propagates
+  to a concrete `NTuple`. The kept dims are built with `ntuple(Val(N-K))` (a
+  K-dim reduction always drops exactly K dims, so the kept length is type-
+  known) instead of a value-length filter, and the plan constructors `map`
+  over that tuple rather than `ntuple(…, Val(length(keep)))`. Result:
+  `sum(u; dims=2)`, `mapreduce_haloarray_dims`, `DimReductionPlan`, and the
+  hoisted `reduce!` all infer a concrete result on `LocalHaloArray` /
+  `ThreadedHaloArray`, even for a runtime `dims::Int`. (The collection
+  one-shot stays dynamic — its field-vs-spatial split length is value-
+  dependent — but a hoisted collection `reduce!` is stable.)
+
 ### Fixed
 - **`mapfoldl`/`mapfoldr` with `dims=` throw a clean error on every backend**:
   the guard covered only `ThreadedHaloArray`, so on a `LocalHaloArray` the
