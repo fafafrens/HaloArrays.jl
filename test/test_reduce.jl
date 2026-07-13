@@ -26,6 +26,10 @@ end
     @test reduce(+, ha) ≈ MPI.Allreduce(local_sum, MPI.SUM, topology.cart_comm)
     @test sum(ha) ≈ mapreduce(identity, +, ha)
     @test sum(abs2, ha) ≈ mapreduce(abs2, +, ha)
+    # init= is seeded once globally, not once per rank (would over-count by
+    # (nranks-1)*init across the Allreduce).
+    @test mapreduce(identity, +, ha; init=1000.0) ≈ 1000.0 + mapreduce(identity, +, ha)
+    @test sum(ha; init=1000.0) ≈ 1000.0 + sum(ha)
     @test maximum(ha) ≈ mapreduce(identity, max, ha)
     @test minimum(ha) ≈ mapreduce(identity, min, ha)
 

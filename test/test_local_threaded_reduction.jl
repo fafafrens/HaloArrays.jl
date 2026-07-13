@@ -289,6 +289,25 @@ using LinearAlgebra: dot, norm
         @test sum(big16) == 40000                            # > typemax(Int16)=32767
     end
 
+    @testset "init= is applied once, not per tile/rank" begin
+        # A commutative reduction seeds `init` once over the whole array, not
+        # once per tile (which returned 41 instead of 31 for two tiles).
+        for mk in (() -> LocalHaloArray(Int, (6,), 0; boundary_condition=:repeating),
+                   () -> ThreadedHaloArray(Int, (3,), 0; dims=(2,), boundary_condition=:repeating))
+            u = mk()
+            for i in 1:6; u[i] = i; end
+            @test mapreduce(identity, +, u; init=10) == 10 + 21   # not 20 + 21
+            @test sum(u; init=100) == 121
+            @test mapreduce(x -> x, *, u; init=2) == 2 * factorial(6)
+            @test mapreduce(identity, +, u) == 21                 # no-init unchanged
+        end
+        # Order-sensitive folds forward init into the (single-tile) fold: exact Base.
+        lu = LocalHaloArray(Int, (6,), 0; boundary_condition=:repeating)
+        for i in 1:6; lu[i] = i; end
+        @test mapfoldl(identity, -, lu; init=100) == foldl(-, 1:6; init=100)
+        @test mapfoldr(identity, -, lu; init=100) == foldr(-, 1:6; init=100)
+    end
+
     # The Local (single-block) path must stay allocation-free: the tile drivers
     # take closures, and a regression (e.g. a Core.Box from a reassigned capture,
     # or a lost @inline) would show up as heap allocations on the Krylov hot path.

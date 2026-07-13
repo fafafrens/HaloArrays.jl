@@ -7,6 +7,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **`mapreduce`/`sum` with `init=` seed once, not per tile/rank.** `init` was
+  forwarded into every tile-local (and, on MPI, per-rank) reduction, so
+  `mapreduce(identity, +, u; init=10)` returned `41` instead of `31` on a
+  two-tile array (an extra `init` per tile). A commutative reduction now folds
+  `init` in exactly once, after the tiles/ranks are combined. Order-sensitive
+  `mapfoldl`/`mapfoldr` forward `init` into the fold (exact Base on a single
+  tile; the cross-tile order is unspecified regardless — use `mapreduce` for a
+  commutative reduction).
 - **`sum`/`norm` widen narrow integers like Base.** The fast interior
   accumulator seeded at the element type, so `sum` of a `Bool`/`Int8`/`Int16`
   halo array overflowed in that type (e.g. `sum` of four `Int8(100)` returned

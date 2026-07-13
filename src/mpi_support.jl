@@ -400,12 +400,12 @@ function Base.mapreduce(
     dims = _dims_kwarg(kws, 1 + length(etc))
     dims === nothing || return mapreduce_haloarray_dims(f, op, halo, dims)
     comm   = communicator(halo)
-    rlocal = _local_mapreduce(mapreduce, f, op, (halo, etc...); kws...)  # shared local part
+    rlocal = _local_mapreduce(mapreduce, f, op, (halo, etc...))  # shared local part (no init)
     # Normalize AFTER the local part (add_sum's integer widening already
     # happened in rlocal): the builtin MPI_SUM/MPI_PROD then applies — required
     # on non-Intel, where MPI.jl cannot register custom reduction ops.
     op_mpi = MPI.Op(_normalize_reduction_op(op), typeof(rlocal); iscommutative=true)
-    MPI.Allreduce(rlocal, op_mpi, comm)
+    return _apply_init(op, MPI.Allreduce(rlocal, op_mpi, comm), kws)  # seed once, after Allreduce
 end
 
 for func in (:mapfoldl, :mapfoldr)

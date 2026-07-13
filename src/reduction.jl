@@ -65,9 +65,20 @@ end
 # inline tile; threaded = tile_mapreduce over the thread backend). The MPI
 # HaloArray methods (mpi_support.jl) wrap these SAME local parts in an
 # Allreduce, so each reduction's local math exists in exactly one place.
+# `kws` here is only ever `init` (dims is routed away earlier). For the
+# COMMUTATIVE `mapreduce` path the caller passes NO kws and seeds with `init`
+# once via `_apply_init` — forwarding it into every tile counted it per tile.
+# The order-sensitive folds still forward it (it must seed one end of the fold,
+# which is only well-defined on a single tile; see the fold methods).
 _local_mapreduce(reducer::R, f::F, op::OP, arrays::Tuple; kws...) where {R,F,OP} =
     _mapreduce_tile(t -> _reduce_views(reducer, f, op,
         map(h -> interior_view(h, t), arrays); kws...), op, first(arrays))
+
+# Seed a commutative reduction with `init` exactly ONCE, after the tiles (and,
+# on MPI, the ranks) have been combined. `haskey` is compile-time constant (the
+# kw names are in the Pairs type), so this is type-stable and free without `init`.
+@inline _apply_init(op::OP, r, kws) where {OP} =
+    haskey(kws, :init) ? op(kws[:init], r) : r
 _local_sum(f::F, u) where {F} =
     _mapreduce_tile(t -> _interior_acc(f, tile_parent(u, t), interior_range(u, t)), +, u)
 _local_dot(x, y) =
@@ -98,7 +109,8 @@ function Base.mapreduce(
     ) where {F<:Function, OP}
     dims = _dims_kwarg(kws, 1 + length(etc))
     dims === nothing || return mapreduce_haloarray_dims(f, op, halo, dims)
-    return _local_mapreduce(mapreduce, f, op, (halo, etc...); kws...)
+    r = _local_mapreduce(mapreduce, f, op, (halo, etc...))   # per-tile, no init
+    return _apply_init(op, r, kws)                            # seed once (commutative)
 end
 
 for func in (:mapfoldl, :mapfoldr)
@@ -114,6 +126,9 @@ for func in (:mapfoldl, :mapfoldr)
         :dims in keys(kws) && throw(ArgumentError(
             "`$($(string(func)))` with `dims=` is not supported on a halo array; " *
             "use `mapreduce`/`sum`/… with `dims=` (commutative ops only)."))
+        # Folds forward `init` into the tile fold (it seeds one end): exact Base
+        # on a single tile; on a tiled array the cross-tile order is unspecified
+        # regardless — use `mapreduce` for a commutative reduction.
         return _local_mapreduce($func, f, op, (halo, etc...); kws...)
     end
 end
