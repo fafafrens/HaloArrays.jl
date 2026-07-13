@@ -47,6 +47,20 @@ end
         @test fixed[1, :, :] == reshape(collect(11:16), 2, 3)
         @test fixed[2, :, :] == reshape(collect(21:26), 2, 3)
 
+        # Reopening the file must validate the existing "fixed" dataset against the
+        # halo array it will receive — a shape or eltype mismatch is refused loudly
+        # rather than silently corrupting the dataset on the next write.
+        wrong_shape = LocalHaloArray(Int, (2, 4), 1; boundary_condition=:repeating)
+        @test_throws DimensionMismatch create_haloarray_output_file(path, "fixed", wrong_shape, 2)
+        wrong_steps = LocalHaloArray(Int, (2, 3), 1; boundary_condition=:repeating)
+        @test_throws DimensionMismatch create_haloarray_output_file(path, "fixed", wrong_steps, 5)
+        wrong_eltype = LocalHaloArray(Float64, (2, 3), 1; boundary_condition=:repeating)
+        @test_throws ArgumentError create_haloarray_output_file(path, "fixed", wrong_eltype, 2)
+        # a matching reopen still succeeds and reuses the dataset
+        fid2, dset2 = create_haloarray_output_file(path, "fixed", halo, 2)
+        @test size(dset2) == (2, 2, 3)
+        close(fid2)
+
         rm(path; force=true)
     end
 

@@ -345,6 +345,35 @@ function write_haloarray_timestep!(dset, halo::MaybeHaloArray, timestep)
     return write_haloarray_timestep!(dset, getdata(halo), timestep)
 end
 
+# Reusing an existing object as a fixed-size output must match the halo array it
+# will receive — otherwise the later `write_haloarray_timestep!` writes into a
+# mismatched dataset (silent corruption, or a late out-of-range HDF5 error).
+function _assert_fixedsize_dataset_matches(obj, halo::Union{AbstractSingleHaloArray,ArrayOfHaloArray},
+                                           num_timesteps::Int, name::String)
+    obj isa HDF5.Dataset || throw(ArgumentError(
+        "HDF5: \"$name\" already exists as $(typeof(obj)), not a fixed-size dataset."))
+    expected = (num_timesteps, _hdf5_dataset_dims(halo)...)
+    size(obj) == expected || throw(DimensionMismatch(
+        "HDF5: existing dataset \"$name\" has size $(size(obj)) but this halo array needs " *
+        "$expected (num_timesteps, global_dims…). Refusing to reuse a mismatched dataset — " *
+        "use a new file/name or delete the old dataset."))
+    eltype(obj) === eltype(halo) || throw(ArgumentError(
+        "HDF5: existing dataset \"$name\" has eltype $(eltype(obj)), expected $(eltype(halo))."))
+    return obj
+end
+
+function _assert_fixedsize_dataset_matches(obj, halo::MultiHaloArray, num_timesteps::Int, name::String)
+    obj isa HDF5.Group || throw(ArgumentError(
+        "HDF5: \"$name\" already exists as $(typeof(obj)), not a field group."))
+    for (field_name, field) in pairs(halo.arrays)
+        fname = _hdf5_field_name(field_name)
+        haskey(obj, fname) || throw(ArgumentError(
+            "HDF5: existing group \"$name\" is missing field dataset \"$fname\"."))
+        _assert_fixedsize_dataset_matches(obj[fname], field, num_timesteps, "$name/$fname")
+    end
+    return obj
+end
+
 function create_haloarray_output_file(filename::String, dataset_name::String,
                                       halo::AbstractHaloArray, num_timesteps::Int)
     comm = _hdf5_comm(halo)
@@ -352,7 +381,7 @@ function create_haloarray_output_file(filename::String, dataset_name::String,
     fid = _hdf5_open(filename, mode, comm)
 
     dset = haskey(fid, dataset_name) ?
-            fid[dataset_name] :
+            _assert_fixedsize_dataset_matches(fid[dataset_name], halo, num_timesteps, dataset_name) :
             create_fixedsize_dataset_from_haloarray(fid, dataset_name, halo, num_timesteps)
 
     return fid, dset
