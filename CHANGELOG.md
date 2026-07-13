@@ -7,6 +7,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **Cell checkerboard colors are anchored to the *global* cell index, not
+  storage.** `interior_cells(ranges, color)` derived a cell's color from its
+  tile/rank-local storage parity, so with an odd local extent the red/black
+  pattern restarted at every tile/rank seam — adjacent cells straddling a
+  boundary could share a color, breaking the race-freedom that colored
+  in-place updates rely on. `CellRanges` now carries the global index of its
+  first interior cell (pass the tile id on a `ThreadedHaloArray`:
+  `CellRanges(u, tile_id)`), and the color is `mod(sum(global_index), 2)`, so
+  the checkerboard is continuous across every seam. `CellCheckerboard` carries
+  the matching global-origin `parity` offset for GPU launch kernels. Faces are
+  unchanged (each tile owns separate face storage, so intra-tile local parity
+  is already race-free).
 - **`mapreduce`/`sum` with `init=` seed once, not per tile/rank.** `init` was
   forwarded into every tile-local (and, on MPI, per-rank) reduction, so
   `mapreduce(identity, +, u; init=10)` returned `41` instead of `31` on a

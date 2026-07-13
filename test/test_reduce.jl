@@ -151,6 +151,26 @@ end
     end
 end
 
+@testset "colored cells follow global parity across rank seams" begin
+    comm = MPI.COMM_WORLD
+    # Odd local extent (3): a storage-local color anchor would mislabel the
+    # cells adjacent to each rank seam (the local checkerboard would repeat
+    # instead of continuing). CellRanges carries the rank's global origin, so
+    # colors follow the GLOBAL parity mod(sum(global_index), 2) everywhere.
+    topology = CartesianTopology(comm, (0,); periodic=(false,))
+    ha = HaloArray(Int, (3,), 1, topology; boundary_condition=:repeating)
+    hw = halo_width(ha)
+    cr = CellRanges(ha)
+
+    owned = 0
+    for color in (0, 1), sub in interior_cells(cr, color), I in sub
+        g = interior_to_global_index(ha, Tuple(I) .- hw)
+        @test mod(sum(g), 2) == color
+        owned += 1
+    end
+    @test owned == 3   # every owned cell is assigned exactly one color
+end
+
 @testset "collective == (all ranks agree)" begin
     comm = MPI.COMM_WORLD
     rank = MPI.Comm_rank(comm)

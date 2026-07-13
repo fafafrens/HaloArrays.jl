@@ -210,13 +210,16 @@ function update_direction_color!(::LocalHaloBackend, U, rng, params, dir::Int, c
 end
 
 function update_direction_color!(::ThreadedHaloBackend, U, rngs, params, dir::Int, color::Int)
-    regions = interior_cells(CellRanges(U), color)
     update! = dir == 1 ? update_x_link! : update_y_link!
 
     tforeach(1:tile_count(U); scheduler=:static) do tile_id
         arrays = link_arrays(U, tile_id)
         rng = rngs[tile_id]
-        for indices in regions
+        # Per-tile ranges: each tile carries its own global origin, so the
+        # checkerboard stays globally consistent across tile seams (a single
+        # shared `CellRanges(U)` colors tiles by local parity and double-colors
+        # adjacent cells at a boundary with an odd tile extent).
+        for indices in interior_cells(CellRanges(U, tile_id), color)
             @inbounds for I in indices
                 update!(arrays, I, params, rng)
             end

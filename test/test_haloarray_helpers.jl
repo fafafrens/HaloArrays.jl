@@ -265,10 +265,12 @@ end
 
         @test length(color0_ranges) == 2
         @test length(color1_ranges) == 2
-        @test collect(color0_ranges[1]) == collect(CartesianIndices((2:2:4, 2:2:6)))
-        @test collect(color0_ranges[2]) == collect(CartesianIndices((3:2:5, 3:2:5)))
-        @test collect(color1_ranges[1]) == collect(CartesianIndices((2:2:4, 3:2:5)))
-        @test collect(color1_ranges[2]) == collect(CartesianIndices((3:2:5, 2:2:6)))
+        # Subranges are ordered by the global-parity mask; for this local array
+        # (global origin (1,1)) color 0 collects the two global-even subranges.
+        @test collect(color0_ranges[1]) == collect(CartesianIndices((3:2:5, 3:2:5)))
+        @test collect(color0_ranges[2]) == collect(CartesianIndices((2:2:4, 2:2:6)))
+        @test collect(color1_ranges[1]) == collect(CartesianIndices((3:2:5, 2:2:6)))
+        @test collect(color1_ranges[2]) == collect(CartesianIndices((2:2:4, 3:2:5)))
 
         color0_cells = _cell_subrange_indices(color0_ranges)
         color1_cells = _cell_subrange_indices(color1_ranges)
@@ -315,8 +317,9 @@ end
         @test collect(interior_cells(one_d_ranges)) == collect(CartesianIndices((2:5,)))
         @test length(one_d_color0) == 1
         @test length(one_d_color1) == 1
-        @test _cell_subrange_indices(one_d_color0) == collect(CartesianIndices((2:2:4,)))
-        @test _cell_subrange_indices(one_d_color1) == collect(CartesianIndices((3:2:5,)))
+        # global index = storage - halo, so color 0 (global-even) is storage 3,5.
+        @test _cell_subrange_indices(one_d_color0) == collect(CartesianIndices((3:2:5,)))
+        @test _cell_subrange_indices(one_d_color1) == collect(CartesianIndices((2:2:4,)))
 
         one_cell = LocalHaloArray(Int, (1,), 1; boundary_condition=:repeating)
         one_cell_ranges = CellRanges(one_cell)
@@ -326,12 +329,13 @@ end
         one_cell_region_color1 = @inferred interior_cell_window(one_cell_ranges, 1)
 
         @test collect(interior_cells(one_cell_ranges)) == [CartesianIndex(2)]
-        @test _cell_subrange_indices(one_cell_color0) == [CartesianIndex(2)]
-        @test isempty(_cell_subrange_indices(one_cell_color1))
-        @test one_cell_region_color0 == CellCheckerboard(CartesianIndex(2), (1,), (1,), 0, 1)
-        @test one_cell_region_color1 == CellCheckerboard(CartesianIndex(2), (1,), (1,), 1, 1)
-        @test _colored_cell_region_indices(one_cell_region_color0) == [CartesianIndex(2)]
-        @test isempty(_colored_cell_region_indices(one_cell_region_color1))
+        # the lone cell has global index 1 (odd) → color 1, not color 0.
+        @test isempty(_cell_subrange_indices(one_cell_color0))
+        @test _cell_subrange_indices(one_cell_color1) == [CartesianIndex(2)]
+        @test one_cell_region_color0 == CellCheckerboard(CartesianIndex(2), (1,), (1,), 0, 1, 1)
+        @test one_cell_region_color1 == CellCheckerboard(CartesianIndex(2), (1,), (1,), 1, 1, 1)
+        @test isempty(_colored_cell_region_indices(one_cell_region_color0))
+        @test _colored_cell_region_indices(one_cell_region_color1) == [CartesianIndex(2)]
 
         three_d = LocalHaloArray(Int, (3, 4, 2), 1; boundary_condition=:repeating)
         three_d_ranges = CellRanges(three_d)
@@ -348,10 +352,11 @@ end
               Set(collect(interior_cells(three_d_ranges)))
         @test !_has_nearest_neighbor_conflict(three_d_color0_cells)
         @test !_has_nearest_neighbor_conflict(three_d_color1_cells)
+        # 3-D halo=1: global origin (1,1,1) vs storage first (2,2,2) → parity 1.
         @test three_d_color0_region ==
-              CellCheckerboard(CartesianIndex(2, 2, 2), (2, 4, 2), (3, 4, 2), 0, 1)
+              CellCheckerboard(CartesianIndex(2, 2, 2), (2, 4, 2), (3, 4, 2), 0, 1, 1)
         @test three_d_color1_region ==
-              CellCheckerboard(CartesianIndex(2, 2, 2), (2, 4, 2), (3, 4, 2), 1, 1)
+              CellCheckerboard(CartesianIndex(2, 2, 2), (2, 4, 2), (3, 4, 2), 1, 1, 1)
         @test Set(_colored_cell_region_indices(three_d_color0_region)) == Set(three_d_color0_cells)
         @test Set(_colored_cell_region_indices(three_d_color1_region)) == Set(three_d_color1_cells)
 
@@ -375,6 +380,36 @@ end
             @test interior_cell_window(other_ranges, 0) == color0_region
             @test interior_cell_window(other_ranges, 1) == color1_region
         end
+    end
+
+    @testset "checkerboard stays globally continuous across tile seams" begin
+        # 2 tiles × 3 interior cells (odd local extent) — a storage-local parity
+        # anchor would give each tile the same local coloring and double-color
+        # the cells straddling the seam. Building the ranges per tile with its
+        # own global origin must reproduce a single global red/black checkerboard.
+        u = ThreadedHaloArray(Int, (3,), 1; dims=(2,), boundary_condition=:repeating)
+        hw = halo_width(u)
+
+        to_global(tid, cells) =
+            [CartesianIndex(interior_to_global_index(u, tid, Tuple(I) .- hw)) for I in cells]
+
+        global0 = CartesianIndex{1}[]
+        global1 = CartesianIndex{1}[]
+        for tid in 1:tile_count(u)
+            cr = CellRanges(u, tid)
+            append!(global0, to_global(tid, _cell_subrange_indices(interior_cells(cr, 0))))
+            append!(global1, to_global(tid, _cell_subrange_indices(interior_cells(cr, 1))))
+        end
+
+        # the 6 global cells are partitioned exactly once
+        @test Set(vcat(global0, global1)) == Set(collect(CartesianIndices((1:6,))))
+        @test length(global0) + length(global1) == 6
+        # colors follow GLOBAL parity, continuous across the tile-1/tile-2 seam
+        @test Set(Tuple(I)[1] for I in global0) == Set([2, 4, 6])
+        @test Set(Tuple(I)[1] for I in global1) == Set([1, 3, 5])
+        # no two same-color cells are global neighbours → race-free updates
+        @test !_has_nearest_neighbor_conflict(global0)
+        @test !_has_nearest_neighbor_conflict(global1)
     end
 
     @testset "interior_faces support a conservative flux update" begin
@@ -497,21 +532,22 @@ end
         u = LocalHaloArray(Float64, (4,), 1; boundary_condition=:repeating)
         cr = CellRanges(u)
 
-        r0 = interior_cell_window(cr, 0)   # color 0: even storage index
-        r1 = interior_cell_window(cr, 1)   # color 1: odd storage index
+        r0 = interior_cell_window(cr, 0)   # color 0: global-even cell
+        r1 = interior_cell_window(cr, 1)   # color 1: global-odd cell
 
-        # color 0 maps J=(1,) → storage 2, J=(2,) → storage 4
-        @test cell_index(r0, (1,)) == (2,)
-        @test cell_index(r0, (2,)) == (4,)
-        # color 1 maps J=(1,) → storage 3, J=(2,) → storage 5
-        @test cell_index(r1, (1,)) == (3,)
-        @test cell_index(r1, (2,)) == (5,)
+        # global index = storage - halo, so color 0 (global-even) is storage 3,5
+        # color 0 maps J=(1,) → storage 3, J=(2,) → storage 5
+        @test cell_index(r0, (1,)) == (3,)
+        @test cell_index(r0, (2,)) == (5,)
+        # color 1 maps J=(1,) → storage 2, J=(2,) → storage 4
+        @test cell_index(r1, (1,)) == (2,)
+        @test cell_index(r1, (2,)) == (4,)
 
-        # verify each result has the correct color: mod(i, 2) == color
+        # verify each result has the correct global color: mod(sum(I)+parity,2) == color
         for (region, color) in ((r0, 0), (r1, 1))
             for j in 1:region.size[1]
                 I = cell_index(region, (j,))
-                @test mod(I[1], 2) == color
+                @test mod(sum(I) + region.parity, 2) == color
                 @test is_cell_index_inbounds(region, I)
             end
         end
@@ -535,7 +571,7 @@ end
         for ji in 1:r2c0.size[1], jj in 1:r2c0.size[2]
             I = cell_index(r2c0, (ji, jj))
             if is_cell_index_inbounds(r2c0, I)
-                @test mod(sum(I), 2) == 0
+                @test mod(sum(I) + r2c0.parity, 2) == 0
             end
         end
     end
