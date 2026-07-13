@@ -14,24 +14,26 @@ them after selecting an individual field.
 - `interior_cells(ranges, color)`: branch-free checkerboard
   subranges for nearest-neighbor in-place updates.
 """
-struct CellRanges{A,Halo,N}
+struct CellRanges{A,Halo}
     owned_cells::A
     halo::Halo
-    global_origin::NTuple{N,Int}   # global index of the first interior cell (this tile/rank)
+    parity_offset::Int   # storage↔global sum-parity offset for this tile/rank
 end
 
-# `global_origin` anchors the checkerboard parity to the GLOBAL cell index, so
-# the colors stay consistent across tile/rank seams (a storage-local anchor
-# double-colors adjacent cells at a boundary with an odd local extent). On a
-# `ThreadedHaloArray` pass the tile id; single-block backends have one tile.
+# A cell's color is its GLOBAL parity `mod(sum(global_index), 2)`, kept consistent
+# across tile/rank seams by `parity_offset` — the one bit by which this tile's
+# storage parity differs from global. Pass the tile id on a `ThreadedHaloArray`;
+# single-block backends have one tile.
 CellRanges(halo) = CellRanges(halo, 1)
 
 function CellRanges(halo, tile_id::Integer)
     sr = _spatial_interior_range(halo)
+    indices = CartesianIndices(sr)
     # `_geometry_field` picks the reference field (a collection's fields share
-    # geometry), so the global origin works for single arrays and collections.
+    # geometry), so the origin works for single arrays and collections.
     origin = interior_to_global_index(_geometry_field(halo), tile_id, map(_ -> 1, sr))
-    return CellRanges(CartesianIndices(sr), halo_width(halo), origin)
+    parity_offset = mod(sum(origin) - sum(Tuple(first(indices))), 2)
+    return CellRanges(indices, halo_width(halo), parity_offset)
 end
 
 """
@@ -47,17 +49,15 @@ interior_cells(ranges::CellRanges) = ranges.owned_cells
     return ntuple(d -> d == N ? last_bit : prefix_bits[d], Val(N))
 end
 
-# `origin` is the GLOBAL index of the first interior cell (`indices` are the
-# tile/rank-LOCAL storage indices). The color of a cell is its *global* parity,
-# so the first colored storage cell is offset by the global-origin parity, not
-# the storage parity — this keeps the checkerboard continuous across seams.
+# Branch-free checkerboard in STORAGE coordinates; the caller shifts the color by
+# `parity_offset` (see `interior_cells`) so the result lands on global parity.
 @inline function _colored_cell_subrange(indices::CartesianIndices{N},
-                                        origin::NTuple{N,Int}, mask::NTuple{N,Int}) where {N}
+                                        mask::NTuple{N,Int}) where {N}
     first_tuple = Tuple(first(indices))
     region_size = size(indices)
 
     return CartesianIndices(ntuple(Val(N)) do d
-        delta = mod(mask[d] - mod(origin[d], 2), 2)
+        delta = mod(mask[d] - mod(first_tuple[d], 2), 2)
         len = region_size[d] <= delta ? 0 : cld(region_size[d] - delta, 2)
         start = first_tuple[d] + delta
         _loop_strided_range(start, len, 2)
@@ -65,11 +65,11 @@ end
 end
 
 @inline function _colored_cell_ranges(indices::CartesianIndices{N},
-                                      origin::NTuple{N,Int}, color::Integer) where {N}
+                                      color::Integer) where {N}
     checked_color = _check_loop_color(color)
     return ntuple(Val(2^(N - 1))) do subrange_id
         mask = _cell_color_mask(Val(N), checked_color, subrange_id)
-        _colored_cell_subrange(indices, origin, mask)
+        _colored_cell_subrange(indices, mask)
     end
 end
 
@@ -80,7 +80,10 @@ Return a tuple of strided `CartesianIndices` that cover one checkerboard color
 of the interior cells. Colors are `0` and `1`, chosen by the cell's **global**
 parity `mod(sum(global_index), 2)`, so the coloring is consistent across
 tile/rank boundaries. On a [`ThreadedHaloArray`](@ref) build the ranges per
-tile — `CellRanges(u, tile_id)` — so each tile carries its own global origin.
+tile — `CellRanges(u, tile_id)` — so each tile carries its own parity offset.
 """
-interior_cells(ranges::CellRanges, color::Integer) =
-    _colored_cell_ranges(interior_cells(ranges), ranges.global_origin, color)
+function interior_cells(ranges::CellRanges, color::Integer)
+    # shift the requested color by this tile's storage↔global parity offset
+    storage_color = mod(_check_loop_color(color) - ranges.parity_offset, 2)
+    return _colored_cell_ranges(interior_cells(ranges), storage_color)
+end

@@ -25,7 +25,7 @@ struct CellCheckerboard{N,C}
     full_size::NTuple{N,Int}
     color::Int
     compressed_dim::Int
-    parity::Int   # mod(sum(global_origin) - sum(first), 2): anchors `color` to global parity
+    parity::Int   # storage↔global sum-parity offset (CellRanges.parity_offset): anchors `color` to global parity
 end
 
 @inline CellWindow(indices::CartesianIndices{N}) where {N} =
@@ -120,12 +120,11 @@ end
 @inline function CellCheckerboard(indices::CartesianIndices{N},
                                          color::Integer,
                                          compressed_dim::Integer=1;
-                                         global_origin::NTuple{N,Int}=Tuple(first(indices))) where {N}
+                                         parity::Integer=0) where {N}
     checked_color = _check_loop_color(color)
     compressed = _check_cell_compressed_dim(Val(N), compressed_dim)
     full_size = size(indices)
     launch_size = ntuple(d -> d == compressed ? cld(full_size[d], 2) : full_size[d], Val(N))
-    parity = mod(sum(global_origin) - sum(Tuple(first(indices))), 2)
 
     return CellCheckerboard(
         first(indices),
@@ -133,7 +132,7 @@ end
         full_size,
         checked_color,
         compressed,
-        parity,
+        Int(parity),
     )
 end
 
@@ -160,7 +159,7 @@ physical cell index and check the compressed dimension upper bound.
                                       color::Integer,
                                       compressed_dim::Integer) =
     CellCheckerboard(interior_cells(ranges), color, compressed_dim;
-                     global_origin=ranges.global_origin)
+                     parity=ranges.parity_offset)
 @inline interior_cell_window(ranges::CellRanges,
                                       color::Integer,
                                       ::Dim{D}) where {D} =

@@ -265,12 +265,13 @@ end
 
         @test length(color0_ranges) == 2
         @test length(color1_ranges) == 2
-        # Subranges are ordered by the global-parity mask; for this local array
-        # (global origin (1,1)) color 0 collects the two global-even subranges.
-        @test collect(color0_ranges[1]) == collect(CartesianIndices((3:2:5, 3:2:5)))
-        @test collect(color0_ranges[2]) == collect(CartesianIndices((2:2:4, 2:2:6)))
-        @test collect(color1_ranges[1]) == collect(CartesianIndices((3:2:5, 2:2:6)))
-        @test collect(color1_ranges[2]) == collect(CartesianIndices((2:2:4, 3:2:5)))
+        # Subranges are generated in storage coordinates (color shifted by the
+        # tile's parity offset); this local array has offset 0, so color 0 is the
+        # storage-even set and its subranges come out in storage-mask order.
+        @test collect(color0_ranges[1]) == collect(CartesianIndices((2:2:4, 2:2:6)))
+        @test collect(color0_ranges[2]) == collect(CartesianIndices((3:2:5, 3:2:5)))
+        @test collect(color1_ranges[1]) == collect(CartesianIndices((2:2:4, 3:2:5)))
+        @test collect(color1_ranges[2]) == collect(CartesianIndices((3:2:5, 2:2:6)))
 
         color0_cells = _cell_subrange_indices(color0_ranges)
         color1_cells = _cell_subrange_indices(color1_ranges)
