@@ -3,9 +3,10 @@ module HaloArraysLinearSolveExt
 using HaloArrays
 using LinearSolve
 using Krylov
-using LinearAlgebra: dot, norm, mul!
+using LinearAlgebra: dot, norm, mul!, ldiv!, UniformScaling
 
 const SciMLBase = LinearSolve.SciMLBase
+const _IdentityOp = LinearSolve.SciMLOperators.IdentityOperator
 
 # ============================================================
 # Path 1 — KrylovJL on a *1-D* halo array (Krylov.jl, mature, cached)
@@ -71,34 +72,63 @@ end
 @inline _threshold(b, abstol, reltol) =
     max(abstol, reltol * max(norm(b), eps(float(real(eltype(b))))))
 
+# ---- left-preconditioning helpers ----
+# These solvers apply a LEFT preconditioner `Pl` (approximating A), the usual
+# LinearSolve convention `z = Pl \ r` via `ldiv!`. The identity default (no
+# preconditioner) is a no-op, so the unpreconditioned path stays byte-for-byte
+# and reduction-for-reduction identical.
+@inline _is_identity_precond(::_IdentityOp) = true
+@inline _is_identity_precond(::UniformScaling) = true
+@inline _is_identity_precond(_) = false
+
+@inline _apply_precond!(z, Pl, r) = ldiv!(z, Pl, r)     # z = Pl⁻¹ r  (out of place)
+@inline _apply_precond!(z, ::_IdentityOp, r) = copyto!(z, r)
+@inline _apply_precond!(z, ::UniformScaling, r) = copyto!(z, r)
+@inline _apply_precond!(Pl, v) = ldiv!(Pl, v)           # v ← Pl⁻¹ v  (in place)
+@inline _apply_precond!(::_IdentityOp, v) = v
+@inline _apply_precond!(::UniformScaling, v) = v
+
+# A right preconditioner would be silently dropped, so reject it explicitly.
+@inline _reject_right_precond(Pr) =
+    _is_identity_precond(Pr) || throw(ArgumentError(
+        "Halo Krylov solvers apply a LEFT preconditioner (Pl) only; a right " *
+        "preconditioner Pr::$(typeof(Pr)) is not supported. Fold it into Pl."))
+
 # ---- Conjugate Gradient — symmetric positive-definite ----
 struct CGWorkspace{T}
     Ap::T
     r::T
     p::T
+    z::T
 end
-_cg_workspace(b) = CGWorkspace(similar(b), similar(b), similar(b))
+_cg_workspace(b) = CGWorkspace(similar(b), similar(b), similar(b), similar(b))
 
-function _cg!(x, A, b, w::CGWorkspace; abstol, reltol, maxiter)
-    Ap, r, p = w.Ap, w.r, w.p
+# Preconditioned CG (M SPD). `rz = ⟨r, M⁻¹r⟩` is the monitored residual measure:
+# with the identity preconditioner `z ≡ r`, so `rz = ⟨r,r⟩`, `sqrt(rz) = ‖r‖`,
+# and the two per-iteration reductions (`⟨p,Ap⟩`, `⟨r,z⟩`) reduce to exactly the
+# stock CG — no extra communication when unpreconditioned.
+function _cg!(x, A, b, w::CGWorkspace, Pl; abstol, reltol, maxiter)
+    Ap, r, p, z = w.Ap, w.r, w.p, w.z
     mul!(Ap, A, x); copyto!(r, b); r .-= Ap        # r = b - A*x
-    copyto!(p, r)
-    rsold = real(dot(r, r))
+    _apply_precond!(z, Pl, r)                       # z = M⁻¹ r
+    copyto!(p, z)
+    rz = real(dot(r, z))
     thr = _threshold(b, abstol, reltol)
-    res = sqrt(rsold)
+    res = sqrt(rz)
     res ≤ thr && return x, 0, res, true
     iters = 0
     for k in 1:maxiter
         iters = k
         mul!(Ap, A, p)
-        α = rsold / real(dot(p, Ap))
+        α = rz / real(dot(p, Ap))
         x .+= α .* p
         r .-= α .* Ap
-        rsnew = real(dot(r, r))
-        res = sqrt(rsnew)
+        _apply_precond!(z, Pl, r)
+        rznew = real(dot(r, z))
+        res = sqrt(rznew)
         res ≤ thr && return x, iters, res, true
-        p .= r .+ (rsnew / rsold) .* p
-        rsold = rsnew
+        p .= z .+ (rznew / rz) .* p
+        rz = rznew
     end
     return x, iters, res, res ≤ thr
 end
@@ -110,9 +140,13 @@ end
 _bicgstab_workspace(b) =
     BiCGStabWorkspace(similar(b), similar(b), similar(b), similar(b), similar(b), similar(b), similar(b))
 
-function _bicgstab!(x, A, b, w::BiCGStabWorkspace; abstol, reltol, maxiter)
+# Left-preconditioned BiCGStab: solve M⁻¹A x = M⁻¹b. Every operator product is
+# preconditioned in place, so all residual norms are the preconditioned residual
+# (identical to the true residual when unpreconditioned).
+function _bicgstab!(x, A, b, w::BiCGStabWorkspace, Pl; abstol, reltol, maxiter)
     r, tmp, rhat, p, v, s, t = w.r, w.tmp, w.rhat, w.p, w.v, w.s, w.t
     copyto!(r, b); mul!(tmp, A, x); r .-= tmp       # r = b - A*x
+    _apply_precond!(Pl, r)                          # r ← M⁻¹ r
     copyto!(rhat, r)
     fill!(p, 0); fill!(v, 0)
     Tr = real(eltype(b))
@@ -126,7 +160,7 @@ function _bicgstab!(x, A, b, w::BiCGStabWorkspace; abstol, reltol, maxiter)
         ρ = dot(rhat, r)
         β = (ρ / ρ_old) * (α / ω)
         p .-= ω .* v; p .*= β; p .+= r              # p = r + β(p - ω v)
-        mul!(v, A, p)
+        mul!(v, A, p); _apply_precond!(Pl, v)       # v ← M⁻¹ A p
         α = ρ / dot(rhat, v)
         s .= r .- α .* v
         res = norm(s)
@@ -134,7 +168,7 @@ function _bicgstab!(x, A, b, w::BiCGStabWorkspace; abstol, reltol, maxiter)
             x .+= α .* p
             return x, iters, res, true
         end
-        mul!(t, A, s)
+        mul!(t, A, s); _apply_precond!(Pl, t)       # t ← M⁻¹ A s
         ω = dot(t, s) / dot(t, t)
         x .+= α .* p; x .+= ω .* s
         r .= s .- ω .* t
@@ -164,7 +198,10 @@ end
     return (abs(a) / ρ, (a / abs(a)) * conj(b) / ρ)
 end
 
-function _gmres!(x, A, b, work::GMRESWorkspace; abstol, reltol, maxiter)
+# Left-preconditioned restarted GMRES: build the Krylov space of M⁻¹A and monitor
+# the preconditioned residual `M⁻¹(b - Ax)` (identical to the true residual when
+# unpreconditioned, since M⁻¹ is then a no-op).
+function _gmres!(x, A, b, work::GMRESWorkspace, Pl; abstol, reltol, maxiter)
     V, H, g, cs, sn, w, Ax = work.V, work.H, work.g, work.cs, work.sn, work.w, work.Ax
     T = real(float(eltype(b))); m = length(cs)
     thr = _threshold(b, abstol, reltol)
@@ -172,6 +209,7 @@ function _gmres!(x, A, b, work::GMRESWorkspace; abstol, reltol, maxiter)
     while total < maxiter
         mul!(Ax, A, x)
         r = V[1]; copyto!(r, b); r .-= Ax           # residual in V[1]
+        _apply_precond!(Pl, r)                       # r ← M⁻¹(b - Ax)
         β = norm(r); res = β
         res ≤ thr && break
         V[1] .*= inv(β)
@@ -180,7 +218,7 @@ function _gmres!(x, A, b, work::GMRESWorkspace; abstol, reltol, maxiter)
         inner = min(m, maxiter - total)             # never exceed the iteration budget
         for j in 1:inner
             k = j; total += 1
-            mul!(w, A, V[j])
+            mul!(w, A, V[j]); _apply_precond!(Pl, w)  # w ← M⁻¹ A vⱼ
             for i in 1:j                            # modified Gram-Schmidt
                 H[i, j] = dot(V[i], w)              # conjugate inner product (complex-safe)
                 w .-= H[i, j] .* V[i]
@@ -295,25 +333,32 @@ LinearSolve.init_cacheval(alg::HaloGMRESAlg, A, b, u, Pl, Pr, maxiters, abstol, 
 _retcode(converged) = converged ? SciMLBase.ReturnCode.Success : SciMLBase.ReturnCode.MaxIters
 
 function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::HaloCGAlg; kwargs...)
-    x, iters, _res, conv = _cg!(cache.u, cache.A, cache.b, cache.cacheval;
+    _reject_right_precond(cache.Pr)
+    x, iters, _res, conv = _cg!(cache.u, cache.A, cache.b, cache.cacheval, cache.Pl;
         abstol = cache.abstol, reltol = cache.reltol, maxiter = cache.maxiters)
     return SciMLBase.build_linear_solution(alg, x, nothing, cache; retcode = _retcode(conv), iters = iters)
 end
 
 function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::HaloMINRESAlg; kwargs...)
+    # Preconditioned MINRES needs the SPD Lanczos rework; reject rather than
+    # silently ignore a supplied preconditioner (use HaloCG/HaloGMRES instead).
+    (_is_identity_precond(cache.Pl) && _is_identity_precond(cache.Pr)) || throw(ArgumentError(
+        "HaloMINRES does not support preconditioning; use HaloCG (SPD) or HaloGMRES with `Pl`."))
     x, iters, _res, conv = _minres!(cache.u, cache.A, cache.b, cache.cacheval;
         abstol = cache.abstol, reltol = cache.reltol, maxiter = cache.maxiters)
     return SciMLBase.build_linear_solution(alg, x, nothing, cache; retcode = _retcode(conv), iters = iters)
 end
 
 function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::HaloBiCGStabAlg; kwargs...)
-    x, iters, _res, conv = _bicgstab!(cache.u, cache.A, cache.b, cache.cacheval;
+    _reject_right_precond(cache.Pr)
+    x, iters, _res, conv = _bicgstab!(cache.u, cache.A, cache.b, cache.cacheval, cache.Pl;
         abstol = cache.abstol, reltol = cache.reltol, maxiter = cache.maxiters)
     return SciMLBase.build_linear_solution(alg, x, nothing, cache; retcode = _retcode(conv), iters = iters)
 end
 
 function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::HaloGMRESAlg; kwargs...)
-    x, iters, _res, conv = _gmres!(cache.u, cache.A, cache.b, cache.cacheval;
+    _reject_right_precond(cache.Pr)
+    x, iters, _res, conv = _gmres!(cache.u, cache.A, cache.b, cache.cacheval, cache.Pl;
         abstol = cache.abstol, reltol = cache.reltol, maxiter = cache.maxiters)
     return SciMLBase.build_linear_solution(alg, x, nothing, cache; retcode = _retcode(conv), iters = iters)
 end

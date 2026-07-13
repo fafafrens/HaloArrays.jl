@@ -7,6 +7,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **`HaloCG`/`HaloGMRES`/`HaloBiCGStab` apply a supplied preconditioner instead
+  of silently ignoring it.** The coordinate-free `solve!` methods dropped
+  `cache.Pl`/`cache.Pr`, so a `Pl = M` passed through LinearSolve did nothing.
+  They now apply `Pl` as a left preconditioner (`z = M⁻¹r` via `ldiv!`): `HaloCG`
+  runs preconditioned CG, `HaloGMRES`/`HaloBiCGStab` left-precondition every
+  operator product. The identity default is a no-op, so the unpreconditioned
+  path stays byte- and reduction-identical. A right preconditioner (`Pr`) — which
+  these solvers can't apply — now raises a clear error rather than being dropped,
+  and `HaloMINRES` rejects any preconditioner (preconditioned MINRES needs the
+  SPD Lanczos rework; use `HaloCG`/`HaloGMRES`).
+- **HDF5 fixed-size output validates an existing dataset before reusing it.**
+  Reopening a file reused a dataset by name with no shape/eltype check, silently
+  corrupting it (or erroring late) when the geometry, `num_timesteps`, or eltype
+  differed. A mismatch now raises `DimensionMismatch`/`ArgumentError`.
 - **`norm`/`dot` work for vector-valued cells (e.g. `SVector` fields).** The
   fast 2-norm accumulated `abs2(cell)` and `dot` accumulated `conj(x)*y`, both
   undefined for an `SVector` element, so `norm(u)`/`dot(u, u)` on an otherwise

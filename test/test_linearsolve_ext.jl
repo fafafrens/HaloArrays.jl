@@ -110,7 +110,7 @@ end
     # Reach the internal solver to check the numerical edge cases directly.
     ext = Base.get_extension(HaloArrays, :HaloArraysLinearSolveExt)
     run_gmres(x, A, b; restart = length(b), maxiter = 10 * length(b)) =
-        ext._gmres!(x, A, b, ext._gmres_workspace(b; restart = restart);
+        ext._gmres!(x, A, b, ext._gmres_workspace(b; restart = restart), I;
                     abstol = 0.0, reltol = 1e-10, maxiter = maxiter)
 
     # Complex system: the Hessenberg/Givens stay in the complex field — A = i,
@@ -128,6 +128,40 @@ end
     # (not a full restart cycle of `restart` matvecs).
     xb = zeros(8); _, itb, _, _ = run_gmres(xb, randn(8, 8) + 8I, randn(8); restart = 30, maxiter = 1)
     @test itb ≤ 1
+end
+
+@testset "left preconditioning (Pl) is applied, not ignored" begin
+    n = 12
+    Q = Matrix(qr(randn(n, n)).Q)
+    Aspd = Q * Diagonal(range(1.0, 40.0; length = n)) * transpose(Q)
+    Aspd = (Aspd + transpose(Aspd)) / 2                      # SPD, ill-conditioned
+    # well-conditioned, diagonally dominant non-symmetric matrix for GMRES/BiCGStab
+    Agen = Diagonal(range(3.0, 6.0; length = n)) + 0.2 * randn(n, n)
+    b = randn(n)
+
+    @testset "$name converges with a Jacobi preconditioner" for (name, alg, A) in (
+            ("HaloCG", HaloCG(), Aspd),
+            ("HaloGMRES", HaloGMRES(restart = n), Agen),
+            ("HaloBiCGStab", HaloBiCGStab(), Agen))
+        xref = A \ b
+        M = Diagonal(diag(A))
+        sol = solve(LinearProblem(copy(A), copy(b)), alg; Pl = M, reltol = 1e-10, maxiters = 500)
+        @test sol.retcode == ReturnCode.Success
+        @test isapprox(sol.u, xref; rtol = 1e-6)
+
+        # A perfect preconditioner (M = A on a diagonal system, so M⁻¹A = I) must
+        # converge in a single iteration — proof the preconditioner is applied.
+        d = collect(range(2.0, 5.0; length = n)); Ad = Diagonal(d); bd = randn(n)
+        exact = solve(LinearProblem(Ad, copy(bd)), alg; Pl = Diagonal(d), reltol = 1e-10, maxiters = 50)
+        @test exact.iters == 1
+        @test exact.u ≈ Ad \ bd
+    end
+
+    # Unsupported preconditioner requests are rejected, not silently dropped.
+    M = Diagonal(diag(Aspd))
+    @test_throws ArgumentError solve(LinearProblem(Aspd, b), HaloCG(); Pr = M)
+    @test_throws ArgumentError solve(LinearProblem(Aspd, b), HaloGMRES(); Pr = M)
+    @test_throws ArgumentError solve(LinearProblem(Aspd, b), HaloMINRES(); Pl = M)
 end
 
 @testset "HaloMINRES on a symmetric indefinite system" begin
