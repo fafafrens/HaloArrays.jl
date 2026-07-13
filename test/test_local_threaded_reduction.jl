@@ -266,6 +266,29 @@ using LinearAlgebra: dot, norm
         end
     end
 
+    @testset "sum widens narrow ints like Base (no overflow)" begin
+        # The fast accumulator reduces in the add_sum-promoted type, so a sum of
+        # Int8/Bool cells widens to Int (matching sum(::Array)) instead of
+        # overflowing in the element type — on every backend/tiling.
+        for mk in (() -> LocalHaloArray(Int8, (4,), 0; boundary_condition=:repeating),
+                   () -> ThreadedHaloArray(Int8, (2,), 0; dims=(2,), boundary_condition=:repeating))
+            u = mk()
+            for i in 1:4; u[i] = Int8(100); end
+            s = sum(u)
+            @test s == 400 && s isa Signed          # would be -112::Int8 without widening
+        end
+        b = LocalHaloArray(Bool, (5,), 0; boundary_condition=:repeating)
+        interior_view(b) .= true
+        @test sum(b) == 5 && sum(b) isa Integer
+        # norm sums abs2 through the same accumulator, so it matches Base too.
+        i16 = LocalHaloArray(Int16, (4,), 0; boundary_condition=:repeating)
+        for i in 1:4; i16[i] = Int16(200); end
+        @test sum(i16) == 800 && sum(i16) isa Signed        # would overflow Int16 (800 fits, use bigger)
+        big16 = LocalHaloArray(Int16, (400,), 0; boundary_condition=:repeating)
+        interior_view(big16) .= Int16(100)
+        @test sum(big16) == 40000                            # > typemax(Int16)=32767
+    end
+
     # The Local (single-block) path must stay allocation-free: the tile drivers
     # take closures, and a regression (e.g. a Core.Box from a reassigned capture,
     # or a lost @inline) would show up as heap allocations on the Krylov hot path.

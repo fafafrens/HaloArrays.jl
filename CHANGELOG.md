@@ -6,6 +6,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **`sum`/`norm` widen narrow integers like Base.** The fast interior
+  accumulator seeded at the element type, so `sum` of a `Bool`/`Int8`/`Int16`
+  halo array overflowed in that type (e.g. `sum` of four `Int8(100)` returned
+  `-112::Int8` instead of `400`) — unlike `sum(::Array)`, which widens via
+  `add_sum`. It now accumulates in the `add_sum`-promoted type on every
+  backend; `Float64` is unchanged (the reduction stays byte-for-byte identical
+  and allocation-free). `dot` is unchanged (it matches Base's `dot`, which does
+  not widen the per-element product).
+
 ## [0.4.0] — 2026-07-13
 
 ### Added

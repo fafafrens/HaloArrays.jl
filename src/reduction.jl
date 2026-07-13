@@ -19,11 +19,19 @@ end
 # per-rank/per-tile local reduction); MPI/threaded wrap them with Allreduce / tile
 # combine. Only the `+`-accumulating ops live here — `@simd` reassociates, which
 # matches `sum`/`norm`/`dot` semantics but not order-sensitive folds or max/min.
+# Accumulator zero of the type Base's `sum` reduces in — the `add_sum`-promoted
+# type, NOT the element type. This widens `Bool`/`Int8`/… to `Int` so a sum of
+# narrow integers doesn't overflow (matching `sum(::Array)`), while `Float64`
+# stays `Float64` (the hot path is byte-for-byte unchanged). `norm` sums `abs2`
+# through the same path, so it widens too.
+@inline _acc_zero(f::F, ::Type{T}) where {F,T} =
+    (S = typeof(f(zero(T))); zero(Base.promote_op(Base.add_sum, S, S)))
+
 # Fast CPU path — a dense `Array` parent: @simd over the contiguous leading dim.
 @inline function _interior_acc(f::F, p::Array, rng::Tuple) where {F}
     inner = rng[1]
     outer = CartesianIndices(Base.tail(rng))
-    s = zero(typeof(f(zero(eltype(p)))))
+    s = _acc_zero(f, eltype(p))
     @inbounds for J in outer
         @simd for i in inner
             s += f(p[i, J])
@@ -34,7 +42,7 @@ end
 @inline function _interior_dot(px::Array, py::Array, rng::Tuple)
     inner = rng[1]
     outer = CartesianIndices(Base.tail(rng))
-    s = zero(promote_type(eltype(px), eltype(py)))
+    s = zero(promote_type(eltype(px), eltype(py)))   # matches Base's `dot` accumulator
     @inbounds for J in outer
         @simd for i in inner
             s += conj(px[i, J]) * py[i, J]
@@ -47,7 +55,7 @@ end
 # @simd loop above would throw under `allowscalar(false)` or crawl on a GPUArray;
 # this preserves the original, device-agnostic behaviour for those parents.
 @inline _interior_acc(f::F, p::AbstractArray, rng::Tuple) where {F} =
-    mapreduce(f, +, @view p[rng...])
+    sum(f, @view p[rng...])   # `sum` widens narrow ints like Base (not `mapreduce(f,+)`)
 @inline _interior_dot(px::AbstractArray, py::AbstractArray, rng::Tuple) =
     LinearAlgebra.dot(@view(px[rng...]), @view(py[rng...]))
 
