@@ -1,6 +1,7 @@
 using Test
 using HaloArrays
 using StaticArrays
+using LinearAlgebra: norm, dot
 
 # ============================================================
 # Halo arrays with an SVector element type — the "array of structs" layout for a
@@ -79,6 +80,40 @@ using StaticArrays
         t .*= 2.0
         @test interior_view(t, 1)[1] == SVector(2.0, 2.0, 2.0)
         @test sum(t) == SVector(42.0, 42.0, 42.0)
+    end
+
+    @testset "norm / dot return the scalar Base does for SVector cells" begin
+        # `norm(u)` used `abs2(::SVector)` and `dot(u,u)` did `SVector*SVector` —
+        # both undefined, so these threw. They must fold each cell's Euclidean
+        # contribution into a scalar, exactly like Base on the interior array.
+        u = LocalHaloArray(V, (4,), 1; boundary_condition=:periodic)
+        interior_view(u) .= [SVector(Float64(i), 2i, 3i) for i in 1:4]
+        ref = collect(interior_view(u))
+
+        @test norm(u)      ≈ norm(ref)
+        @test norm(u)      isa Float64
+        @test dot(u, u)    ≈ dot(ref, ref)
+        @test dot(u, u)    isa Float64
+        @test norm(u, 1)   ≈ norm(ref, 1)
+        @test norm(u, Inf) ≈ norm(ref, Inf)
+        @test norm(u)      ≈ sqrt(dot(u, u))
+
+        # 2-D
+        g = LocalHaloArray(SVector{2,Float64}, (3, 3), 1; boundary_condition=:periodic)
+        for I in CartesianIndices(interior_view(g))
+            i, j = Tuple(I)
+            interior_view(g)[I] = SVector(Float64(i), Float64(j))
+        end
+        gref = collect(interior_view(g))
+        @test norm(g)   ≈ norm(gref)
+        @test dot(g, g) ≈ dot(gref, gref)
+
+        # threaded (per-tile reduction combines to the same global scalar)
+        t = ThreadedHaloArray(V, (3,), 1; dims=(2,), boundary_condition=:periodic)
+        HaloArrays.fill_from_global_indices!(I -> SVector(Float64(I[1]), 0.0, -1.0), t)
+        tref = [SVector(Float64(i), 0.0, -1.0) for i in 1:6]
+        @test norm(t)   ≈ norm(tref)
+        @test dot(t, t) ≈ dot(tref, tref)
     end
 
     @testset "copy / zero / similar preserve the SVector eltype" begin

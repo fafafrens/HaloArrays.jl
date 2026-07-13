@@ -462,7 +462,7 @@ end
 LinearAlgebra.dot(x::HaloArray, y::HaloArray) =
     MPI.Allreduce(_local_dot(x, y), +, communicator(x))
 LinearAlgebra.norm(u::HaloArray) =
-    sqrt(MPI.Allreduce(_local_sum(abs2, u), +, communicator(u)))
+    sqrt(MPI.Allreduce(_local_sum(_elt_abs2, u), +, communicator(u)))
 Base.sum(u::HaloArray) =
     MPI.Allreduce(_local_sum(identity, u), +, communicator(u))
 

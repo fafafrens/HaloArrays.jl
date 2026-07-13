@@ -1,6 +1,7 @@
 using Test
 using MPI
 using HaloArrays
+using StaticArrays: SVector
 using LinearAlgebra: dot, norm
 
 function _periodic_bc(::Val{N}) where {N}
@@ -67,6 +68,27 @@ end
     @test minimum(array_fields) ≈ mapreduce(identity, min, array_fields)
     @test all(x -> x >= 0, array_fields)
     @test any(x -> x == 1, array_fields)
+end
+
+@testset "MPI norm/dot on SVector cells (global scalar reduction)" begin
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+    topology = CartesianTopology(comm, (0,); periodic=(true,))
+    V = SVector{3,Float64}
+    ha = HaloArray(V, (4,), 1, topology; boundary_condition=_periodic_bc(Val(1)))
+
+    hi = interior_view(ha)
+    for i in eachindex(hi)
+        hi[i] = SVector(rank + i / 10, 2.0, -1.0)
+    end
+
+    # each cell folds to a scalar; dot/norm Allreduce across ranks. Compare to
+    # the hand-rolled global reduction of the per-rank local contributions.
+    local_dot = sum(x -> dot(x, x), hi)
+    @test dot(ha, ha) ≈ MPI.Allreduce(local_dot, MPI.SUM, topology.cart_comm)
+    @test dot(ha, ha) isa Float64
+    @test norm(ha) ≈ sqrt(dot(ha, ha))
+    @test norm(ha) isa Float64
 end
 
 @testset "MPI dimension reductions" begin

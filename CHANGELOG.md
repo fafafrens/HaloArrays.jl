@@ -7,6 +7,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **`norm`/`dot` work for vector-valued cells (e.g. `SVector` fields).** The
+  fast 2-norm accumulated `abs2(cell)` and `dot` accumulated `conj(x)*y`, both
+  undefined for an `SVector` element, so `norm(u)`/`dot(u, u)` on an otherwise
+  supported `SVector` halo array threw a `MethodError` instead of returning the
+  scalar Base returns (which recurses `abs2`/`dot` into the element). The
+  reductions now fold each cell's Euclidean contribution to a scalar via
+  element helpers that inline to `abs2`/`conj*` for numeric elements — so the
+  `Float64`/`Complex` hot path is byte-for-byte identical and still
+  allocation-free — and fall to `sum(abs2, ·)`/`dot(·, ·)` for a static vector.
+  The general-`p` `norm` likewise reduces `norm(cell)` (equal to `abs` for
+  scalars), and an inactive `MaybeHaloArray` contributes the correct *scalar*
+  zero. Works on every backend (`Local`/`Threaded`/MPI `HaloArray`).
 - **Cell checkerboard colors are anchored to the *global* cell index, not
   storage.** `interior_cells(ranges, color)` derived a cell's color from its
   tile/rank-local storage parity, so with an odd local extent the red/black

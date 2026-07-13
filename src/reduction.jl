@@ -27,6 +27,20 @@ end
 @inline _acc_zero(f::F, ::Type{T}) where {F,T} =
     (S = typeof(f(zero(T))); zero(Base.promote_op(Base.add_sum, S, S)))
 
+# Element-wise ‖·‖² and ⟨·,·⟩ so `norm`/`dot` work for vector-valued cells (e.g.
+# `SVector` fields) exactly like Base, which recurses `abs2`/`*` into the element.
+# For a scalar element these inline to `abs2` / `conj(x)*y`, so the numeric hot
+# path (and its `@simd`) is byte-for-byte unchanged; a static vector falls to
+# `sum(abs2, ·)` / `dot(·,·)`, returning the same scalar Base does.
+@inline _elt_abs2(x::Number) = abs2(x)
+@inline _elt_abs2(x) = sum(abs2, x)
+@inline _elt_dot(x::Number, y::Number) = conj(x) * y
+@inline _elt_dot(x, y) = LinearAlgebra.dot(x, y)
+# Scalar accumulator zero of ‖·‖² / ⟨·,·⟩ for a (possibly vector-valued) element
+# type — `Float64` for an `SVector{N,Float64}`, unchanged for numeric elements.
+@inline _sqnorm_zero(::Type{T}) where {T} = zero(Base.promote_op(_elt_abs2, T))
+@inline _dot_zero(::Type{X}, ::Type{Y}) where {X,Y} = zero(Base.promote_op(_elt_dot, X, Y))
+
 # Fast CPU path — a dense `Array` parent: @simd over the contiguous leading dim.
 @inline function _interior_acc(f::F, p::Array, rng::Tuple) where {F}
     inner = rng[1]
@@ -42,10 +56,10 @@ end
 @inline function _interior_dot(px::Array, py::Array, rng::Tuple)
     inner = rng[1]
     outer = CartesianIndices(Base.tail(rng))
-    s = zero(promote_type(eltype(px), eltype(py)))   # matches Base's `dot` accumulator
+    s = _dot_zero(eltype(px), eltype(py))   # scalar; matches Base's `dot` accumulator
     @inbounds for J in outer
         @simd for i in inner
-            s += conj(px[i, J]) * py[i, J]
+            s += _elt_dot(px[i, J], py[i, J])
         end
     end
     return s

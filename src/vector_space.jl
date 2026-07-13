@@ -26,17 +26,20 @@ Base.:*(x::Number, halo::AbstractSingleHaloArray) = x .* halo
 # ---- norm (global reduction) ------------------------------------------------
 # The 2-norm (the Krylov hot path) is its own branch-free method; the general-`p`
 # method carries the `p == Inf` / else dispatch and reuses the 2-norm for p == 2.
-LinearAlgebra.norm(halo::AbstractSingleHaloArray) = sqrt(_local_sum(abs2, halo))
+LinearAlgebra.norm(halo::AbstractSingleHaloArray) = sqrt(_local_sum(_elt_abs2, halo))
 # Expressed in GLOBAL primitives (mapreduce), not the _local_* helpers, so the
 # MPI HaloArray inherits a globally-correct p-norm through its Allreduce-backed
 # mapreduce — only the hot 2-norm gets a specialized MPI method.
+# `norm` (not `abs`) per element: for a scalar `norm(x::Number) == abs(x)`, so the
+# numeric result is unchanged, while a vector-valued cell contributes its own
+# Euclidean length — matching Base's `norm(::Array{<:AbstractVector}, p)`.
 function LinearAlgebra.norm(halo::AbstractSingleHaloArray, p::Real)
     p == 2    && return norm(halo)
-    p == 1    && return mapreduce(abs, +, halo)
-    p == Inf  && return mapreduce(abs, max, halo)
-    p == -Inf && return mapreduce(abs, min, halo)
+    p == 1    && return mapreduce(norm, +, halo)
+    p == Inf  && return mapreduce(norm, max, halo)
+    p == -Inf && return mapreduce(norm, min, halo)
     p == 0    && return convert(float(real(eltype(halo))), mapreduce(x -> !iszero(x), +, halo))
-    return mapreduce(x -> abs(x)^p, +, halo)^(1 / p)
+    return mapreduce(x -> norm(x)^p, +, halo)^(1 / p)
 end
 # The 2-norm above IS the fast path: `_local_sum` runs the contiguous-aware
 # `_interior_acc` per tile (single-block inline, threaded across the backend);
@@ -72,12 +75,15 @@ LinearAlgebra.dot(x::AbstractHaloCollection, y::AbstractHaloCollection) =
 # global reduction); an inactive value contributes nothing. Without these, `dot`
 # hits the two-arg-mapreduce fallback below and `norm` hits Base's generic path —
 # both O(N) per call (the same hot-path leak fixed for collections above).
+# An inactive value contributes the SCALAR zero of the reduction (`dot`/`norm`
+# return a scalar even for vector-valued cells — `zero(eltype)` would be an
+# `SVector`), so `_dot_zero`/`_sqnorm_zero` give the right type on every eltype.
 LinearAlgebra.dot(x::MaybeHaloArray, y::MaybeHaloArray) =
-    is_active(x) ? LinearAlgebra.dot(getdata(x), getdata(y)) : zero(eltype(x))
+    is_active(x) ? LinearAlgebra.dot(getdata(x), getdata(y)) : _dot_zero(eltype(x), eltype(y))
 LinearAlgebra.norm(m::MaybeHaloArray) =
-    is_active(m) ? LinearAlgebra.norm(getdata(m)) : zero(real(eltype(m)))
+    is_active(m) ? LinearAlgebra.norm(getdata(m)) : sqrt(_sqnorm_zero(eltype(m)))
 LinearAlgebra.norm(m::MaybeHaloArray, p::Real) =
-    is_active(m) ? LinearAlgebra.norm(getdata(m), p) : zero(real(eltype(m)))
+    is_active(m) ? LinearAlgebra.norm(getdata(m), p) : sqrt(_sqnorm_zero(eltype(m)))
 # Fallback for any other halo-array type.
 LinearAlgebra.dot(x::AbstractHaloArray, y::AbstractHaloArray) = mapreduce(LinearAlgebra.dot, +, x, y)
 
