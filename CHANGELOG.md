@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-07-13
+
 ### Added
 - **`DimReductionPlan` / `reduce!` / `free!`** — a reusable dimensional
   reduction for distributed `HaloArray`s. `mapreduce_haloarray_dims` used to
@@ -70,6 +72,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   counts in `Int` on Local, Threaded, and MPI alike. `reduce!` also
   normalizes `Base.add_sum`/`mul_prod` itself, so driving a plan with Base's
   internal reducers works on non-Intel MPI just like the keyword forms.
+- **`LocalHaloArray` ↔ `ThreadedHaloArray` conversion** —
+  `ThreadedHaloArray(u::LocalHaloArray; dims)` splits a block into a tile grid
+  and `LocalHaloArray(u::ThreadedHaloArray)` assembles the tiles back. Both are
+  pure in-process re-layout (no communication) that carry over the element
+  type, halo width, boundary conditions, and device, copying only the interior
+  (ghosts left for the next `synchronize_halo!`). The MPI direction is
+  deliberately absent — crossing the distribution boundary is a collective
+  scatter/gather (`gather_haloarray` / explicit construction), not a convert.
+- **`benchmark/reduce_save.jl`** — saving a reduced quantity of a distributed
+  array three ways: gather→reduce→save (gather the whole array to root),
+  reduce→gather→save, and reduce→collective-save (no gather). The in-place
+  reductions move `global_size[dim]×` less data and run 5–8× faster than
+  gathering the full array; the no-gather collective write is the most scalable
+  at large rank counts.
 
 ### Changed
 - **`mapreduce_haloarray_dims` is reimplemented over the transient
@@ -113,6 +129,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   with the measured guidance (default OhMyThreads for coarse per-tile work;
   `PolyesterBackend` for many thin per-tile ops, where its `@batch` pool avoids
   the task-spawn cost — measurably faster and near-allocation-free).
+- **`DiffEqBase` and `OrdinaryDiffEq` compat allow 7** (`"6, 7"`), verified on
+  the 7 stack (DiffEqBase v7.6.1 / OrdinaryDiffEq v7.1.2) with no extension
+  changes. (`LinearSolve` stays at `3`: LinearSolve 5 is currently
+  incompatible with OrdinaryDiffEq 7's `OrdinaryDiffEqRosenbrock`, which pins
+  LinearSolve < 5.)
+- **The collection field-axis fold runs through the shared tile driver** —
+  parallel on a `ThreadedHaloArray`'s thread backend, inline on single-block
+  backends — like every other reduction path (no hand-rolled per-element loops
+  remain).
+- **Docs: a "Reductions" section** in the guide covering global reductions, the
+  `dims=` forms and their return types, `DimReductionPlan`/`reduce!` hot loops,
+  and collection reductions.
 
 ### Changed (breaking)
 - **Collection `dims=` reductions use collection-global coordinates and can
@@ -135,6 +163,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   array plan for the spatial axes, so a hoisted collection reduction rebuilds
   no MPI communicators; the collection one-shot (`sum(c; dims=…)`) is a
   transient such plan, mirroring the array path.
+- **Distributed `collect`/`iterate` error instead of returning garbage.** An
+  MPI `HaloArray` reports its global shape but holds only this rank's block, so
+  a generic whole-array `collect`/`iterate` produced a global-shaped array
+  half-filled with uninitialised garbage. They now error, pointing to
+  `gather_haloarray(u)` (global, collective) or `interior_view(u)` (this rank's
+  block). `LocalHaloArray`/`ThreadedHaloArray` are single-process — all data is
+  present — so their `collect`/`iterate` are unchanged. An inactive
+  `MaybeHaloArray` likewise reported a global-shaped `size` with `length 0`
+  (violating `length == prod(size)`); it now reports an empty shape (`size` and
+  `axes`), so the invariant holds and `collect` returns a clean empty array.
 
 ### Performance
 - **Array `dims=` reductions are now type-stable and allocation-free in setup.**
