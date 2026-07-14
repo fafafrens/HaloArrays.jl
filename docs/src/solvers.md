@@ -77,5 +77,9 @@ sol = solve(LinearProblem(A, b; u0 = zero(b)), HaloCG())
     initial guess flattens `b` to a 1-D vector of length `size(A, 2)`, which a
     geometry-carrying halo array can't be.
 
-See `examples/poisson/operator.jl` for a 2-D Dirichlet Poisson solved this way,
-and `examples/poisson/mpi.jl` for the distributed version.
+See `examples/poisson/operator.jl` for a 2-D Dirichlet Poisson solved this way.
+Its `poisson/mpi.jl` companion applies the same matrix-free stencil with
+hand-written coordinate-free Krylov solvers across MPI ranks. For repeated
+`LinearProblem` solves, `examples/schrodinger/crank_nicolson_2d.jl` reuses one
+`LinearSolve` cache and one `HaloGMRES` workspace across every Crank–Nicolson
+time step.

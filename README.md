@@ -71,7 +71,8 @@ three backends (and a CPU-vs-GPU KernelAbstractions version).
 ## Documentation
 
 - **[Documentation site](https://fafafrens.github.io/HaloArrays.jl)** — guide + full API reference.
-- **[examples/](examples/)** — worked solvers: heat, finite volume, hydro, relativistic hydro, lattice field theory, Poisson.
+- **[examples/](examples/)** — worked solvers: heat, finite volume, hydro,
+  relativistic hydro, lattice field theory, Poisson, and Schrödinger dynamics.
 
 Every exported symbol has a docstring — in the REPL try `?synchronize_halo!`, `?ThreadedHaloArray`.
 

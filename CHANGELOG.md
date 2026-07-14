@@ -6,6 +6,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **A matrix-free 2-D time-dependent Schrödinger example.** A coherent Gaussian
+  state in a harmonic trap is advanced with Crank–Nicolson and a cached complex
+  `HaloGMRES` solve. The same Hamiltonian kernel runs on `LocalHaloArray` and
+  `ThreadedHaloArray`, with checks for probability/energy conservation, the
+  expected circular orbit, and agreement between both backends.
+
 ### Fixed
 - **`HaloCG`/`HaloGMRES`/`HaloBiCGStab` apply a supplied preconditioner instead
   of silently ignoring it.** The coordinate-free `solve!` methods dropped

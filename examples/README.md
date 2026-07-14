@@ -10,6 +10,7 @@ finite_volume/  conservative finite volume (Burgers, advection)
 hydro/          2-D ideal hydrodynamics
 lattice/        lattice field theory Monte Carlo (scalar φ⁴, SU(2) Wilson)
 poisson/        matrix-free Krylov solves of a Poisson problem
+schrodinger/    complex time evolution with a cached matrix-free solve
 ```
 
 ## Setup
@@ -100,13 +101,13 @@ julia --project=examples examples/finite_volume/advection_diffeq_1d.jl
 
 `stiff_reaction_diffusion_implicit_1d.jl` shows an **implicit** SciML solve with
 autodiff Jacobians using the `HaloArray` *as the ODE state* — matrix-free
-(`concrete_jac=false`), with Krylov.jl wired in through `KrylovConstructor` (a
-`similar`-based workspace) via a `LinearSolveFunction`. It runs both the **Local**
-and **Threaded** backends; the `*_mpi_1d.jl` companion runs the same solve on a
-**distributed** `HaloArray` (and checks it stays collective + matches serial).
-The key point: pick a `similar`-based linear solver, *not* the `KrylovJL_*`
-wrappers (they allocate work vectors as `S(undef, n)`, which a geometry-carrying
-`HaloArray` has no constructor for).
+(`concrete_jac=false`), with `HaloKrylov(:gmres)`. The LinearSolve/Krylov
+extension builds Krylov.jl's workspace through `similar`, so `HaloKrylov` and
+the stock `KrylovJL_*` algorithms work directly on a 1-D halo-array state. It
+runs both the **Local** and **Threaded** backends; the `*_mpi_1d.jl` companion
+runs the same solve on a **distributed** `HaloArray` (and checks it stays
+collective + matches serial). For a 2-D/3-D state, use the coordinate-free
+`HaloCG`/`HaloGMRES`/`HaloBiCGStab` algorithms instead.
 
 ```bash
 julia --project=examples examples/finite_volume/stiff_reaction_diffusion_implicit_1d.jl
@@ -234,6 +235,19 @@ that both solvers agree.
 
 ```bash
 julia --project=. -t 4 examples/poisson/cg_fused.jl
+```
+
+## Time-dependent Schrödinger equation (`schrodinger/`)
+
+`crank_nicolson_2d.jl` evolves a coherent Gaussian wave packet in a 2-D
+harmonic trap. Each Crank–Nicolson step is a complex, matrix-free
+`LinearProblem` solved directly on the halo array with a cached `HaloGMRES`
+workspace. The identical Hamiltonian runs on `LocalHaloArray` and
+`ThreadedHaloArray`; the example checks conservation of probability and energy,
+the packet's classical circular orbit, and agreement between both backends.
+
+```bash
+julia --project=examples -t 4 examples/schrodinger/crank_nicolson_2d.jl
 ```
 
 ## Notes

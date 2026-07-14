@@ -67,5 +67,6 @@ MPI.Finalize()
 - **[Guide](guide.md)** — concepts: ownership semantics, halo exchange, boundary
   conditions, the backends, multi-field containers, and the loop/kernel helpers.
 - **[Examples](examples.md)** — runnable tutorials and worked solvers (heat,
-  finite volume, hydro, relativistic hydro, lattice field theory, Poisson).
+  finite volume, hydro, relativistic hydro, lattice field theory, Poisson,
+  Schrödinger dynamics).
 - **[API reference](api/types.md)** — every exported type and function.

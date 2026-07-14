@@ -2,7 +2,7 @@
 
 Runnable examples live in the [`examples/`](https://github.com/fafafrens/HaloArrays.jl/tree/main/examples)
 directory and are grouped by topic: `tutorials/`, `heat/`, `finite_volume/`,
-`hydro/`, `lattice/`, and `poisson/`. See
+`hydro/`, `lattice/`, `poisson/`, and `schrodinger/`. See
 [`examples/README.md`](https://github.com/fafafrens/HaloArrays.jl/blob/main/examples/README.md)
 for the full list and run commands.
 
@@ -36,11 +36,14 @@ julia --project=examples examples/tutorials/diffeq.jl
 - **`lattice/`** — scalar-field and SU(2) Wilson lattice Monte Carlo (threaded and Metal).
 - **`poisson/`** — matrix-free CG/BiCGStab/GMRES on a halo array; the same operator
   and solvers run serially and across MPI ranks because `dot`/`norm` are global reductions.
+- **`schrodinger/`** — complex Crank–Nicolson time evolution in a 2-D harmonic
+  trap, reusing one matrix-free `HaloGMRES` cache on Local and Threaded arrays.
 
 ```bash
 julia --project=. examples/heat/local.jl
 julia --project=. examples/finite_volume/relativistic_hydro_mu0_2d.jl
 julia --project=examples examples/poisson/operator.jl
+julia --project=examples -t 4 examples/schrodinger/crank_nicolson_2d.jl
 mpiexec -n 4 julia --project=examples examples/poisson/mpi.jl
 ```
 

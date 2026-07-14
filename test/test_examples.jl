@@ -59,6 +59,13 @@ const DIFFEQ_EXAMPLES = [
     "tutorials/diffeq.jl",
 ]
 
+# Matrix-free N-D LinearProblem examples need the LinearSolve + Krylov package
+# extension. These are test extras under Pkg.test, but may be absent when this
+# file is included directly with a minimal environment.
+const LINEARSOLVE_EXAMPLES = [
+    "schrodinger/crank_nicolson_2d.jl",
+]
+
 function _smoke_run(rel)
     path = joinpath(EXAMPLES_DIR, rel)
     # A module created with `module … end` syntax gets its own `include`/`eval`,
@@ -98,5 +105,15 @@ end
         end
     else
         @info "Skipping DiffEq example smoke tests (DiffEqBase not in this environment; run via Pkg.test)"
+    end
+
+    if all(pkg -> Base.find_package(pkg) !== nothing, ("LinearSolve", "Krylov"))
+        for rel in LINEARSOLVE_EXAMPLES
+            @testset "$rel" begin
+                @test _smoke_run(rel)
+            end
+        end
+    else
+        @info "Skipping LinearSolve example smoke tests (LinearSolve/Krylov not in this environment; run via Pkg.test)"
     end
 end
