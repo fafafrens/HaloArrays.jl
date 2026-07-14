@@ -362,6 +362,30 @@ Base.similar(halo::AbstractSingleHaloArray, dims::Dims{M}) where {M} = similar(h
 Base.similar(halo::AbstractSingleHaloArray, dims::NTuple{M,<:Integer}) where {M} =
     similar(halo, eltype(halo), dims)
 
+# permutedims/reverse have no meaningful generic behaviour on a halo array: the
+# Base fallbacks (similar + scalar indexing) would permute/flip the DATA but copy
+# the boundary condition verbatim — leaving it attached to the original axes and
+# sides, so the next synchronize_halo! fills the ghosts wrong. (Under MPI they
+# would also only touch this rank's block.) Rather than return a silently
+# mislabelled array, refuse with the escape hatch.
+const _NO_AXES_REORDER_MSG =
+    "on a halo array would keep the boundary condition attached to the " *
+    "original axes/sides (wrong ghost fill after synchronize_halo!). Apply it " *
+    "to `collect(interior_view(u))` and build a new halo array with the " *
+    "intended boundary condition instead."
+# N-specific 1-arg methods: a single `::AbstractSingleHaloArray` method would be
+# dispatch-ambiguous with Base's `permutedims(::AbstractVector/::AbstractMatrix)`.
+Base.permutedims(::AbstractSingleHaloArray{<:Any,1}) =
+    throw(ArgumentError("permutedims " * _NO_AXES_REORDER_MSG))
+Base.permutedims(::AbstractSingleHaloArray{<:Any,2}) =
+    throw(ArgumentError("permutedims " * _NO_AXES_REORDER_MSG))
+Base.permutedims(::AbstractSingleHaloArray, perm) =
+    throw(ArgumentError("permutedims " * _NO_AXES_REORDER_MSG))
+Base.reverse(::AbstractSingleHaloArray; dims=:) =
+    throw(ArgumentError("reverse " * _NO_AXES_REORDER_MSG))
+Base.reverse!(::AbstractSingleHaloArray; dims=:) =
+    throw(ArgumentError("reverse! " * _NO_AXES_REORDER_MSG))
+
 function Base.map!(f, dest::AbstractSingleHaloArray, src::Vararg{AbstractSingleHaloArray,Nsrc}) where {Nsrc}
     @views map!(f, interior_view(dest), map(interior_view, src)...)
     return dest

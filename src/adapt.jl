@@ -26,3 +26,14 @@ function Adapt.adapt_structure(to, h::ThreadedHaloArray{T,N,A,Halo,Topo,BC,TB}) 
     return ThreadedHaloArray{T,N,eltype(newdata),Halo,Topo,BC,TB}(
         newdata, h.tile_size, h.topology, h.boundary_condition, h.backend)
 end
+
+# Collections and Maybe wrappers: without these, Adapt's generic AbstractArray
+# recursion strips the wrapper and returns a bare device array — losing the halo
+# metadata (BCs, topology, field names). Adapt each field/inner array through
+# the methods above and rebuild the same wrapper.
+Adapt.adapt_structure(to, c::FieldCollection) =
+    _rebuild_collection(map(a -> Adapt.adapt(to, a), getfield(c, :arrays)))
+# Preserve the stored flag rather than recomputing it — adaptation must not
+# change whether a rank's value is active.
+Adapt.adapt_structure(to, m::MaybeHaloArray) =
+    MaybeHaloArray(Adapt.adapt(to, m.data), m.active)

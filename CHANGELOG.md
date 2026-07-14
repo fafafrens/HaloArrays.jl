@@ -14,6 +14,27 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   expected circular orbit, and agreement between both backends.
 
 ### Fixed
+- **`FaceRanges` on a halo-width-0 array throws instead of corrupting memory.**
+  The face sweep includes the two boundary faces, which scatter into ghost
+  cells; with `halo = 0` there are none, the range started at storage index 0,
+  and the `@inbounds` flux loop wrote out of bounds (observed crashing the
+  process). The face sweep is undefined without ghosts, so construction now
+  raises a clear `ArgumentError`.
+- **`permutedims`/`reverse` on a halo array throw instead of mislabelling the
+  boundary condition.** Base's generic fallbacks permuted/flipped the data but
+  copied the boundary-condition tuple verbatim — attached to the original
+  axes/sides — so the next `synchronize_halo!` filled the ghosts wrong (and
+  under MPI only this rank's block was touched). There is no meaningful generic
+  behaviour, so they now refuse with an escape hatch: apply the operation to
+  `collect(interior_view(u))` and build a new halo array with the intended
+  boundary condition.
+- **`adapt` preserves collection and Maybe wrappers.** `adapt(CuArray, state)`
+  on a `MultiHaloArray`/`ArrayOfHaloArray`/`MaybeHaloArray` fell through
+  Adapt's generic `AbstractArray` recursion and returned a **bare device
+  array**, silently dropping the halo metadata (boundary conditions, topology,
+  field names, active flag). Dedicated `adapt_structure` methods now adapt
+  each field through the existing single-array rules (device send/recv buffers
+  included) and rebuild the same wrapper.
 - **`HaloCG`/`HaloGMRES`/`HaloBiCGStab` apply a supplied preconditioner instead
   of silently ignoring it.** The coordinate-free `solve!` methods dropped
   `cache.Pl`/`cache.Pr`, so a `Pl = M` passed through LinearSolve did nothing.

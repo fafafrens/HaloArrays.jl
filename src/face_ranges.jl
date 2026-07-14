@@ -26,6 +26,12 @@ ghost writes at the two boundary faces fall on allocated halo cells).
 """
 function interior_face_range(halo, dim::Int)
     _check_face_dim(halo, dim)
+    # The two boundary faces scatter into ghost cells; with halo width 0 there
+    # are none — the range would start at storage index 0 and the @inbounds
+    # flux loop would corrupt memory. The face sweep is undefined without ghosts.
+    halo_width(halo) >= 1 || throw(ArgumentError(
+        "FaceRanges/interior_face_range require halo width >= 1: the boundary " *
+        "faces scatter into the ghost cells, which a halo-0 array does not have."))
     ranges = _spatial_interior_range(halo)
     return ntuple(_spatial_ndims(halo)) do d
         d == dim ? ((first(ranges[d]) - 1):last(ranges[d])) : (first(ranges[d]):last(ranges[d]))

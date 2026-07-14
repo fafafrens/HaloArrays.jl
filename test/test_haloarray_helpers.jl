@@ -413,6 +413,34 @@ end
         @test !_has_nearest_neighbor_conflict(global1)
     end
 
+    @testset "FaceRanges require halo width >= 1" begin
+        # The boundary faces scatter into ghost cells; with halo 0 the face range
+        # would start at storage index 0 and the @inbounds flux loop corrupted
+        # memory (crashed the process). Must refuse loudly instead.
+        u0 = LocalHaloArray(Float64, (4,), 0; boundary_condition=:noboundary)
+        @test_throws ArgumentError FaceRanges(u0)
+        @test_throws ArgumentError HaloArrays.interior_face_range(u0, 1)
+        u1 = LocalHaloArray(Float64, (4,), 1; boundary_condition=:repeating)
+        @test FaceRanges(u1) isa FaceRanges   # halo >= 1 unaffected
+    end
+
+    @testset "permutedims/reverse refuse to mislabel the boundary condition" begin
+        # Base's generic fallbacks permute/flip the data but copy the BC tuple
+        # verbatim — attached to the wrong axes/sides, so the next
+        # synchronize_halo! fills ghosts wrong. Refused with an escape hatch.
+        u = LocalHaloArray(Float64, (3, 4), 1;
+            boundary_condition=((:reflecting, :reflecting), (:periodic, :periodic)))
+        v = LocalHaloArray(Float64, (4,), 1; boundary_condition=:periodic)
+        t = ThreadedHaloArray(Float64, (2, 2), 1; dims=(2, 1), boundary_condition=:periodic)
+        for x in (u, v, t)
+            ndims(x) == 2 && @test_throws ArgumentError permutedims(x)
+            ndims(x) == 1 && @test_throws ArgumentError permutedims(x)
+            @test_throws ArgumentError permutedims(x, reverse(ntuple(identity, ndims(x))))
+            @test_throws ArgumentError reverse(x; dims=1)
+            @test_throws ArgumentError reverse!(x)
+        end
+    end
+
     @testset "interior_faces support a conservative flux update" begin
         u = LocalHaloArray(Int, (4,), 1; boundary_condition=:repeating)
         du = similar(u)

@@ -54,6 +54,36 @@ MPI.Initialized() || MPI.Init()
         @test norm(td) ≈ norm(t)
     end
 
+    @testset "collections and Maybe wrappers keep their type through adapt" begin
+        # Without dedicated adapt_structure methods, Adapt's generic AbstractArray
+        # recursion strips these wrappers to a bare device array — losing the halo
+        # metadata (BCs, topology, field names, active flag).
+        mk() = (u = LocalHaloArray(Float64, (4, 3), 1; boundary_condition=:periodic);
+                interior_view(u) .= rand(4, 3); u)
+
+        mha = MultiHaloArray((; rho = mk(), mom = mk()))
+        mhd = adapt(JLArray, mha)
+        @test mhd isa MultiHaloArray
+        @test keys(parent(mhd)) == (:rho, :mom)
+        @test parent(mhd.rho) isa JLArray
+        @test Array(interior_view(mhd.rho)) ≈ collect(interior_view(mha.rho))
+
+        aoh = ArrayOfHaloArray([mk() for _ in 1:2, _ in 1:2])
+        aod = adapt(JLArray, aoh)
+        @test aod isa ArrayOfHaloArray
+        @test field_shape(aod) == (2, 2)
+        @test parent(aod[1, 1]) isa JLArray
+
+        mb = MaybeHaloArray(mk())
+        mbd = adapt(JLArray, mb)
+        @test mbd isa MaybeHaloArray
+        @test is_active(mbd) == is_active(mb)
+        @test parent(getdata(mbd)) isa JLArray
+        # an inactive value stays inactive
+        mbi = HaloArrays.inactive(mk())
+        @test !is_active(adapt(JLArray, mbi))
+    end
+
     @testset "dims= reductions stay on the device" begin
         g(i, j) = Float64(i + 100j)
         ref = [sum(g(i, j) for j in 1:6) for i in 1:4]
