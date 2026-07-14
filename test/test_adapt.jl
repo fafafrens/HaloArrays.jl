@@ -78,7 +78,7 @@ MPI.Initialized() || MPI.Init()
         mbd = adapt(JLArray, mb)
         @test mbd isa MaybeHaloArray
         @test is_active(mbd) == is_active(mb)
-        @test parent(getdata(mbd)) isa JLArray
+        @test parent(HaloArrays.getdata(mbd)) isa JLArray
         # an inactive value stays inactive
         mbi = HaloArrays.inactive(mk())
         @test !is_active(adapt(JLArray, mbi))
