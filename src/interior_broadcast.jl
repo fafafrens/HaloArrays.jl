@@ -96,27 +96,56 @@ end
 end
 unpack_args_ha( args::Tuple{Any}) = (unpack_ha(args[1]),)
 
-unpack_ha_tile(x::ThreadedHaloArray, tile_id) = interior_view(x, tile_id)
-unpack_ha_tile(x::AbstractSingleHaloArray, _) = interior_view(x)
-unpack_ha_tile(x, tile_id) = x
-
-@inline function unpack_ha_tile(bc::Broadcasted{Style}, tile_id) where {Style}
-    Broadcasted{Style}(bc.f, unpack_args_ha_tile(tile_id, bc.args))
+# A plain array (or a single-block halo array's interior) in a THREADED
+# broadcast is indexed by GLOBAL interior coordinates, so each tile must see
+# its own global window of it — passing the whole operand to every tile
+# mismatches the tile-sized destination. `ref` (the destination) supplies the
+# tile geometry; dims where the operand has size 1 keep Base's broadcast
+# expansion, anything else must span the global interior.
+@inline function _tile_global_view(x::AbstractArray, ref::ThreadedHaloArray{T,N},
+        tile_id::Integer) where {T,N}
+    Base.require_one_based_indexing(x)
+    ts  = tile_size(ref)
+    c   = tile_coordinates(ref, tile_id)
+    gsz = global_size(ref)
+    rngs = ntuple(Val(N)) do d
+        szd = size(x, d)
+        szd == 1      ? (1:1) :
+        szd == gsz[d] ? (((c[d] - 1) * ts[d] + 1):(c[d] * ts[d])) :
+        throw(DimensionMismatch(
+            "broadcast operand of size $(size(x)) is incompatible with the " *
+            "global interior $(gsz) of the threaded destination (each " *
+            "dimension must match the global extent or be 1)"))
+    end
+    return view(x, rngs...)
 end
 
-@inline function unpack_ha_tile(bc::Broadcasted{<:HaloArrayStyle}, tile_id)
-    Broadcasted(bc.f, unpack_args_ha_tile(tile_id, bc.args))
+unpack_ha_tile(x::ThreadedHaloArray, tile_id, ref) = interior_view(x, tile_id)
+# A single-block halo array's interior spans the same GLOBAL grid: slice this
+# tile's window of it, like any global-shaped operand.
+unpack_ha_tile(x::AbstractSingleHaloArray, tile_id, ref) =
+    _tile_global_view(interior_view(x), ref, tile_id)
+unpack_ha_tile(x::AbstractArray, tile_id, ref) = _tile_global_view(x, ref, tile_id)
+unpack_ha_tile(x::AbstractArray{<:Any,0}, tile_id, ref) = x   # 0-d wrapper: scalar-like
+unpack_ha_tile(x, tile_id, ref) = x                            # scalars, Ref, types, …
+
+@inline function unpack_ha_tile(bc::Broadcasted{Style}, tile_id, ref) where {Style}
+    Broadcasted{Style}(bc.f, unpack_args_ha_tile(tile_id, ref, bc.args))
 end
 
-@inline function unpack_ha_tile(bc::Broadcasted{<:ThreadedHaloArrayStyle}, tile_id)
-    Broadcasted(bc.f, unpack_args_ha_tile(tile_id, bc.args))
+@inline function unpack_ha_tile(bc::Broadcasted{<:HaloArrayStyle}, tile_id, ref)
+    Broadcasted(bc.f, unpack_args_ha_tile(tile_id, ref, bc.args))
 end
 
-@inline function unpack_args_ha_tile(tile_id, args::Tuple)
-    (unpack_ha_tile(args[1], tile_id), unpack_args_ha_tile(tile_id, Base.tail(args))...)
+@inline function unpack_ha_tile(bc::Broadcasted{<:ThreadedHaloArrayStyle}, tile_id, ref)
+    Broadcasted(bc.f, unpack_args_ha_tile(tile_id, ref, bc.args))
 end
-unpack_args_ha_tile(tile_id, args::Tuple{Any}) = (unpack_ha_tile(args[1], tile_id),)
-unpack_args_ha_tile(tile_id, args::Tuple{}) = ()
+
+@inline function unpack_args_ha_tile(tile_id, ref, args::Tuple)
+    (unpack_ha_tile(args[1], tile_id, ref), unpack_args_ha_tile(tile_id, ref, Base.tail(args))...)
+end
+unpack_args_ha_tile(tile_id, ref, args::Tuple{Any}) = (unpack_ha_tile(args[1], tile_id, ref),)
+unpack_args_ha_tile(tile_id, ref, args::Tuple{}) = ()
 
 
 # ------------------------------------------------------------------------------
@@ -174,12 +203,12 @@ function Broadcast.materialize!(dest::ThreadedHaloArray, bc::Broadcasted)
 end
 
 @inline function _copyto_threaded_broadcast_tile!(dest::ThreadedHaloArray, bc_flat, tile_id)
-    copyto!(interior_view(dest, tile_id), unpack_ha_tile(bc_flat, tile_id))
+    copyto!(interior_view(dest, tile_id), unpack_ha_tile(bc_flat, tile_id, dest))
     return nothing
 end
 
 @inline function _materialize_threaded_broadcast_tile!(dest::ThreadedHaloArray, bc_flat, tile_id)
-    Broadcast.materialize!(interior_view(dest, tile_id), unpack_ha_tile(bc_flat, tile_id))
+    Broadcast.materialize!(interior_view(dest, tile_id), unpack_ha_tile(bc_flat, tile_id, dest))
     return nothing
 end
 

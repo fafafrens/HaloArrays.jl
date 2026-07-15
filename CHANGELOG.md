@@ -30,6 +30,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stdout on every save.
 
 ### Fixed
+- **Threaded in-place broadcast accepts plain global-shaped operands.**
+  `t .= t .+ g` on a `ThreadedHaloArray` sent a plain array `g` whole to every
+  tile, so any layout with more than one tile along a dimension threw
+  `DimensionMismatch`. A plain-array operand is indexed by **global** interior
+  coordinates: each tile now sees a view of its own global window, with Base's
+  size-1 broadcast expansion per dimension preserved. A `LocalHaloArray`
+  operand (whose interior spans the same global grid) is sliced the same way.
+  Operands matching neither the global extent nor 1 in some dimension are
+  refused with a clear `DimensionMismatch`. Out-of-place mixing
+  (`t .+ g`) keeps its existing semantics (a plain global `Array`).
 - **Two-array kernels reject mismatched geometry instead of corrupting memory.**
   `axpy!`/`axpby!`/`swap!`/`rotate!`/`reflect!` and `dot` index both padded
   parents with one array's interior range under `@inbounds`, with no shape

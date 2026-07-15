@@ -278,6 +278,37 @@
         @test collect(interior_view(dest, 2)) == [48, 60, 72]
     end
 
+    @testset "threaded in-place broadcast slices global-shaped operands per tile" begin
+        # A plain array in a threaded broadcast is indexed by GLOBAL interior
+        # coordinates: each tile must see its own global window of it. It used
+        # to be sent whole to every tile (DimensionMismatch for any layout with
+        # more than one tile along a dimension).
+        t = ThreadedHaloArray(Float64, (3,), 1; dims=(2,), boundary_condition=:repeating)
+        fill_from_global_indices!(I -> Float64(I[1]), t)          # 1..6
+        g = collect(1.0:6.0)
+        t .= t .+ g
+        @test collect(interior_view(t, 1)) == [2.0, 4.0, 6.0]
+        @test collect(interior_view(t, 2)) == [8.0, 10.0, 12.0]
+
+        # 2-D, multiple operand kinds at once: a global matrix, a size-1-dim
+        # expansion (Base's broadcast rule), a LocalHaloArray (its interior
+        # spans the same global grid), and a scalar.
+        t2 = ThreadedHaloArray(Float64, (2, 3), 1; dims=(2, 1), boundary_condition=:repeating)
+        fill_from_global_indices!(I -> 10.0I[1] + I[2], t2)
+        g2 = [10.0i + j for i in 1:4, j in 1:3]
+        row = reshape([100.0, 200.0, 300.0], 1, 3)
+        lu = LocalHaloArray(Float64, (4, 3), 1; boundary_condition=:repeating)
+        fill!(lu, 1000.0)
+        t2 .= t2 .+ g2 .+ row .+ lu .+ 1
+        @test all(t2[i, j] == 2 * (10i + j) + 100j + 1001 for i in 1:4, j in 1:3)
+
+        # an operand that matches neither the global extent nor 1 per dimension
+        # is refused (SerialBackend so the error is not wrapped in a task)
+        ts = ThreadedHaloArray(Float64, (3,), 1; dims=(2,),
+            boundary_condition=:repeating, thread_backend=SerialBackend())
+        @test_throws DimensionMismatch ts .= ts .+ ones(5)
+    end
+
     @testset "threaded multi halo array broadcast" begin
         fields = ThreadedMultiHaloArray(
             Int,
