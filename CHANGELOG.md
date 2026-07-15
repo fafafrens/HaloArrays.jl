@@ -6,6 +6,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed
+- **The pre-0.3 deprecation shims** (`get_send_view`/`get_recv_view` →
+  [`edge_view`](@ref)/[`ghost_view`](@ref), `get_comm` → `communicator`,
+  `isactive` → `is_active`), deprecated since 0.3. Removing exported names is
+  breaking: the next release is **0.5.0**.
+
 ### Fixed
 - **Two-array kernels reject mismatched geometry instead of corrupting memory.**
   `axpy!`/`axpby!`/`swap!`/`rotate!`/`reflect!` and `dot` index both padded

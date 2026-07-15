@@ -83,16 +83,6 @@ struct UnimplementedBC <: AbstractCoupledBoundaryCondition end
         # the coupled BC did not modify the y-ghost columns
     end
 
-    @testset "0.3 renamed-helper shims still work" begin
-        u = LocalHaloArray(Float64, (4,), 1; boundary_condition=:noboundary)
-        @test get_send_view(Side(1), Dim(1), u) == edge_view(u, Side(1), Dim(1))
-        @test get_recv_view(Side(2), Dim(1), u) == ghost_view(u, Side(2), Dim(1))
-        @test get_comm(u) === communicator(u)
-        @test isactive(u) == is_active(u)
-        t = ThreadedHaloArray(Float64, (4,), 1; dims=(2,), boundary_condition=:noboundary)
-        @test get_send_view(Side(1), Dim(1), t, 1) == edge_view(t, Side(1), Dim(1), 1)
-    end
-
     @testset "helpers + unimplemented error" begin
         u = LocalHaloArray(Float64, (4,), 1; boundary_condition=:noboundary)
         @test is_physical_boundary(u, Side(1), Dim(1))   # local edges are always physical

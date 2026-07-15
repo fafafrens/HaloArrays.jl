@@ -33,7 +33,6 @@ include("linearsolve.jl")
 include("mpi_support.jl")
 include("adapt.jl")
 include("hdf5_api.jl")   # HDF5 I/O stubs; methods in ext/HaloArraysHDF5Ext.jl (weakdep)
-include("deprecated.jl") # @deprecate shims for pre-0.3 names
 
 # Core types
 export HaloArray,
