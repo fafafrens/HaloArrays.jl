@@ -4,6 +4,41 @@ All notable changes to HaloArrays.jl are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **The `MultiHaloArray` group-append path validates existing child datasets.**
+  `append_haloarray!(group, ::MultiHaloArray)` still reused a child dataset by
+  name with no shape/eltype check — the one appending entry point 0.5.0's
+  validation missed — so a mismatched existing field took silent partial-slab
+  appends. It now routes through the same validate-or-create call as the
+  single-array path.
+- **Appending to a fixed-size dataset is refused up front.** The appendable
+  validator now also checks that the time axis is extendable: a same-shaped
+  dataset created by `create_haloarray_output_file` previously passed the
+  shape check and then failed deep inside `HDF5.set_extent_dims`. The two
+  dataset-reuse validators now share one kind/eltype core so they cannot
+  drift.
+- **`map!`/`map` over multiple halo arrays reject mismatched geometry.** They
+  were the one multi-array kernel class left without the 0.5.0 guard: Base's
+  `map!` zips the interior views and silently stops at the shortest (scrambled
+  for multidimensional interiors, where Base's own `map` throws).
+- **Multi-array reductions accept equal interiors with different halo
+  widths again.** The 0.5.0 guard compared padded storage, so
+  `mapreduce(+, +, x_halo1, w_halo2)` with identical interiors threw where
+  0.4.x computed the correct result — this path only reads interior views, so
+  it now checks interior geometry only (`map!` uses the same relaxed check;
+  the padded-parent kernels `copyto!`/BLAS-1/`dot` keep the strict one).
+- **A distributed `HaloArray` operand in a threaded broadcast is refused
+  explicitly** (its interior is rank-local, not global — the global-window
+  slicing is now restricted to serial backends), and the `MaybeHaloArray`
+  wrapper gained the same instructive linear/slice-indexing refusal as the
+  single arrays.
+- **`isassigned` answers `false` for refused index forms instead of
+  throwing.** On Julia 1.10, `Base.isassigned` only swallows `BoundsError`,
+  so the instructive `ArgumentError` for linear indexing escaped it and
+  crashed generic callers.
+
 ## [0.5.0] — 2026-07-15
 
 ### Changed
@@ -39,7 +74,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   operand (whose interior spans the same global grid) is sliced the same way.
   Operands matching neither the global extent nor 1 in some dimension are
   refused with a clear `DimensionMismatch`. Out-of-place mixing
-  (`t .+ g`) keeps its existing semantics (a plain global `Array`).
+  (`t .+ g`) keeps its existing semantics (a plain global `Array`). Migration
+  note: a plain operand sized to the **tile** interior, which 0.4.x happened
+  to apply per tile (a layout-dependent accident), is now refused — pass the
+  global-shaped operand instead.
 - **Two-array kernels reject mismatched geometry instead of corrupting memory.**
   `axpy!`/`axpby!`/`swap!`/`rotate!`/`reflect!` and `dot` index both padded
   parents with one array's interior range under `@inbounds`, with no shape

@@ -105,13 +105,13 @@ unpack_args_ha( args::Tuple{Any}) = (unpack_ha(args[1]),)
 @inline function _tile_global_view(x::AbstractArray, ref::ThreadedHaloArray{T,N},
         tile_id::Integer) where {T,N}
     Base.require_one_based_indexing(x)
-    ts  = tile_size(ref)
-    c   = tile_coordinates(ref, tile_id)
     gsz = global_size(ref)
+    # the tile's global window, from the shared tile-origin helper
+    gr  = _tile_interior_range(tile_coordinates(ref, tile_id), tile_size(ref))
     rngs = ntuple(Val(N)) do d
         szd = size(x, d)
         szd == 1      ? (1:1) :
-        szd == gsz[d] ? (((c[d] - 1) * ts[d] + 1):(c[d] * ts[d])) :
+        szd == gsz[d] ? gr[d] :
         throw(DimensionMismatch(
             "broadcast operand of size $(size(x)) is incompatible with the " *
             "global interior $(gsz) of the threaded destination (each " *
@@ -121,10 +121,15 @@ unpack_args_ha( args::Tuple{Any}) = (unpack_ha(args[1]),)
 end
 
 unpack_ha_tile(x::ThreadedHaloArray, tile_id, ref) = interior_view(x, tile_id)
-# A single-block halo array's interior spans the same GLOBAL grid: slice this
-# tile's window of it, like any global-shaped operand.
-unpack_ha_tile(x::AbstractSingleHaloArray, tile_id, ref) =
+# A SERIAL single-block halo array's interior spans the same GLOBAL grid:
+# slice this tile's window of it, like any global-shaped operand. (Only serial
+# backends: a distributed HaloArray's interior is rank-LOCAL, so slicing it by
+# global tile windows would read the wrong cells — refuse it explicitly.)
+unpack_ha_tile(x::AbstractSerialHaloArray, tile_id, ref) =
     _tile_global_view(interior_view(x), ref, tile_id)
+unpack_ha_tile(::AbstractDistributedHaloArray, tile_id, ref) = throw(ArgumentError(
+    "a distributed HaloArray cannot be an operand of a threaded broadcast: its " *
+    "interior is rank-local, not global"))
 unpack_ha_tile(x::AbstractArray, tile_id, ref) = _tile_global_view(x, ref, tile_id)
 unpack_ha_tile(x::AbstractArray{<:Any,0}, tile_id, ref) = x   # 0-d wrapper: scalar-like
 unpack_ha_tile(x, tile_id, ref) = x                            # scalars, Ref, types, …
@@ -133,11 +138,8 @@ unpack_ha_tile(x, tile_id, ref) = x                            # scalars, Ref, t
     Broadcasted{Style}(bc.f, unpack_args_ha_tile(tile_id, ref, bc.args))
 end
 
-@inline function unpack_ha_tile(bc::Broadcasted{<:HaloArrayStyle}, tile_id, ref)
-    Broadcasted(bc.f, unpack_args_ha_tile(tile_id, ref, bc.args))
-end
-
-@inline function unpack_ha_tile(bc::Broadcasted{<:ThreadedHaloArrayStyle}, tile_id, ref)
+@inline function unpack_ha_tile(
+        bc::Broadcasted{<:Union{HaloArrayStyle,ThreadedHaloArrayStyle}}, tile_id, ref)
     Broadcasted(bc.f, unpack_args_ha_tile(tile_id, ref, bc.args))
 end
 

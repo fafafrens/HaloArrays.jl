@@ -339,6 +339,19 @@ end
     return nothing
 end
 
+# Relaxed variant for kernels that only touch INTERIOR VIEWS (multi-array
+# mapreduce/folds, map!): halo widths may differ — the views still align —
+# but the global size and per-tile interior extents must match (equal extents
+# with equal global size pins the tile layout too). Kernels that index the
+# padded parents (copyto!, BLAS-1, dot) need the strict storage check above.
+@inline function _check_same_interior(x, y, what::String)
+    (size(x) == size(y) && tile_count(x) == tile_count(y) &&
+     map(length, interior_range(x)) == map(length, interior_range(y))) ||
+        throw(DimensionMismatch(
+            "$what requires matching interior geometry (global size and tile layout)"))
+    return nothing
+end
+
 function Base.copyto!(dest::AbstractSingleHaloArray, src::AbstractSingleHaloArray)
     _check_same_geometry(dest, src, "copyto!")
     _foreach_tile(t -> copyto!(tile_parent(dest, t), tile_parent(src, t)), dest)
@@ -398,6 +411,9 @@ Base.reverse!(::AbstractSingleHaloArray; dims=:) =
     throw(ArgumentError("reverse! " * _NO_AXES_REORDER_MSG))
 
 function Base.map!(f, dest::AbstractSingleHaloArray, src::Vararg{AbstractSingleHaloArray,Nsrc}) where {Nsrc}
+    # Base's map! zips the views and silently stops at the shortest — guard
+    # like the other multi-array kernels (interior check: halo widths may differ).
+    foreach(s -> _check_same_interior(dest, s, "map!"), src)
     @views map!(f, interior_view(dest), map(interior_view, src)...)
     return dest
 end
@@ -540,6 +556,20 @@ Base.getindex(::AbstractSingleHaloArray,
 Base.setindex!(::AbstractSingleHaloArray, _,
         ::Vararg{Union{Colon,AbstractRange,AbstractVector,Integer}}) =
     throw(ArgumentError(_SLICE_INDEX_MSG))
+
+# Base.isassigned only swallows BoundsError/UndefRefError — the instructive
+# ArgumentErrors above (linear indexing; non-owned MPI cells) would escape it
+# on Julia 1.10's try/catch implementation and crash generic callers. Answer
+# from the index check directly: any refused or out-of-range form is `false`.
+function Base.isassigned(halo::AbstractSingleHaloArray, I::Integer...)
+    try
+        _check_global_scalar_indices(halo, I)
+        return true
+    catch e
+        e isa Union{ArgumentError,BoundsError} && return false
+        rethrow()
+    end
+end
 
 Base.getindex(halo::AbstractHaloArray, I::CartesianIndex) = getindex(halo, Tuple(I)...)
 Base.setindex!(halo::AbstractHaloArray, value, I::CartesianIndex) =

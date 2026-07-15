@@ -78,6 +78,16 @@ function Base.setindex!(m::MaybeHaloArray, value, I::Vararg{Integer})
     return m
 end
 
+# Same instructive slice refusal as the single halo arrays (see
+# abstract_haloarray.jl) — without it the wrapper falls to Base's obscure
+# generic slice fallback the refusal exists to replace.
+Base.getindex(::MaybeHaloArray,
+        ::Vararg{Union{Colon,AbstractRange,AbstractVector,Integer}}) =
+    throw(ArgumentError(_SLICE_INDEX_MSG))
+Base.setindex!(::MaybeHaloArray, _,
+        ::Vararg{Union{Colon,AbstractRange,AbstractVector,Integer}}) =
+    throw(ArgumentError(_SLICE_INDEX_MSG))
+
 function Base.show(io::IO, m::MaybeHaloArray)
     if m.active
         print(io, "MaybeHaloArray(active) -> ")

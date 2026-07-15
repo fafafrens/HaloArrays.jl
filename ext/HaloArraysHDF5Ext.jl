@@ -210,17 +210,31 @@ end
 # appended step (the rest stays stale); a larger one errors late inside HDF5.
 # Same class of guard as the fixed-size `create_haloarray_output_file` path;
 # here the leading (time) axis may hold any number of already-appended steps.
-function _assert_appendable_dataset_matches(obj, ::Type{T}, global_dims, name::String) where {T}
+# Shared kind + eltype core for the two dataset-reuse validators (appendable
+# and fixed-size), so the checks and their messages cannot drift apart.
+function _assert_dataset_kind_eltype(obj, ::Type{T}, name::String, what::String) where {T}
     obj isa HDF5.Dataset || throw(ArgumentError(
-        "HDF5: \"$name\" already exists as $(typeof(obj)), not an appendable dataset."))
+        "HDF5: \"$name\" already exists as $(typeof(obj)), not $what."))
+    eltype(obj) === T || throw(ArgumentError(
+        "HDF5: existing dataset \"$name\" has eltype $(eltype(obj)), expected $T."))
+    return obj
+end
+
+function _assert_appendable_dataset_matches(obj, ::Type{T}, global_dims, name::String) where {T}
+    _assert_dataset_kind_eltype(obj, T, name, "an appendable dataset")
     dims = size(obj)
     (length(dims) == length(global_dims) + 1 && dims[2:end] == global_dims) ||
         throw(DimensionMismatch(
             "HDF5: existing dataset \"$name\" has size $dims but appending this halo " *
             "array needs (nsteps, $(join(global_dims, ", "))). Refusing to append to a " *
             "mismatched dataset — use a new file/name or delete the old dataset."))
-    eltype(obj) === T || throw(ArgumentError(
-        "HDF5: existing dataset \"$name\" has eltype $(eltype(obj)), expected $T."))
+    # The time axis must be extendable: a same-shaped dataset created by the
+    # fixed-size path passes the shape check but `set_extent_dims` would then
+    # fail deep inside HDF5 — refuse with the story instead.
+    _, maxdims = HDF5.get_extent_dims(obj)
+    maxdims[1] == -1 || throw(ArgumentError(
+        "HDF5: existing dataset \"$name\" has a fixed time axis (max $(maxdims[1]) " *
+        "step(s)); it was not created for appending — use a new file/name or delete it."))
     return obj
 end
 
@@ -280,9 +294,10 @@ end
 
 function append_haloarray!(group::HDF5.Group, halo::MultiHaloArray)
     for (field_name, field) in pairs(halo.arrays)
-        child_name = _hdf5_field_name(field_name)
-        child = haskey(group, child_name) ? group[child_name] :
-            create_dataset_from_haloarray(group, child_name, field)
+        # create_dataset_from_haloarray opens-and-validates an existing child
+        # dataset or creates a fresh one — no unvalidated reuse (a mismatched
+        # existing field would otherwise take silent partial-slab appends).
+        child = create_dataset_from_haloarray(group, _hdf5_field_name(field_name), field)
         append_haloarray!(child, field)
     end
     return nothing
@@ -367,15 +382,12 @@ end
 # mismatched dataset (silent corruption, or a late out-of-range HDF5 error).
 function _assert_fixedsize_dataset_matches(obj, halo::Union{AbstractSingleHaloArray,ArrayOfHaloArray},
                                            num_timesteps::Int, name::String)
-    obj isa HDF5.Dataset || throw(ArgumentError(
-        "HDF5: \"$name\" already exists as $(typeof(obj)), not a fixed-size dataset."))
+    _assert_dataset_kind_eltype(obj, eltype(halo), name, "a fixed-size dataset")
     expected = (num_timesteps, _hdf5_dataset_dims(halo)...)
     size(obj) == expected || throw(DimensionMismatch(
         "HDF5: existing dataset \"$name\" has size $(size(obj)) but this halo array needs " *
         "$expected (num_timesteps, global_dims…). Refusing to reuse a mismatched dataset — " *
         "use a new file/name or delete the old dataset."))
-    eltype(obj) === eltype(halo) || throw(ArgumentError(
-        "HDF5: existing dataset \"$name\" has eltype $(eltype(obj)), expected $(eltype(halo))."))
     return obj
 end
 

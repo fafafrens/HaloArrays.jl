@@ -423,6 +423,8 @@ end
         w = LocalHaloArray(Float64, (8,), 2; boundary_condition=:periodic)   # same size, different halo
         interior_view(x) .= 1.0; interior_view(y) .= 2.0; interior_view(w) .= 3.0
 
+        # kernels indexing the PADDED parents need identical storage: both a
+        # different size (y) and a different halo width (w) are refused.
         for bad in (y, w)
             @test_throws DimensionMismatch axpy!(1.0, x, bad)
             @test_throws DimensionMismatch axpby!(1.0, x, 2.0, bad)
@@ -430,7 +432,15 @@ end
             @test_throws DimensionMismatch rotate!(x, bad, 0.6, 0.8)
             @test_throws DimensionMismatch reflect!(x, bad, 0.6, 0.8)
             @test_throws DimensionMismatch dot(x, bad)
-            @test_throws DimensionMismatch mapreduce(+, +, x, bad)
+        end
+        # interior-view kernels (multi-array mapreduce, map!) only need equal
+        # interiors: a different SIZE is refused, a different halo width works.
+        @test_throws DimensionMismatch mapreduce(+, +, x, y)
+        @test_throws DimensionMismatch map!(+, similar(x), x, y)
+        @test mapreduce(+, +, x, w) == 8 * (1.0 + 3.0)
+        let d = similar(x)
+            @test map!(+, d, x, w) === d
+            @test collect(interior_view(d)) == fill(4.0, 8)
         end
 
         # mismatched tile layouts are rejected too (same interior, tiled differently)
@@ -660,6 +670,19 @@ end
         end
         # out-of-range scalar indexing keeps throwing BoundsError
         @test_throws BoundsError u[0, 1]
+
+        # isassigned must swallow the refusals (Base only catches BoundsError,
+        # so the instructive ArgumentError would crash it on Julia 1.10)
+        @test isassigned(u, 2, 3)
+        @test !isassigned(u, 3)        # linear-indexing arity → false, not a throw
+        @test !isassigned(u, 9, 9)     # out of range
+
+        # the MaybeHaloArray wrapper gets the same instructive slice refusal
+        m = MaybeHaloArray(u)
+        @test_throws ArgumentError m[:, 1]
+        @test_throws ArgumentError m[1:2, 1]
+        @test_throws ArgumentError m[:, 1] = [1.0, 2.0]
+        @test m[2, 3] == u[2, 3]       # scalar forms unaffected
     end
 
     @testset "size/axes honor the trailing-dimension contract" begin

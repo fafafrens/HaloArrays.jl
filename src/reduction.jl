@@ -87,8 +87,10 @@ end
 function _local_mapreduce(reducer::R, f::F, op::OP, arrays::Tuple; kws...) where {R,F,OP}
     # Multi-array reductions zip the interior views, and `zip` silently
     # truncates to the shortest — a mismatched pair would return a partial
-    # result instead of Base's DimensionMismatch. Guard once, up front.
-    foreach(a -> _check_same_geometry(first(arrays), a, "multi-array reduction"),
+    # result instead of Base's DimensionMismatch. Guard once, up front. The
+    # INTERIOR check: this path never touches the padding, so equal interiors
+    # with different halo widths are fine (they were in 0.4.x).
+    foreach(a -> _check_same_interior(first(arrays), a, "multi-array reduction"),
         Base.tail(arrays))
     return _mapreduce_tile(t -> _reduce_views(reducer, f, op,
         map(h -> interior_view(h, t), arrays); kws...), op, first(arrays))

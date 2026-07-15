@@ -71,6 +71,25 @@ end
         @test size(dset2) == (2, 2, 3)
         close(fid2)
 
+        # appending to a FIXED-size dataset is refused up front (its time axis
+        # is not extendable; set_extent_dims would otherwise fail deep in HDF5)
+        @test_throws ArgumentError append_haloarray_to_file!(base, "fixed", halo)
+
+        # the MultiHaloArray group-append path validates each existing child
+        # dataset too (it used to reuse them unvalidated)
+        mk_mha(dims) = MultiHaloArray((;
+            rho=LocalHaloArray(Int, dims, 1; boundary_condition=:repeating),
+            mom=LocalHaloArray(Int, dims, 1; boundary_condition=:repeating),
+        ))
+        state = mk_mha((2, 3))
+        interior_view(state.rho) .= 1
+        interior_view(state.mom) .= 2
+        append_haloarray_to_file!(base, "state", state)
+        @test size(_read_dataset(path, "state/rho")) == (1, 2, 3)
+        @test_throws DimensionMismatch append_haloarray_to_file!(base, "state", mk_mha((2, 4)))
+        append_haloarray_to_file!(base, "state", state)   # matched append still grows
+        @test size(_read_dataset(path, "state/mom")) == (2, 2, 3)
+
         rm(path; force=true)
     end
 

@@ -307,6 +307,15 @@
         ts = ThreadedHaloArray(Float64, (3,), 1; dims=(2,),
             boundary_condition=:repeating, thread_backend=SerialBackend())
         @test_throws DimensionMismatch ts .= ts .+ ones(5)
+
+        # a distributed HaloArray operand is refused: its interior is
+        # rank-LOCAL, so slicing it by global tile windows would be wrong.
+        # (The plain-array operand demotes the style so the tile path is
+        # reached; a pure threaded+MPI mix already errors at style resolution.)
+        topology = CartesianTopology(MPI.COMM_SELF, (1,); periodic=(true,))
+        mpi_u = HaloArray(Float64, (6,), 1, topology;
+            boundary_condition=((Periodic(), Periodic()),))
+        @test_throws ArgumentError ts .= ts .+ ones(6) .+ mpi_u
     end
 
     @testset "threaded multi halo array broadcast" begin
