@@ -205,20 +205,37 @@ function _hdf5_write_timestep!(group::HDF5.Group, halo::MultiHaloArray, time_ind
     return nothing
 end
 
+# Reusing an existing object for appends must match the halo array that will be
+# written: a SMALLER array would silently write a partial slab into each
+# appended step (the rest stays stale); a larger one errors late inside HDF5.
+# Same class of guard as the fixed-size `create_haloarray_output_file` path;
+# here the leading (time) axis may hold any number of already-appended steps.
+function _assert_appendable_dataset_matches(obj, ::Type{T}, global_dims, name::String) where {T}
+    obj isa HDF5.Dataset || throw(ArgumentError(
+        "HDF5: \"$name\" already exists as $(typeof(obj)), not an appendable dataset."))
+    dims = size(obj)
+    (length(dims) == length(global_dims) + 1 && dims[2:end] == global_dims) ||
+        throw(DimensionMismatch(
+            "HDF5: existing dataset \"$name\" has size $dims but appending this halo " *
+            "array needs (nsteps, $(join(global_dims, ", "))). Refusing to append to a " *
+            "mismatched dataset — use a new file/name or delete the old dataset."))
+    eltype(obj) === T || throw(ArgumentError(
+        "HDF5: existing dataset \"$name\" has eltype $(eltype(obj)), expected $T."))
+    return obj
+end
+
 function _create_hdf5_dataset_from_haloarray(g, name::String, halo)
     T = eltype(halo)
     global_dims = _hdf5_dataset_dims(halo)
+
+    haskey(g, name) &&
+        return _assert_appendable_dataset_matches(g[name], T, global_dims, name)
 
     initial_size = (0, global_dims...)
     max_size = (-1, global_dims...)
     chunk = (1, _hdf5_chunk_dims(halo)...)
 
     dspace = dataspace(initial_size; max_dims=max_size)
-
-    if haskey(g, name)
-        return HDF5.open_dataset(g, name)
-    end
-
     dset = HDF5.create_dataset(g, name, T, dspace; chunk=chunk)
     return dset
 end
@@ -287,9 +304,9 @@ function append_haloarray_to_file!(file::String, dataset_name::String, halo::Abs
     mode = isfile(file) ? "r+" : "w"
 
     _hdf5_open(file, mode, comm) do fid
-        dset = haskey(fid, dataset_name) ? fid[dataset_name] :
-            create_dataset_from_haloarray(fid, dataset_name, halo)
-
+        # create_dataset_from_haloarray opens-and-validates an existing dataset
+        # (shape + eltype) or creates a fresh one — no unvalidated reuse here.
+        dset = create_dataset_from_haloarray(fid, dataset_name, halo)
         append_haloarray!(dset, halo)
     end
 

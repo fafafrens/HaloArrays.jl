@@ -160,15 +160,23 @@ end
     (@views py[rng...] .= s .* px[rng...] .+ t .* py[rng...]; nothing)
 
 # Per-tile driving goes through `_foreach_tile` (abstract_haloarray.jl, next to
-# the one-tile decomposition trait it is built on).
+# the one-tile decomposition trait it is built on). The two-array kernels index
+# BOTH parents with x's range under @inbounds, so they must pass the shared
+# geometry guard first (an unchecked mismatch is an out-of-bounds read/write).
 LinearAlgebra.rmul!(x::AbstractSingleHaloArray, s::Number) =
     (_foreach_tile(t -> _interior_scal!(tile_parent(x, t), interior_range(x, t), s), x); x)
 LinearAlgebra.lmul!(s::Number, x::AbstractSingleHaloArray) =
     (_foreach_tile(t -> _interior_scal!(tile_parent(x, t), interior_range(x, t), s), x); x)
-LinearAlgebra.axpy!(s::Number, x::AbstractSingleHaloArray, y::AbstractSingleHaloArray) =
-    (_foreach_tile(t -> _interior_axpy!(tile_parent(y, t), tile_parent(x, t), interior_range(x, t), s), x); y)
-LinearAlgebra.axpby!(s::Number, x::AbstractSingleHaloArray, t::Number, y::AbstractSingleHaloArray) =
-    (_foreach_tile(tt -> _interior_axpby!(tile_parent(y, tt), tile_parent(x, tt), interior_range(x, tt), s, t), x); y)
+function LinearAlgebra.axpy!(s::Number, x::AbstractSingleHaloArray, y::AbstractSingleHaloArray)
+    _check_same_geometry(x, y, "axpy!")
+    _foreach_tile(t -> _interior_axpy!(tile_parent(y, t), tile_parent(x, t), interior_range(x, t), s), x)
+    return y
+end
+function LinearAlgebra.axpby!(s::Number, x::AbstractSingleHaloArray, t::Number, y::AbstractSingleHaloArray)
+    _check_same_geometry(x, y, "axpby!")
+    _foreach_tile(tt -> _interior_axpby!(tile_parent(y, tt), tile_parent(x, tt), interior_range(x, tt), s, t), x)
+    return y
+end
 
 # ---- swap + Givens/Householder on two vectors (elementwise, MPI-safe) --------
 # These complete the BLAS-1 surface (SSWAP, SROT). Each mixes two whole vectors
@@ -240,16 +248,19 @@ backend and is MPI-safe (each rank/tile swaps its own cells). On a
 [`ThreadedHaloArray`](@ref) the tiles are processed in parallel.
 """
 function swap!(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray)
+    _check_same_geometry(x, y, "swap!")
     _foreach_tile(t -> _swap_tile!(tile_parent(x, t), tile_parent(y, t), interior_range(x, t)), x)
     return x, y
 end
 
 function LinearAlgebra.rotate!(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray, c, s)
+    _check_same_geometry(x, y, "rotate!")
     _foreach_tile(t -> _rotate_tile!(tile_parent(x, t), tile_parent(y, t), interior_range(x, t), c, s), x)
     return x, y
 end
 
 function LinearAlgebra.reflect!(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray, c, s)
+    _check_same_geometry(x, y, "reflect!")
     _foreach_tile(t -> _reflect_tile!(tile_parent(x, t), tile_parent(y, t), interior_range(x, t), c, s), x)
     return x, y
 end

@@ -84,9 +84,15 @@ end
 # once via `_apply_init` — forwarding it into every tile counted it per tile.
 # The order-sensitive folds still forward it (it must seed one end of the fold,
 # which is only well-defined on a single tile; see the fold methods).
-_local_mapreduce(reducer::R, f::F, op::OP, arrays::Tuple; kws...) where {R,F,OP} =
-    _mapreduce_tile(t -> _reduce_views(reducer, f, op,
+function _local_mapreduce(reducer::R, f::F, op::OP, arrays::Tuple; kws...) where {R,F,OP}
+    # Multi-array reductions zip the interior views, and `zip` silently
+    # truncates to the shortest — a mismatched pair would return a partial
+    # result instead of Base's DimensionMismatch. Guard once, up front.
+    foreach(a -> _check_same_geometry(first(arrays), a, "multi-array reduction"),
+        Base.tail(arrays))
+    return _mapreduce_tile(t -> _reduce_views(reducer, f, op,
         map(h -> interior_view(h, t), arrays); kws...), op, first(arrays))
+end
 
 # Seed a commutative reduction with `init` exactly ONCE, after the tiles (and,
 # on MPI, the ranks) have been combined. `haskey` is compile-time constant (the
@@ -95,8 +101,13 @@ _local_mapreduce(reducer::R, f::F, op::OP, arrays::Tuple; kws...) where {R,F,OP}
     haskey(kws, :init) ? op(kws[:init], r) : r
 _local_sum(f::F, u) where {F} =
     _mapreduce_tile(t -> _interior_acc(f, tile_parent(u, t), interior_range(u, t)), +, u)
-_local_dot(x, y) =
-    _mapreduce_tile(t -> _interior_dot(tile_parent(x, t), tile_parent(y, t), interior_range(x, t)), +, x)
+# `_interior_dot` indexes BOTH parents with x's range under @inbounds/@simd —
+# guard first (a mismatch would be an out-of-bounds read / silently partial dot,
+# where Base's `dot` throws). Covers `dot` on every backend (MPI included).
+function _local_dot(x, y)
+    _check_same_geometry(x, y, "dot")
+    return _mapreduce_tile(t -> _interior_dot(tile_parent(x, t), tile_parent(y, t), interior_range(x, t)), +, x)
+end
 _local_any(f::F, u) where {F} = _mapreduce_tile(t -> any(f, interior_view(u, t)), |, u)
 _local_all(f::F, u) where {F} = _mapreduce_tile(t -> all(f, interior_view(u, t)), &, u)
 _local_equal(x, y) = _mapreduce_tile(t -> interior_view(x, t) == interior_view(y, t), &, x)

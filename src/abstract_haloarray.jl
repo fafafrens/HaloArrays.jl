@@ -323,13 +323,24 @@ function Base.fill!(halo::AbstractSingleHaloArray, value)
     return halo
 end
 
+# One uniform geometry guard for every backend: global shape, decomposition
+# layout, and per-tile padded storage (storage_size covers tile size AND halo
+# width — equal interiors with different ghosts would silently misalign a raw
+# sweep). Every two-array kernel that indexes both parents with ONE array's
+# range under @inbounds (copyto!, the BLAS-1 updates, dot, the multi-array
+# reductions) MUST call this: an unchecked mismatch is an out-of-bounds
+# read/write. Cost is a few integer tuple compares (~50 ns, no allocation) —
+# noise next to any interior sweep.
+@inline function _check_same_geometry(x, y, what::String)
+    (size(x) == size(y) && tile_count(x) == tile_count(y) &&
+     storage_size(x) == storage_size(y)) ||
+        throw(DimensionMismatch(
+            "$what requires matching global size, tile layout, and halo width"))
+    return nothing
+end
+
 function Base.copyto!(dest::AbstractSingleHaloArray, src::AbstractSingleHaloArray)
-    # One uniform guard for every backend: global shape, decomposition layout,
-    # and per-tile padded storage (storage_size covers tile size AND halo width —
-    # equal interiors with different ghosts would silently misalign a raw copy).
-    (size(dest) == size(src) && tile_count(dest) == tile_count(src) &&
-     storage_size(dest) == storage_size(src)) ||
-        throw(DimensionMismatch("copyto! requires matching global size, tile layout, and halo width"))
+    _check_same_geometry(dest, src, "copyto!")
     _foreach_tile(t -> copyto!(tile_parent(dest, t), tile_parent(src, t)), dest)
     return dest
 end

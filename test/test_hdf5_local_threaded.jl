@@ -26,6 +26,16 @@ end
         @test size(data) == (1, 2, 3)
         @test data[1, :, :] == interior_view(halo)
 
+        # Appending to an existing dataset validates its shape/eltype against the
+        # array (a smaller array would silently write a partial slab per step).
+        wrong_shape = LocalHaloArray(Int, (2, 4), 1; boundary_condition=:repeating)
+        @test_throws DimensionMismatch append_haloarray_to_file!(base, "field", wrong_shape)
+        wrong_eltype = LocalHaloArray(Float64, (2, 3), 1; boundary_condition=:repeating)
+        @test_throws ArgumentError append_haloarray_to_file!(base, "field", wrong_eltype)
+        # a matched append still grows the dataset
+        append_haloarray_to_file!(base, "field", halo)
+        @test size(_read_dataset(path, "field")) == (2, 2, 3)
+
         save_base = _serial_hdf5_base("local_save")
         save_path = save_base * ".h5"
         rm(save_path; force=true)

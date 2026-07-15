@@ -4,6 +4,25 @@ All notable changes to HaloArrays.jl are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Two-array kernels reject mismatched geometry instead of corrupting memory.**
+  `axpy!`/`axpby!`/`swap!`/`rotate!`/`reflect!` and `dot` index both padded
+  parents with one array's interior range under `@inbounds`, with no shape
+  check — `axpy!` into a smaller array was an out-of-bounds write (observed
+  crashing the process), and `dot`/multi-array `mapreduce` on mismatched arrays
+  returned silently partial results (the lazy `zip` truncates; Base throws).
+  All of them now run the same geometry guard `copyto!` always had (global
+  size + tile layout + halo width; ~50 ns, allocation-free — noise next to any
+  interior sweep) and raise `DimensionMismatch`.
+- **HDF5 appends validate an existing dataset before reusing it.** The
+  append path (`append_haloarray_to_file!`/`create_dataset_from_haloarray`)
+  reused a dataset by name with no shape/eltype check — the same hole fixed in
+  0.4.1 for the fixed-size path — so appending a smaller array silently wrote a
+  partial slab per step. A mismatch now raises
+  `DimensionMismatch`/`ArgumentError`.
+
 ## [0.4.1] — 2026-07-15
 
 ### Added

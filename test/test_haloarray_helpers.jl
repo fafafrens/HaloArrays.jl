@@ -413,6 +413,40 @@ end
         @test !_has_nearest_neighbor_conflict(global1)
     end
 
+    @testset "two-array kernels reject mismatched geometry" begin
+        # axpy!/axpby!/swap!/rotate!/reflect!/dot and the multi-array reductions
+        # index BOTH parents with one array's range under @inbounds — an
+        # unchecked mismatch was an out-of-bounds read/write (axpy! crashed) or
+        # a silently partial dot/mapreduce (zip truncates; Base throws).
+        x = LocalHaloArray(Float64, (8,), 1; boundary_condition=:periodic)
+        y = LocalHaloArray(Float64, (4,), 1; boundary_condition=:periodic)   # different size
+        w = LocalHaloArray(Float64, (8,), 2; boundary_condition=:periodic)   # same size, different halo
+        interior_view(x) .= 1.0; interior_view(y) .= 2.0; interior_view(w) .= 3.0
+
+        for bad in (y, w)
+            @test_throws DimensionMismatch axpy!(1.0, x, bad)
+            @test_throws DimensionMismatch axpby!(1.0, x, 2.0, bad)
+            @test_throws DimensionMismatch HaloArrays.swap!(x, bad)
+            @test_throws DimensionMismatch rotate!(x, bad, 0.6, 0.8)
+            @test_throws DimensionMismatch reflect!(x, bad, 0.6, 0.8)
+            @test_throws DimensionMismatch dot(x, bad)
+            @test_throws DimensionMismatch mapreduce(+, +, x, bad)
+        end
+
+        # mismatched tile layouts are rejected too (same interior, tiled differently)
+        t2 = ThreadedHaloArray(Float64, (4,), 1; dims=(2,), boundary_condition=:periodic)
+        t4 = ThreadedHaloArray(Float64, (2,), 1; dims=(4,), boundary_condition=:periodic)
+        @test_throws DimensionMismatch dot(t2, t4)
+        @test_throws DimensionMismatch axpy!(1.0, t2, t4)
+
+        # matched geometry is unaffected
+        z = similar(x); interior_view(z) .= 2.0
+        @test axpy!(1.0, x, z) === z
+        @test collect(interior_view(z)) == fill(3.0, 8)
+        @test dot(x, z) ≈ 24.0
+        @test mapreduce(+, +, x, z) ≈ 32.0
+    end
+
     @testset "FaceRanges require halo width >= 1" begin
         # The boundary faces scatter into ghost cells; with halo 0 the face range
         # would start at storage index 0 and the @inbounds flux loop corrupted
