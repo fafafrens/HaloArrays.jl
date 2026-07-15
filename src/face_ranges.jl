@@ -45,7 +45,8 @@ interior_face_range(halo, ::Dim{D}) where {D} = interior_face_range(halo, D)
 
 Precompute the face index ranges and offsets for conservative flux-divergence
 loops. The stored indices identify the lower-index cell of each face; add
-`unit_vector(ranges, dim)` to reach the upper-index cell.
+`unit_vector(ranges, dim)` to reach the upper-index cell. Requires halo
+width ≥ 1 (throws otherwise): the two boundary faces scatter into ghost cells.
 
 For `MultiHaloArray` and `ArrayOfHaloArray`, the ranges are spatial only. Apply
 them after selecting an individual field.

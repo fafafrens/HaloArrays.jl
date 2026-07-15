@@ -97,12 +97,12 @@ fields). `prod(field_shape(c))` is the number of fields.
 
 # ---- LocalMultiHaloArray constructors -----------------------------------
 
-function LocalMultiHaloArray(arrs::NamedTuple; check=nothing)
+function LocalMultiHaloArray(arrs::NamedTuple)
     field_values = values(arrs)
     isempty(field_values) && throw(ArgumentError("LocalMultiHaloArray requires at least one field"))
     all(a -> a isa LocalHaloArray, field_values) ||
         throw(ArgumentError("All fields must be LocalHaloArray"))
-    return MultiHaloArray(arrs; check=check)
+    return MultiHaloArray(arrs)
 end
 
 """
@@ -133,7 +133,7 @@ LocalMultiHaloArray(owned_dims::NTuple{N,<:Integer}, halo::Integer; kwargs...) w
 
 # ---- ThreadedMultiHaloArray constructors --------------------------------
 
-function ThreadedMultiHaloArray(arrs::NamedTuple; check=nothing)
+function ThreadedMultiHaloArray(arrs::NamedTuple)
     field_values = values(arrs)
     isempty(field_values) && throw(ArgumentError("ThreadedMultiHaloArray requires at least one field"))
     all(a -> a isa ThreadedHaloArray, field_values) ||
@@ -149,7 +149,7 @@ function ThreadedMultiHaloArray(arrs::NamedTuple; check=nothing)
         tile_count(a) == tile_count(ref) ||
             throw(DimensionMismatch("Field `$(name)` has tile_count $(tile_count(a)) != $(tile_count(ref))"))
     end
-    return MultiHaloArray(arrs; check=check)
+    return MultiHaloArray(arrs)
 end
 
 """

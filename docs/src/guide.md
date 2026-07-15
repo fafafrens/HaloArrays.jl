@@ -405,8 +405,10 @@ For collections the ranges are spatial only — select a field first.
 [`CellRanges`](@ref)`(u)` gives the interior-cell range. For ordinary out-of-place
 stencils use [`interior_cells`](@ref); for nearest-neighbor in-place red-black
 updates use [`interior_cells`](@ref)`(ranges, color)` (strided
-`CartesianIndices`, so the inner loop has no parity branch). Cell colors use
-`mod(sum(Tuple(I)), 2)`.
+`CartesianIndices`, so the inner loop has no parity branch). A cell's color is
+its **global** parity `mod(sum(global_index), 2)`, so the checkerboard stays
+continuous across tile/rank seams; on a [`ThreadedHaloArray`](@ref) build the
+ranges per tile — `CellRanges(u, tile_id)` — inside the tile loop.
 
 ## Kernel regions
 

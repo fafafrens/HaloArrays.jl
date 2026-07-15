@@ -132,7 +132,7 @@ end
 
 # ---- ground-truth constructors --------------------------------------------
 
-function MultiHaloArray(arrs::NamedTuple; check=nothing)
+function MultiHaloArray(arrs::NamedTuple)
     field_names = keys(arrs)
     field_values = values(arrs)
     _check_multihaloarray_compatible(field_names, field_values)
@@ -142,7 +142,7 @@ function MultiHaloArray(arrs::NamedTuple; check=nothing)
     return FieldCollection{T, S + 1, S, typeof(arrs)}(arrs)
 end
 
-function ArrayOfHaloArray(arrays::AbstractArray; check=nothing)
+function ArrayOfHaloArray(arrays::AbstractArray)
     _check_arrayofhaloarray_compatible(arrays)
 
     T = promote_type(map(eltype, arrays)...)

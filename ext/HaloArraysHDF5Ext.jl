@@ -411,15 +411,12 @@ function create_haloarray_output_file(filename::String, dataset_name::String,
 end
 
 function save_array_hdf5(filename::String, data, comm::MPI.Comm; root::Int=0)
-    rank = MPI.Comm_rank(comm)
-    if rank == root
+    if MPI.Comm_rank(comm) == root
         h5open(filename*".h5", "w") do file
             write(file, "dataset", data)
         end
-        println("Rank $rank wrote data to $filename")
-    else
-        nothing
     end
+    return nothing
 end
 
 function save_array_hdf5(filename::String, data; dataset::String="dataset")
