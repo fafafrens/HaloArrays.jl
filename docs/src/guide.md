@@ -45,6 +45,41 @@ For MPI-backed `HaloArray`, scalar `u[I...]` does not communicate. If `I` is not
 in the current rank's interior region, it errors. This keeps expensive communication out of
 generic indexing and makes performance-critical code use local views explicitly.
 
+## Indexing
+
+A halo array reports its **global** shape but stores only this rank's/tile's
+piece, so it deliberately supports a *narrower* indexing surface than a plain
+`AbstractArray` — everything it refuses, it refuses loudly, with the fast
+alternative named in the error.
+
+**What works:**
+
+| form | behaviour |
+|:-----|:----------|
+| `u[i, j, …]` (all `ndims` indices, **global** coordinates) | reads/writes the cell — on MPI only for cells this rank owns (warns; diagnostics only, not for hot loops) |
+| `u[i, j, …, 1]` (trailing `1`s past `ndims`) | allowed, per the `AbstractArray` contract (generic LinearAlgebra code such as `Diagonal`'s `ldiv!` relies on it) |
+
+**What is refused, and what to use instead:**
+
+| form | why | instead |
+|:-----|:----|:--------|
+| `u[3]` — linear indexing of an N-d array | would route generic code through a slow scalar path (and is ill-defined across ranks) | `interior_view(u)[3]`, or loop `eachindex(u)` / `CartesianIndices(interior_view(u))` |
+| `u[:]`, `u[:, 1]`, `u[1:2, :]` — slices | would materialize cross-rank/tile data cell by cell | slice the view: `interior_view(u)[:, 1]` (this rank's cells), or [`gather_haloarray`](@ref)`(u)` for the true global array (MPI, root-only) |
+
+The idiomatic patterns:
+
+```julia
+interior_view(u) .= data              # bulk initialisation of this rank's cells
+fill_from_global_indices!(f, u)       # initial condition from GLOBAL indices, any backend
+interior_view(u)[2, :]                # arbitrary slicing — it is a normal array
+parent(u)[I...]                       # storage coordinates (ghosts included), for stencils
+A = gather_haloarray(u)               # the assembled global array on the MPI root
+```
+
+Everything performance-relevant — broadcast, reductions, `dot`/`norm`, the
+BLAS-1 updates — is specialized and never touches scalar indexing, so these
+restrictions only surface in hand-written loops over the array itself.
+
 ## Halo exchange
 
 The public exchange API is intentionally small:

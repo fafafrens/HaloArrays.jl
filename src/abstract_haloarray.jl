@@ -503,7 +503,14 @@ end
 
 @inline function _check_global_scalar_indices(halo::AbstractHaloArray, I::Tuple)
     nd = ndims(halo)
-    length(I) >= nd || throw(BoundsError(halo, I))
+    # Fewer indices than dimensions is a LINEAR-indexing attempt (`u[3]` on a
+    # 2-D array) — unsupported by design (see the guide's Indexing section):
+    # it would route generic code through the slow scalar path, and is
+    # ill-defined across ranks. Name the alternative instead of BoundsError.
+    length(I) >= nd || throw(ArgumentError(
+        "linear indexing is not supported on a $nd-dimensional halo array " *
+        "(got $(length(I)) index/indices); give all $nd global indices, or " *
+        "index the interior view: `interior_view(u)[...]`."))
     # Trailing indices beyond ndims must be 1, per the AbstractArray contract:
     # `A[i, 1]` is valid for a vector. Generic LinearAlgebra code relies on this
     # (e.g. Diagonal's ldiv!, used as a preconditioner, indexes `B[i, 1]`).
@@ -516,6 +523,23 @@ end
     end
     return idx
 end
+
+# Slice indexing (`u[:]`, `u[:, 1]`, ranges, index vectors) is unsupported by
+# design — Base's generic materialization would either fail obscurely or crawl
+# cell by cell (and cannot assemble cross-rank data) — so refuse with the fast
+# alternative named. All-Integer scalar calls never land here: each backend's
+# `Vararg{Integer}` method is strictly more specific. Kept off the collection
+# types (their untyped field-indexing getindex would be ambiguous with this).
+const _SLICE_INDEX_MSG =
+    "slice indexing (`:`/ranges/index vectors) is not supported on a halo " *
+    "array; slice the interior view instead — `interior_view(u)[...]` — or " *
+    "use `gather_haloarray(u)` for the assembled global array (MPI, root-only)."
+Base.getindex(::AbstractSingleHaloArray,
+        ::Vararg{Union{Colon,AbstractRange,AbstractVector,Integer}}) =
+    throw(ArgumentError(_SLICE_INDEX_MSG))
+Base.setindex!(::AbstractSingleHaloArray, _,
+        ::Vararg{Union{Colon,AbstractRange,AbstractVector,Integer}}) =
+    throw(ArgumentError(_SLICE_INDEX_MSG))
 
 Base.getindex(halo::AbstractHaloArray, I::CartesianIndex) = getindex(halo, Tuple(I)...)
 Base.setindex!(halo::AbstractHaloArray, value, I::CartesianIndex) =

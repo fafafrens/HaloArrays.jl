@@ -639,6 +639,29 @@ end
         end
     end
 
+    @testset "linear/slice indexing is refused with instructive errors" begin
+        # The indexing contract (see the guide's Indexing section): full-dims
+        # global scalar indexing only. Linear indexing and slices point the
+        # user at interior_view/gather_haloarray instead of a bare
+        # BoundsError / an obscure generic-fallback failure.
+        u = LocalHaloArray(Float64, (2, 3), 1; boundary_condition=:periodic)
+        interior_view(u) .= 1.0
+        t = ThreadedHaloArray(Float64, (1, 3), 1; dims=(2, 1), boundary_condition=:periodic)
+        for x in (u, t)
+            @test_throws ArgumentError x[3]           # linear indexing
+            @test_throws ArgumentError x[:]           # vec slice
+            @test_throws ArgumentError x[:, 1]        # column slice
+            @test_throws ArgumentError x[1:2, 1]      # range slice
+            @test_throws ArgumentError x[[1, 2], 1]   # index-vector slice
+            @test_throws ArgumentError x[:, 1] = [1.0, 2.0]
+            # the supported scalar forms are unaffected
+            @test x[2, 3] isa Float64
+            @test x[2, 3, 1] == x[2, 3]               # trailing-1 contract
+        end
+        # out-of-range scalar indexing keeps throwing BoundsError
+        @test_throws BoundsError u[0, 1]
+    end
+
     @testset "size/axes honor the trailing-dimension contract" begin
         # size(A, i) / axes(A, i) must return 1 / OneTo(1) for i > ndims, per the
         # AbstractArray contract — generic code (e.g. ArrayInterface.zeromatrix,

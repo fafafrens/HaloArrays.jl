@@ -6,6 +6,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **The indexing contract is documented and its errors are instructive.** A
+  halo array supports full-dimension **global** scalar indexing only (owned
+  cells only under MPI, plus the trailing-`1`s the `AbstractArray` contract
+  requires). Linear indexing (`u[3]` on an N-d array) and slices
+  (`u[:]`, `u[:, 1]`, ranges, index vectors) are unsupported by design — they
+  would route through slow generic scalar paths and cannot assemble cross-rank
+  data. They now throw an `ArgumentError` naming the alternative
+  (`interior_view(u)[...]` / `gather_haloarray(u)`) instead of a bare
+  `BoundsError` or an obscure generic-fallback failure, and the guide gained
+  an *Indexing* section spelling out the contract and the idiomatic patterns.
+
 ### Removed
 - **The pre-0.3 deprecation shims** (`get_send_view`/`get_recv_view` →
   `edge_view`/`ghost_view`, `get_comm` → `communicator`, `isactive` →
