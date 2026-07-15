@@ -34,10 +34,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   slicing is now restricted to serial backends), and the `MaybeHaloArray`
   wrapper gained the same instructive linear/slice-indexing refusal as the
   single arrays.
-- **`isassigned` answers `false` for refused index forms instead of
-  throwing.** On Julia 1.10, `Base.isassigned` only swallows `BoundsError`,
-  so the instructive `ArgumentError` for linear indexing escaped it and
-  crashed generic callers.
+- **`isassigned` reports actual slot assignment and answers `false` for
+  refused index forms instead of throwing.** It attempts the read: an
+  unassigned reference slot (`Vector{Any}(undef, …)` before writing) is
+  `false`, as are out-of-range and refused forms — on Julia 1.10,
+  `Base.isassigned` only swallows `BoundsError`, so the instructive
+  `ArgumentError` for linear indexing previously escaped it and crashed
+  generic callers.
 
 ## [0.5.0] — 2026-07-15
 

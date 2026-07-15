@@ -676,6 +676,13 @@ end
         @test isassigned(u, 2, 3)
         @test !isassigned(u, 3)        # linear-indexing arity → false, not a throw
         @test !isassigned(u, 9, 9)     # out of range
+        # … and it reports actual slot assignment for reference eltypes, not
+        # just index validity (Vector{Any}(undef, …) slots are null until set)
+        ua = LocalHaloArray(Vector{Any}(undef, 4), 1, :periodic)
+        @test !isassigned(ua, 1)
+        ua[1] = 42
+        @test isassigned(ua, 1)
+        @test !isassigned(ua, 2)       # neighbouring slot still unassigned
 
         # the MaybeHaloArray wrapper gets the same instructive slice refusal
         m = MaybeHaloArray(u)

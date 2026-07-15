@@ -557,16 +557,20 @@ Base.setindex!(::AbstractSingleHaloArray, _,
         ::Vararg{Union{Colon,AbstractRange,AbstractVector,Integer}}) =
     throw(ArgumentError(_SLICE_INDEX_MSG))
 
-# Base.isassigned only swallows BoundsError/UndefRefError — the instructive
-# ArgumentErrors above (linear indexing; non-owned MPI cells) would escape it
-# on Julia 1.10's try/catch implementation and crash generic callers. Answer
-# from the index check directly: any refused or out-of-range form is `false`.
+# `isassigned(u, I...)` answers "would `u[I...]` return a value?" — which for
+# a reference eltype (`Any`, abstract, …) includes whether the slot actually
+# holds one (`Vector{Any}(undef, n)` slots are null until written). Attempt
+# the read and map every no-value outcome to `false`: UndefRefError (null
+# slot), BoundsError (out of range), and our instructive ArgumentErrors
+# (linear indexing; non-owned MPI cells) — Base's own isassigned only swallows
+# the first two, so on Julia 1.10 the ArgumentError would escape and crash
+# generic callers.
 function Base.isassigned(halo::AbstractSingleHaloArray, I::Integer...)
     try
-        _check_global_scalar_indices(halo, I)
+        getindex(halo, I...)
         return true
     catch e
-        e isa Union{ArgumentError,BoundsError} && return false
+        e isa Union{ArgumentError,BoundsError,UndefRefError} && return false
         rethrow()
     end
 end
