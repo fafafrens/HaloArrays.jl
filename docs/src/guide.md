@@ -80,6 +80,16 @@ Everything performance-relevant — broadcast, reductions, `dot`/`norm`, the
 BLAS-1 updates — is specialized and never touches scalar indexing, so these
 restrictions only surface in hand-written loops over the array itself.
 
+The same global-vs-local rule governs **plain-array operands in an in-place
+broadcast** (`u .= u .+ g`). On the shared-memory backends a plain operand is
+indexed by *global* interior coordinates — a `ThreadedHaloArray` hands each
+tile a view of its own global window, with the usual size-1 broadcast
+expansion per dimension. On a distributed `HaloArray` a plain operand must be
+**owned-size** (rank-local, `interior_view`-shaped): a global-shaped operand
+would require every rank to hold the whole array or an implicit scatter, so
+distribute global data explicitly (e.g. [`fill_from_global_indices!`](@ref))
+and broadcast with local operands.
+
 ## Halo exchange
 
 The public exchange API is intentionally small:
