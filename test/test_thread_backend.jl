@@ -47,6 +47,28 @@ using Polyester  # loads HaloArraysPolyesterExt so PolyesterBackend works
         @test sum(v) ≈ 2 * refsum
         @test thread_backend(v) === b
 
+        # do-block forms (closure lands in the first argument slot)
+        acc = zeros(Int, tile_count(u))
+        tile_foreach(b, 1:tile_count(u)) do tile
+            acc[tile] = tile
+        end
+        @test acc == collect(1:tile_count(u))
+        s = tile_mapreduce(+, b, 1:tile_count(u)) do tile
+            2 * tile
+        end
+        @test s == 2 * sum(1:tile_count(u))
+
+        # array-level forms: dispatch through the array's own tile driver
+        fill!(acc, 0)
+        tile_foreach(u) do tile
+            acc[tile] = tile
+        end
+        @test acc == collect(1:tile_count(u))
+        s2 = tile_mapreduce(+, u) do tile
+            2 * tile
+        end
+        @test s2 == 2 * sum(1:tile_count(u))
+
         # fill! and the threaded synchronize variant respect the backend
         fill!(u, 3.0)
         synchronize_halo_threads!(u)
@@ -60,4 +82,16 @@ using Polyester  # loads HaloArraysPolyesterExt so PolyesterBackend works
     # default backend is OhMyThreads
     udefault = ThreadedHaloArray(Float64, (4,), 1; dims=(1,), boundary_condition=:periodic)
     @test thread_backend(udefault) === OhMyThreadsBackend()
+
+    # array-level forms on a single-block array: one tile, run inline
+    ul = LocalHaloArray(Float64, (4, 4), 1; boundary_condition=:periodic)
+    hits = Int[]
+    tile_foreach(ul) do tile
+        push!(hits, tile)
+    end
+    @test hits == [1]
+    sl = tile_mapreduce(+, ul) do tile
+        10 * tile
+    end
+    @test sl == 10
 end

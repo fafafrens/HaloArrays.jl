@@ -50,20 +50,57 @@ struct PolyesterBackend <: ThreadBackend end
 
 """
     tile_foreach(backend, f, itr; scheduler=:dynamic)
+    tile_foreach(f, backend, itr; scheduler=:dynamic)
+    tile_foreach(f, u::AbstractSingleHaloArray)
 
 Apply `f` to every element of `itr` in parallel, according to `backend`. The
 `scheduler` hint is honoured by [`OhMyThreadsBackend`](@ref) and ignored by the
 others.
+
+The function-first forms exist for `do`-block syntax, which always passes the
+closure as the first argument. The array form runs the per-tile kernel
+`f(tile_id)` over `1:tile_count(u)` using `u`'s own tile driver — inline on a
+single-block array (Local/MPI: one tile), across `thread_backend(u)` on a
+[`ThreadedHaloArray`](@ref):
+
+```julia
+tile_foreach(u) do tile
+    s = tile_parent(u, tile)
+    # per-tile work; touch only this tile — tiles may run concurrently
+end
+```
+
+For explicit scheduler control fall back to the backend form,
+`tile_foreach(thread_backend(u), f, 1:tile_count(u); scheduler=…)`.
 """
 function tile_foreach end
 
 """
     tile_mapreduce(backend, f, op, itr; scheduler=:dynamic)
+    tile_mapreduce(f, op, backend, itr; scheduler=:dynamic)
+    tile_mapreduce(f, op, u::AbstractSingleHaloArray)
 
 Parallel `mapreduce(f, op, itr)` according to `backend`. `itr` must be non-empty
-(in this package there is always at least one tile).
+(in this package there is always at least one tile). The function-first forms
+exist for `do`-block syntax: `tile_mapreduce(+, backend, itr) do tile … end`.
+The array form reduces `f(tile_id)` over `1:tile_count(u)` with `u`'s own tile
+driver: `tile_mapreduce(+, u) do tile … end`.
 """
 function tile_mapreduce end
+
+# `do`-block forms. Backends implement only the backend-first methods; these
+# forward to them. `f::Function` keeps them unambiguous with the untyped `f`
+# slot of the backend-first methods (a backend is never a `Function`).
+@inline tile_foreach(f::Function, backend::ThreadBackend, itr; kwargs...) =
+    tile_foreach(backend, f, itr; kwargs...)
+@inline tile_mapreduce(f::Function, op, backend::ThreadBackend, itr; kwargs...) =
+    tile_mapreduce(backend, f, op, itr; kwargs...)
+
+# Array-level forms: public face of the `_foreach_tile`/`_mapreduce_tile` tile
+# drivers (abstract_haloarray.jl), so user kernels get the same dispatch as the
+# package's own per-tile operations without naming the backend.
+@inline tile_foreach(f::Function, u::AbstractSingleHaloArray) = _foreach_tile(f, u)
+@inline tile_mapreduce(f::Function, op, u::AbstractSingleHaloArray) = _mapreduce_tile(f, op, u)
 
 # --- OhMyThreads (default; OhMyThreads is a hard dependency) ------------------
 @inline tile_foreach(::OhMyThreadsBackend, f, itr; scheduler=:dynamic) =
