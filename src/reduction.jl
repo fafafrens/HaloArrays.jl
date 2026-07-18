@@ -357,6 +357,9 @@ for step in 1:nsteps
 end
 free!(plan)
 ```
+
+`reduce!` also has a function-first form for `do`-block syntax:
+`reduce!(plan, +, u) do x … end`.
 """
 abstract type DimReductionPlan end
 
@@ -437,6 +440,10 @@ function reduce!(plan::SerialDimReductionPlan, f::F, op::OP, u::ThreadedHaloArra
         plan.dims_to_remove, plan.source_tiles)
     return plan.output
 end
+
+# `do`-block form: do-syntax passes the closure as the first argument (cf.
+# tile_foreach). Covers every plan flavour (Serial/MPI/Collection) at once.
+@inline reduce!(f::Function, plan::DimReductionPlan, op, u) = reduce!(plan, f, op, u)
 
 # The eltype a reduction produces, predicted from types alone (what Base's
 # broadcast/reduction machinery uses): Bool sums count in Int, an Int field

@@ -129,6 +129,8 @@ end
 """
     accumulate_flux_divergence!(du, u, ranges::FaceRanges, dim, scale, flux,
                                 read=…, scatter! =…)
+    accumulate_flux_divergence!(flux, du, u, ranges::FaceRanges, dim, scale;
+                                read=…, scatter! =…)
 
 Accumulate the conservative finite-volume flux divergence along `dim` into `du`,
 using the precomputed `ranges`. This is the left / internal / right face loop in
@@ -155,6 +157,15 @@ arrays themselves. `dim` may be an `Int` or a `Dim{D}`.
 ranges = FaceRanges(u)
 accumulate_flux_divergence!(parent(du), parent(u), ranges, 1, inv(dx), numerical_flux)
 ```
+
+The flux-first form exists for `do`-block syntax (`read`/`scatter!` become
+keywords there):
+
+```julia
+accumulate_flux_divergence!(parent(du), parent(u), ranges, 1, inv(dx)) do UL, UR
+    0.5 * (UL + UR)
+end
+```
 """
 function accumulate_flux_divergence!(du, u, ranges::FaceRanges, dim, scale,
         flux, read, scatter!)
@@ -173,6 +184,15 @@ end
 @inline accumulate_flux_divergence!(du, u, ranges::FaceRanges, dim, scale, flux) =
     accumulate_flux_divergence!(du, u, ranges, dim, scale, flux,
         _scalar_face_read, _scalar_face_scatter!)
+
+# `do`-block form: do-syntax passes the closure as the first argument. `du`/`u`
+# are typed as the raw storages they already must be (padded arrays, or a
+# NamedTuple of them for collections), which keeps this unambiguous with the
+# flux-last method above — a FaceRanges is neither.
+@inline accumulate_flux_divergence!(flux::Function, du::Union{AbstractArray,NamedTuple},
+        u::Union{AbstractArray,NamedTuple}, ranges::FaceRanges, dim, scale;
+        read=_scalar_face_read, scatter! = _scalar_face_scatter!) =
+    accumulate_flux_divergence!(du, u, ranges, dim, scale, flux, read, scatter!)
 
 # Shared by face- and cell-range/region loops (defined here as face_ranges.jl is
 # included first). _spatial_ndims / _spatial_interior_range dispatch the spatial

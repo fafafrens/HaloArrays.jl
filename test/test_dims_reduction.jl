@@ -152,6 +152,13 @@ _fill_global!(u, g) = (for I in CartesianIndices(axes(u)); u[Tuple(I)...] = g(Tu
             @test reduce!(plan, identity, max, u) === r1     # geometry-only: any op
             @test free!(plan) === plan                       # no-op, stays usable
             @test reduce!(plan, identity, +, u) === r1
+
+            # do-block form (closure lands in the first argument slot)
+            rdo = reduce!(plan, +, u) do x
+                x
+            end
+            @test rdo === r1
+            @test vec(collect(u isa ThreadedHaloArray ? rdo : interior_view(rdo))) ≈ ref_d2
         end
 
         # geometry validation

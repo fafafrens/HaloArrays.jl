@@ -224,6 +224,14 @@ end
         accumulate_flux_divergence!(parent(du2), parent(u), ranges, Dim(1), 2.0, flux)
         @test parent(du2) ≈ 2.0 .* ref
 
+        # do-block form (flux closure lands in the first argument slot)
+        du3 = LocalHaloArray(Float64, (nx,), 1; boundary_condition=:repeating)
+        fill!(parent(du3), 0.0)
+        accumulate_flux_divergence!(parent(du3), parent(u), ranges, 1, 1.0) do uL, uR
+            0.5 * (uL + uR)
+        end
+        @test parent(du3) ≈ ref
+
         # Custom read/scatter (two-field state via a tuple of arrays).
         v = LocalHaloArray(Float64, (nx,), 1; boundary_condition=:repeating)
         interior_view(v) .= [10.0, 20.0, 30.0, 40.0, 50.0]
