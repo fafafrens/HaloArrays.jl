@@ -4,7 +4,23 @@ All notable changes to HaloArrays.jl are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.0] — 2026-09-10
+
+### Added
+- **`do`-block forms for the tile drivers.** Julia's `do`-syntax always passes
+  the closure as the first argument, so the backend-first signatures could not
+  be used with it. `tile_foreach`/`tile_mapreduce` gained function-first
+  forwarding methods, plus array-level forms — `tile_foreach(f, u)` and
+  `tile_mapreduce(f, op, u)` — that route through the array's own tile driver:
+  inline on a single-block array (Local/MPI: one tile), across
+  `thread_backend(u)` on a `ThreadedHaloArray`. For explicit scheduler control,
+  the backend form is still there.
+- **`do`-block forms for `reduce!` and `accumulate_flux_divergence!`.**
+  `reduce!(f, plan, op, u)` covers every plan flavour (Serial/MPI/Collection) at
+  once via the `DimReductionPlan` supertype. `accumulate_flux_divergence!` gained
+  a flux-first form taking `read`/`scatter!` as keywords; `du`/`u` are typed as
+  the raw storages they already must be, which keeps it unambiguous with the
+  flux-last method.
 
 ### Changed
 - **The LinearSolve extension now requires LinearSolve 5** (`compat` moved from
