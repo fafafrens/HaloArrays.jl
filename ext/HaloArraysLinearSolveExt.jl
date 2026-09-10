@@ -321,6 +321,13 @@ function HaloArrays.HaloGMRES(; restart = 30)
     return HaloGMRESAlg(restart)
 end
 
+# LinearSolve rejects an `AbstractMatrix` right-hand side for Krylov subspace
+# methods, reading extra columns as a batch of independent vectors. A 2-D halo
+# array is one N-D field, not a batch, and these solvers are coordinate-free —
+# they only ever touch `b` through broadcasts and `_hdot`. Opt out of the check.
+LinearSolve._check_batched_rhs_support(::LinearSolve.AbstractKrylovSubspaceMethod,
+    ::AbstractHaloArray) = nothing
+
 LinearSolve.init_cacheval(::HaloCGAlg, A, b, u, Pl, Pr, maxiters, abstol, reltol, verbose, assump) =
     _cg_workspace(b)
 LinearSolve.init_cacheval(::HaloBiCGStabAlg, A, b, u, Pl, Pr, maxiters, abstol, reltol, verbose, assump) =

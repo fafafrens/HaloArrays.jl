@@ -6,6 +6,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **The LinearSolve extension now requires LinearSolve 5** (`compat` moved from
+  `"3"` to `"5"`). LinearSolve 5 refuses an `AbstractMatrix` right-hand side for
+  Krylov subspace methods, treating the extra columns as a batch of independent
+  vectors; the coordinate-free `HaloCG`/`HaloMINRES`/`HaloBiCGStab`/`HaloGMRES`
+  solvers take a whole N-D field as `b`, so a 2-D halo array tripped that guard.
+  They now opt out of it — they only ever touch `b` through broadcasts and the
+  halo-aware dot product, so a 2-D `b` was never a batched right-hand side.
+
 ### Fixed
 - **The `MultiHaloArray` group-append path validates existing child datasets.**
   `append_haloarray!(group, ::MultiHaloArray)` still reused a child dataset by
