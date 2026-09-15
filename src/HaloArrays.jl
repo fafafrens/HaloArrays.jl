@@ -15,6 +15,7 @@ include("local_haloarray.jl")
 include("threaded_haloarray.jl")
 include("field_collection.jl")
 include("ArrayOfHaloArray.jl")
+include("field_access.jl")
 include("multihaloarray.jl")
 include("face_ranges.jl")
 include("cell_ranges.jl")
@@ -89,6 +90,9 @@ export interior_view,
     tile_count,
     tile_parent,
     field_storages,
+    gather_fields!,
+    scatter_fields!,
+    add_fields!,
     tile_coordinates,
     neighbor_tile_id,
     FaceRanges,

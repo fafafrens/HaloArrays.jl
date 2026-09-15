@@ -44,6 +44,8 @@ common API isn't buried among the advanced kernel and threading internals.
 - [`FaceRanges`](@ref) + [`accumulate_flux_divergence!`](@ref) — the
   conservative face-flux update in one call
 - [`CellRanges`](@ref) — owned-cell iteration for source terms and updates
+- [`gather_fields!`](@ref), [`scatter_fields!`](@ref), [`add_fields!`](@ref) —
+  read, overwrite, or accumulate all fields at a local storage index
 
 ## Distributed (MPI)
 
