@@ -2,8 +2,8 @@
 @inline _cell_storage(field::Union{LocalHaloArray,HaloArray}, ::Nothing) = parent(field)
 @inline _cell_storage(field::ThreadedHaloArray, ::Nothing) =
     throw(ArgumentError("threaded field access requires an explicit tile id"))
-@inline function _cell_storage(field::AbstractSingleHaloArray, tile::Integer)
-    1 <= tile <= tile_count(field) || throw(BoundsError(field, tile))
+Base.@propagate_inbounds function _cell_storage(field::AbstractSingleHaloArray, tile::Integer)
+    @boundscheck 1 <= tile <= tile_count(field) || throw(BoundsError(field, tile))
     return tile_parent(field, tile)
 end
 
@@ -37,6 +37,10 @@ Returns `dest`. No intermediate field container or vector is allocated. These
 scalar accessors are intended for CPU storage; they do not launch GPU kernels.
 The destination must not alias the state storage.
 
+Validation follows Julia's bounds-checking convention: calling with `@inbounds`
+skips vector-length, index-dimension, and storage/tile bounds checks. The caller
+must ensure these are valid. Ordinary calls validate before writing.
+
 ```julia
 u = ArrayOfHaloArray(LocalHaloArray, Float64, (3,), (16,), 1;
                      boundary_condition=:periodic)
@@ -45,10 +49,10 @@ I = first(interior_cells(CellRanges(u)))
 gather_fields!(v, u, I)
 ```
 """
-function gather_fields!(dest::AbstractVector, state::AbstractHaloCollection,
+Base.@propagate_inbounds function gather_fields!(dest::AbstractVector, state::AbstractHaloCollection,
         I::CartesianIndex, tile::Union{Nothing,Integer}=nothing)
-    _check_field_access(dest, state, I, tile)
-    for (j, field) in zip(eachindex(dest), eachfield(state))
+    @boundscheck _check_field_access(dest, state, I, tile)
+    @inbounds for (j, field) in zip(eachindex(dest), eachfield(state))
         dest[j] = _cell_storage(field, tile)[I]
     end
     return dest
@@ -63,10 +67,10 @@ Overwrite all fields at local padded-storage index `I` from `values` and return
 refresh halos before subsequent stencil reads. `values` must not alias state
 storage. Element conversion follows ordinary array assignment.
 """
-function scatter_fields!(state::AbstractHaloCollection, I::CartesianIndex,
+Base.@propagate_inbounds function scatter_fields!(state::AbstractHaloCollection, I::CartesianIndex,
         values::AbstractVector, tile::Union{Nothing,Integer}=nothing)
-    _check_field_access(values, state, I, tile)
-    for (j, field) in zip(eachindex(values), eachfield(state))
+    @boundscheck _check_field_access(values, state, I, tile)
+    @inbounds for (j, field) in zip(eachindex(values), eachfield(state))
         _cell_storage(field, tile)[I] = values[j]
     end
     return state
@@ -83,10 +87,10 @@ No communication or halo synchronization is performed.
 For a finite-volume face flux `F`, use `add_fields!(du, IL, F, -invdx)` and
 `add_fields!(du, IR, F, invdx)` on initialized storage.
 """
-function add_fields!(state::AbstractHaloCollection, I::CartesianIndex,
+Base.@propagate_inbounds function add_fields!(state::AbstractHaloCollection, I::CartesianIndex,
         values::AbstractVector, scale, tile::Union{Nothing,Integer}=nothing)
-    _check_field_access(values, state, I, tile)
-    for (j, field) in zip(eachindex(values), eachfield(state))
+    @boundscheck _check_field_access(values, state, I, tile)
+    @inbounds for (j, field) in zip(eachindex(values), eachfield(state))
         storage = _cell_storage(field, tile)
         storage[I] += scale * values[j]
     end

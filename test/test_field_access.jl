@@ -13,6 +13,10 @@ function exercise_field_access(state, tile=nothing)
     @test add_fields!(state, I, v, -0.5, tile) === state
     gather_fields!(out, state, I, tile)
     @test out == v / 2
+    @inbounds scatter_fields!(state, I, v, tile)
+    @inbounds add_fields!(state, I, v, -0.5, tile)
+    @inbounds gather_fields!(out, state, I, tile)
+    @test out == v / 2
     m = MVector{4,Float64}(undef)
     gather_fields!(m, state, I, tile)
     @test m == out
@@ -42,6 +46,11 @@ end
     @test parent(local_state[2,1])[I] == 12
     @test parent(local_state[1,2])[I] == 21
     @test parent(local_state[2,2])[I] == 22
+    @inbounds scatter_fields!(local_state, I, [11.,12.,21.,22.])
+    @inbounds add_fields!(local_state, I, zeros(4), 1.0)
+    unchecked_out = zeros(4)
+    @inbounds gather_fields!(unchecked_out, local_state, I)
+    @test unchecked_out == [11,12,21,22]
     synchronize_halo!(local_state)
     out = zeros(4)
     gather_fields!(out, local_state, CartesianIndex(5,2))
