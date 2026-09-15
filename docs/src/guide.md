@@ -109,8 +109,11 @@ scatter_fields!(u, I, U)     # overwrite fields
 add_fields!(u, I, U, 0.5)    # accumulate 0.5*U
 ```
 
-Array field containers are flattened in column-major order; named collections
-use declaration order. Threaded collections require a final tile ID argument.
+Only flat collections of single halo arrays are supported; nested collections
+throw `ArgumentError` before writing, including when called with `@inbounds`.
+Multidimensional array field containers use column-major order; named collections
+use declaration order. Vector length must equal `prod(field_shape(u))`.
+Threaded collections require a final tile ID argument.
 Synchronize halos before reading ghost values and initialize accumulation
 targets before calling `add_fields!`. Inputs and outputs must not alias.
 

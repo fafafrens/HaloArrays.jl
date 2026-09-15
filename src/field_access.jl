@@ -1,4 +1,10 @@
 # Local storage access: no halo exchange or intermediate field-container map.
+@inline function _require_flat_fields(state::AbstractHaloCollection)
+    all(field -> field isa AbstractSingleHaloArray, eachfield(state)) ||
+        throw(ArgumentError("field access requires a flat collection of single halo arrays; nested collections are not supported"))
+    return nothing
+end
+
 @inline _cell_storage(field::Union{LocalHaloArray,HaloArray}, ::Nothing) = parent(field)
 @inline _cell_storage(field::ThreadedHaloArray, ::Nothing) =
     throw(ArgumentError("threaded field access requires an explicit tile id"))
@@ -23,7 +29,9 @@ end
     gather_fields!(dest, state, I::CartesianIndex[, tile])
 
 Copy all fields at local padded-storage index `I` into the preallocated vector
-`dest`. Accepts `ArrayOfHaloArray` and `MultiHaloArray`. Array field containers
+`dest`. Accepts flat `ArrayOfHaloArray` and `MultiHaloArray` collections whose
+immediate fields are all single halo arrays. Nested collections are rejected
+with `ArgumentError` before any writes, even under `@inbounds`. Array field containers
 use column-major order; named collections use declaration order. The vector
 length must equal `prod(field_shape(state))`.
 
@@ -51,6 +59,7 @@ gather_fields!(v, u, I)
 """
 Base.@propagate_inbounds function gather_fields!(dest::AbstractVector, state::AbstractHaloCollection,
         I::CartesianIndex, tile::Union{Nothing,Integer}=nothing)
+    _require_flat_fields(state)
     @boundscheck _check_field_access(dest, state, I, tile)
     @inbounds for (j, field) in zip(eachindex(dest), eachfield(state))
         dest[j] = _cell_storage(field, tile)[I]
@@ -69,6 +78,7 @@ storage. Element conversion follows ordinary array assignment.
 """
 Base.@propagate_inbounds function scatter_fields!(state::AbstractHaloCollection, I::CartesianIndex,
         values::AbstractVector, tile::Union{Nothing,Integer}=nothing)
+    _require_flat_fields(state)
     @boundscheck _check_field_access(values, state, I, tile)
     @inbounds for (j, field) in zip(eachindex(values), eachfield(state))
         _cell_storage(field, tile)[I] = values[j]
@@ -89,6 +99,7 @@ For a finite-volume face flux `F`, use `add_fields!(du, IL, F, -invdx)` and
 """
 Base.@propagate_inbounds function add_fields!(state::AbstractHaloCollection, I::CartesianIndex,
         values::AbstractVector, scale, tile::Union{Nothing,Integer}=nothing)
+    _require_flat_fields(state)
     @boundscheck _check_field_access(values, state, I, tile)
     @inbounds for (j, field) in zip(eachindex(values), eachfield(state))
         storage = _cell_storage(field, tile)
