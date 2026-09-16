@@ -4,6 +4,17 @@ All notable changes to HaloArrays.jl are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **`field_storages!(dest, c)`**, an in-place companion to
+  `field_storages`. `field_storages` builds a fresh container on every
+  call, which allocates for an `ArrayOfHaloArray` — its field count is not part
+  of its type, so the result cannot be a stack-allocated tuple. A hot loop that
+  works on the raw padded storages can now hoist one container out of the loop
+  and refill it here, staying allocation-free; `similar(field_storages(c))`
+  gives a suitable `dest`.
+
 ## [0.6.0] — 2026-09-10
 
 ### Added

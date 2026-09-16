@@ -327,3 +327,32 @@ or a [`FaceRanges`](@ref) sweep. Contrast `parent` (the field container) and
 [`interior_view`](@ref) (ghost-free views).
 """
 @inline field_storages(c::FieldCollection) = map(parent, getfield(c, :arrays))
+
+"""
+    field_storages!(dest, c::FieldCollection)
+
+Fill `dest` with the raw padded backing array of every field and return `dest`.
+
+[`field_storages`](@ref) builds a fresh container on every call, which allocates
+for an [`ArrayOfHaloArray`](@ref) (its field count is not part of its type, so
+the result cannot be a stack-allocated tuple). A hot loop that needs the raw
+storages can hoist a `dest` container out of the loop and refill it here instead,
+staying allocation-free. `dest` must be indexable in the collection's field
+order with `prod(field_shape(c))` entries — `similar(field_storages(c))` gives a
+suitable one.
+
+```julia
+cache = similar(field_storages(u))
+field_storages!(cache, u)          # no allocation
+accumulate_flux_divergence!(field_storages!(cache2, du), cache, ranges, 1, inv(dx), flux, read, scatter!)
+```
+"""
+function field_storages!(dest, c::FieldCollection)
+    fields = getfield(c, :arrays)
+    length(dest) == length(fields) ||
+        throw(DimensionMismatch("dest must hold one entry per field; got $(length(dest)) for $(length(fields)) fields"))
+    @inbounds for (j, field) in zip(eachindex(dest), fields)
+        dest[j] = parent(field)
+    end
+    return dest
+end
