@@ -66,20 +66,18 @@ end
     before = map(field -> copy(parent(field)), eachfield(local_state))
     rho_before = copy(parent(named.a))
     nested_out = fill(-99.0, prod(field_shape(nested)))
-    for unchecked in (false, true)
-        if unchecked
-            @test_throws ArgumentError (@inbounds gather_fields!(nested_out, nested, I))
-            @test_throws ArgumentError (@inbounds scatter_fields!(nested, I, nested_out))
-            @test_throws ArgumentError (@inbounds add_fields!(nested, I, nested_out, 1.0))
-        else
-            @test_throws ArgumentError gather_fields!(nested_out, nested, I)
-            @test_throws ArgumentError scatter_fields!(nested, I, nested_out)
-            @test_throws ArgumentError add_fields!(nested, I, nested_out, 1.0)
-        end
-        @test all(==(-99.0), nested_out)
-        @test parent(named.a) == rho_before
-        @test map(field -> parent(field), eachfield(local_state)) == before
-    end
+    # The flat-collection test is a @boundscheck, so the checked path rejects a
+    # nested collection before touching anything. Under @inbounds it is skipped
+    # and the behaviour is the caller's responsibility (documented on
+    # gather_fields!): the loop reaches a field with no storage accessor, and a
+    # scatter may already have written the flat fields before it. That is not
+    # asserted here because it depends on inlining.
+    @test_throws ArgumentError gather_fields!(nested_out, nested, I)
+    @test_throws ArgumentError scatter_fields!(nested, I, nested_out)
+    @test_throws ArgumentError add_fields!(nested, I, nested_out, 1.0)
+    @test all(==(-99.0), nested_out)
+    @test parent(named.a) == rho_before
+    @test map(field -> parent(field), eachfield(local_state)) == before
 
     threaded = ArrayOfHaloArray(ThreadedHaloArray, Float64, (4,), (3,2), 1;
                                 dims=(2,1), boundary_condition=:periodic)

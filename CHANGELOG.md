@@ -15,6 +15,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and refill it here, staying allocation-free; `similar(field_storages(c))`
   gives a suitable `dest`.
 
+### Changed
+- **The flat-collection test in `gather_fields!`/`scatter_fields!`/`add_fields!`
+  is now a `@boundscheck`.** It previously ran on every call, `@inbounds`
+  included, costing roughly 1.5 ns per `gather_fields!` — about 14% of an
+  `@inbounds` call on an 11-field collection, and the whole reason a hot loop
+  had to reach past the accessors to `field_storages`. It is now skipped along
+  with the other validation, so passing a *nested* collection under `@inbounds`
+  is undefined: the loop reaches a field with no storage accessor and raises
+  `MethodError` instead of `ArgumentError`, and `scatter_fields!`/`add_fields!`
+  may already have written the flat fields preceding it. Only the checked path
+  still guarantees no partial writes. Ordinary checked calls are unchanged.
+
 ## [0.6.0] — 2026-09-10
 
 ### Added
