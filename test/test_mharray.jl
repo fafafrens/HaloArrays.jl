@@ -125,6 +125,11 @@ end
     @test field_storages(local_fields).rho === parent(local_fields.arrays.rho)
     @test keys(field_storages(local_fields)) == keys(local_fields.arrays)
 
+    # field_storages! also fills a named container, in declaration order.
+    named_cache = collect(field_storages(local_fields))
+    @test field_storages!(named_cache, local_fields) === named_cache
+    @test Tuple(named_cache) == Tuple(field_storages(local_fields))
+
     threaded_fields = MultiHaloArray(ThreadedHaloArray, Int, (3,), 1;
         dims=(2,),
         boundary_conditions=(; rho=:repeating, mom=:repeating))

@@ -31,9 +31,9 @@ end
 Copy all fields at local padded-storage index `I` into the preallocated vector
 `dest`. Accepts flat `ArrayOfHaloArray` and `MultiHaloArray` collections whose
 immediate fields are all single halo arrays. Nested collections are rejected
-with `ArgumentError` before any writes, even under `@inbounds`. Array field containers
-use column-major order; named collections use declaration order. The vector
-length must equal `prod(field_shape(state))`.
+with `ArgumentError` before any writes. Array field containers use column-major
+order; named collections use declaration order. The vector length must equal
+`prod(field_shape(state))`.
 
 `I` uses the storage coordinates returned by `interior_cells(CellRanges(state))`
 and `interior_faces(FaceRanges(state), dim)`, including allocated halo cells.
@@ -46,8 +46,14 @@ scalar accessors are intended for CPU storage; they do not launch GPU kernels.
 The destination must not alias the state storage.
 
 Validation follows Julia's bounds-checking convention: calling with `@inbounds`
-skips vector-length, index-dimension, and storage/tile bounds checks. The caller
-must ensure these are valid. Ordinary calls validate before writing.
+skips the flat-collection, vector-length, index-dimension, and storage/tile
+checks. The caller must ensure these hold. Ordinary calls validate before
+writing.
+
+Passing a nested collection under `@inbounds` is therefore undefined: the loop
+reaches a field with no storage accessor and raises `MethodError` instead of the
+`ArgumentError`, and `scatter_fields!`/`add_fields!` may already have written the
+flat fields preceding it. Only the checked path guarantees no partial writes.
 
 ```julia
 u = ArrayOfHaloArray(LocalHaloArray, Float64, (3,), (16,), 1;
@@ -59,8 +65,10 @@ gather_fields!(v, u, I)
 """
 Base.@propagate_inbounds function gather_fields!(dest::AbstractVector, state::AbstractHaloCollection,
         I::CartesianIndex, tile::Union{Nothing,Integer}=nothing)
-    _require_flat_fields(state)
-    @boundscheck _check_field_access(dest, state, I, tile)
+    @boundscheck begin
+        _require_flat_fields(state)
+        _check_field_access(dest, state, I, tile)
+    end
     @inbounds for (j, field) in zip(eachindex(dest), eachfield(state))
         dest[j] = _cell_storage(field, tile)[I]
     end
@@ -78,8 +86,10 @@ storage. Element conversion follows ordinary array assignment.
 """
 Base.@propagate_inbounds function scatter_fields!(state::AbstractHaloCollection, I::CartesianIndex,
         values::AbstractVector, tile::Union{Nothing,Integer}=nothing)
-    _require_flat_fields(state)
-    @boundscheck _check_field_access(values, state, I, tile)
+    @boundscheck begin
+        _require_flat_fields(state)
+        _check_field_access(values, state, I, tile)
+    end
     @inbounds for (j, field) in zip(eachindex(values), eachfield(state))
         _cell_storage(field, tile)[I] = values[j]
     end
@@ -99,8 +109,10 @@ For a finite-volume face flux `F`, use `add_fields!(du, IL, F, -invdx)` and
 """
 Base.@propagate_inbounds function add_fields!(state::AbstractHaloCollection, I::CartesianIndex,
         values::AbstractVector, scale, tile::Union{Nothing,Integer}=nothing)
-    _require_flat_fields(state)
-    @boundscheck _check_field_access(values, state, I, tile)
+    @boundscheck begin
+        _require_flat_fields(state)
+        _check_field_access(values, state, I, tile)
+    end
     @inbounds for (j, field) in zip(eachindex(values), eachfield(state))
         storage = _cell_storage(field, tile)
         storage[I] += scale * values[j]

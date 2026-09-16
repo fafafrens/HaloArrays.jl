@@ -48,6 +48,16 @@ end
     # matching the field-container shape.
     @test field_storages(fields) == map(parent, arrays)
     @test size(field_storages(fields)) == size(arrays)
+
+    # field_storages! refills a preallocated container instead of building one,
+    # so a hot loop can hoist it out and stay allocation-free.
+    cache = similar(field_storages(fields))
+    @test field_storages!(cache, fields) === cache
+    @test cache == field_storages(fields)
+    refill() = field_storages!(cache, fields)
+    refill()
+    @test @allocated(refill()) == 0
+    @test_throws DimensionMismatch field_storages!(similar(cache, length(cache) - 1), fields)
     @test fields[1, 2] === arrays[1, 2]
     @test eltype(typeof(fields)) === Float64
     @test_logs (:warn, r"Global scalar getindex") begin
