@@ -61,8 +61,11 @@ changes:
 
 ```julia
 LocalHaloArray(Float64, (128, 128), 1; boundary_condition=:periodic)
+# size is per tile: 2×2 tiles of 64×64 give a 128×128 domain
 ThreadedHaloArray(Float64, (64, 64), 1; dims=(2, 2), boundary_condition=:periodic)
-HaloArray(Float64, (128, 128), 1, CartesianTopology(comm, (0, 0); periodic=(true, true)))
+# size is per rank: the domain is (128, 128) .* the process grid
+HaloArray(Float64, (128, 128), 1, CartesianTopology(comm, (0, 0); periodic=(true, true));
+          boundary_condition=:periodic)
 ```
 
 See [`examples/heat`](examples/heat/) for one heat solver run unchanged across all
