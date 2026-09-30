@@ -580,5 +580,12 @@ Base.setindex!(halo::AbstractHaloArray, value, I::CartesianIndex) =
     setindex!(halo, value, Tuple(I)...)
 
 # `size(u)` is the whole-domain size on every backend; `global_size` remains as
-# a deprecated alias.
-Base.@deprecate global_size(u) size(u) false
+# a deprecated alias. It keeps its old behaviour of looking through an inactive
+# `MaybeHaloArray` to the wrapped geometry (where `size` is deliberately all
+# zeros), so code kept during the deprecation window sees the same shape on
+# every rank.
+function global_size(u)
+    Base.depwarn("`global_size(u)` is deprecated, use `size(u)`; on an inactive " *
+                 "`MaybeHaloArray` use `size(getdata(u))` for the wrapped geometry.", :global_size)
+    return _global_size(u)
+end

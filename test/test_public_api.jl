@@ -6,6 +6,9 @@ using HaloArrays
     u = LocalHaloArray(Float64, (4, 3), 1; boundary_condition=:periodic)
     fill!(u, 2.0)
     @test global_size(u) == size(u) == (4, 3)
+    inactive = MaybeHaloArray(u, false)          # an MPI dims= result on a non-owning rank
+    @test size(inactive) == (0, 0)               # by design
+    @test global_size(inactive) == (4, 3)        # the alias keeps looking through, as before
     @test mapreduce_haloarray_dims(identity, +, u, 2) == sum(u; dims=2)
     old = LocalMultiHaloArray(Float64, (4, 3), 1; fields=(:a, :b), boundary_condition=:periodic)
     new = MultiHaloArray(LocalHaloArray, Float64, (4, 3), 1; fields=(:a, :b), boundary_condition=:periodic)

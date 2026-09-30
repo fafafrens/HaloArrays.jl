@@ -49,7 +49,7 @@ will be removed in 0.10:
 | `ThreadedMultiHaloArray(T, tile, halo; …)` | `MultiHaloArray(ThreadedHaloArray, T, tile, halo; …)` |
 | `LocalMultiHaloArray(nt)`, `ThreadedMultiHaloArray(nt)` | `MultiHaloArray(nt)` (validates the field geometry) |
 | `mapreduce_haloarray_dims(f, op, u, dims)` | `mapreduce(f, op, u; dims)` (also `sum(u; dims)` etc.) |
-| `global_size(u)` | `size(u)` |
+| `global_size(u)` | `size(u)` (on an inactive `MaybeHaloArray`, `size(getdata(u))`: `size` itself is all zeros there, `global_size` looked through) |
 
 ### Removed (internal)
 - The second, `MPI.Request`-based halo-exchange implementation and its seven
