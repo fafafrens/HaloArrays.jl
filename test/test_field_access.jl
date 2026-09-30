@@ -99,12 +99,14 @@ function exercise_siteview(state, tile=nothing)
 end
 
 @testset "Site vectors" begin
+    flat_state = ArrayOfHaloArray(LocalHaloArray, Float64, (4,), (3,2), 1;
+                                  boundary_condition=:periodic)
+    exercise_siteview(flat_state)
     local_state = ArrayOfHaloArray(LocalHaloArray, Float64, (2,2), (3,2), 1;
                                    boundary_condition=:periodic)
-    exercise_siteview(local_state)
     I = first(interior_cells(CellRanges(local_state)))
     q = siteview(local_state, I)
-    q .= [11.,12.,21.,22.]
+    q .= [11. 21.; 12. 22.]
     @test parent(local_state[1,1])[I] == 11
     @test parent(local_state[2,1])[I] == 12
     @test parent(local_state[1,2])[I] == 21
@@ -136,12 +138,12 @@ end
     exercise_siteview(distributed)
 
     # Shared fields in a different collection/order must be recognized as aliases.
-    q .= [1, 2, 3, 4]
-    reordered = ArrayOfHaloArray(reverse(vec(parent(local_state))))
+    copyto!(q, [1, 2, 3, 4])
+    reordered = ArrayOfHaloArray(reshape(reverse(vec(parent(local_state))), 2, 2))
     @test_throws ArgumentError q .= siteview(reordered, I)
-    @test q == [1, 2, 3, 4]
+    @test vec(q) == [1, 2, 3, 4]
     q .= copy(siteview(reordered, I))
-    @test q == [4, 3, 2, 1]
+    @test vec(q) == [4, 3, 2, 1]
 
     a = LocalHaloArray(Int, (3,2), 1; boundary_condition=:periodic)
     b = LocalHaloArray(Float64, (3,2), 1; boundary_condition=:periodic)
@@ -176,6 +178,58 @@ end
     @test !isdefined(HaloArrays, :gather_fields!)
     @test !isdefined(HaloArrays, :scatter_fields!)
     @test !isdefined(HaloArrays, :add_fields!)
+end
+
+@testset "Site matrices" begin
+    U = ArrayOfHaloArray(LocalHaloArray, Float64, (2,2), (3,2,2), 1;
+        boundary_condition=:periodic)
+    I = first(interior_cells(CellRanges(U)))
+    m = @inferred siteview(U, I)
+    @test m isa AbstractMatrix{Float64}
+    @test size(m) == field_shape(U) == (2, 2)
+    @test IndexStyle(typeof(m)) == IndexLinear()
+    M = [1. 3.; 2. 4.]
+    m .= M
+    @test all(parent(U[a, b])[I] == M[a, b] for a in 1:2, b in 1:2)
+    @test m == M
+    @test m[2, 1] == 2 && m[3] == 3
+    m[1, 2] = 30
+    @test parent(U[1, 2])[I] == 30
+    @test_throws BoundsError m[3, 1]
+
+    # Flat buffers: copyto! is linear (column-major); broadcasts need the site shape.
+    flat = zeros(4)
+    @test copyto!(flat, m) == [1, 2, 30, 4]
+    copyto!(m, [5., 6., 7., 8.])
+    @test m == [5. 7.; 6. 8.]
+    @test_throws DimensionMismatch m .= [1., 2., 3., 4.]
+    vec(m) .= [1., 2., 3., 4.]
+    @test m == M
+    m .+= 0.5 .* M
+    @test m == 1.5 .* M
+    @test m * [1., 1.] == (1.5 .* M) * [1., 1.]
+    @test copy(m) isa Matrix{Float64}
+    @test copy(m) == m
+    @test similar(m) isa Matrix{Float64}
+    @test size(similar(m)) == (2, 2)
+
+    # A transposed view of the same site overlaps and needs an explicit copy.
+    @test_throws ArgumentError m .= transpose(m)
+    @test m == 1.5 .* M
+    m .= copy(transpose(m))
+    @test m == 1.5 .* permutedims(M)
+
+    site_allocations(U, I, nothing, zeros(2, 2))
+    @test site_allocations(U, I, nothing, zeros(2, 2)) == (0, 0, 0, 0)
+
+    tiled = ArrayOfHaloArray(ThreadedHaloArray, Float64, (2,2), (3,2), 1;
+        dims=(2,1), boundary_condition=:periodic)
+    J = CartesianIndex(2, 2)
+    mt = siteview(tiled, J, 2)
+    @test size(mt) == (2, 2)
+    mt .= M
+    @test all(tile_parent(tiled[a, b], 2)[J] == M[a, b] for a in 1:2, b in 1:2)
+    @test all(iszero, siteview(tiled, J, 1))
 end
 
 @testset "Single-field site vectors" begin
