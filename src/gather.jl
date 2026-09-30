@@ -81,10 +81,12 @@ end
 
 function gather_haloarray(halo::ArrayOfHaloArray; root::Int=0)
     fields = parent(halo)
-    is_root(halo; root=root) || (foreach(f -> gather_haloarray(f; root=root), fields); return nothing)
     data = nothing
+    # Gather every field on every rank (each is a collective on MPI); assemble
+    # whatever comes back, which is `nothing` only on non-root MPI ranks.
     for I in CartesianIndices(fields)
         field_data = gather_haloarray(fields[I]; root=root)
+        field_data === nothing && continue
         data === nothing &&
             (data = Array{eltype(halo)}(undef, (field_shape(halo)..., size(field_data)...)))
         data[Tuple(I)..., ntuple(_ -> Colon(), ndims(field_data))...] .= field_data

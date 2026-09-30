@@ -34,7 +34,9 @@ MPI.Initialized() || MPI.Init()
     @test G[1, :, :] == expected
     @test G[2, :, :] == 2 .* expected
 
+    @test gather_haloarray(aoh; root=1) == G          # root is ignored on serial collections too
     m = MultiHaloArray((rho=u, p=parent(aoh)[2]))
+    @test gather_haloarray(m; root=1).p == 2 .* expected
     nt = gather_haloarray(m)
     @test keys(nt) == (:rho, :p)
     @test nt.rho == expected
