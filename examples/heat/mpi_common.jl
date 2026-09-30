@@ -1,4 +1,5 @@
 using MPI
+using HDF5   # for the optional save_hdf5 output (HaloArrays' HDF5 extension + h5write)
 
 include("common.jl")
 
@@ -38,7 +39,8 @@ function run_mpi_heat(::Val{N};
     solve_heat!(u; alpha, dt, dx, nt)
 
     if save_hdf5
-        gather_and_save_haloarray(output_name, u; root=0)
+        A = gather_haloarray(u; root=0)              # global array on root, nothing elsewhere
+        rank == 0 && h5write(output_name * ".h5", "dataset", A)   # plain HDF5.jl
     end
 
     final_mean = _mpi_global_mean(u)

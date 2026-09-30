@@ -56,9 +56,10 @@ common API isn't buried among the advanced kernel and threading internals.
 
 ## HDF5 output
 
-- [`create_haloarray_output_file`](@ref),
-  [`write_haloarray_timestep!`](@ref), and
-  [`gather_and_save_haloarray`](@ref)
+- [`append_haloarray!`](@ref) — append the interior as the next step of a
+  time-series dataset, into a file you opened with HDF5.jl (collective for MPI)
+  or by filename; a snapshot is one append. Gathered snapshots need no library
+  call: `A = gather_haloarray(u); is_root(u) && h5write(file, name, A)`
 
 ---
 

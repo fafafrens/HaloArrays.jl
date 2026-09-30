@@ -71,14 +71,15 @@ function main()
         gather_haloarray(halo; root=0)
     end, samples, warmups, metadata; comm=comm, rank=rank)
 
-    benchmark_case!(rows, "gather_and_save_haloarray", () -> begin
+    benchmark_case!(rows, "gather_haloarray+h5write", () -> begin
         remove_output!(gather_base, comm)
-        gather_and_save_haloarray(gather_base, halo; root=0)
+        A = gather_haloarray(halo; root=0)
+        rank == 0 && h5write(gather_base * ".h5", "dataset", A)
     end, samples, warmups, metadata; comm=comm, rank=rank)
 
-    benchmark_case!(rows, "append_haloarray_to_file", () -> begin
+    benchmark_case!(rows, "append_haloarray!", () -> begin
         remove_output!(append_base, comm)
-        append_haloarray_to_file!(append_base, "field", halo)
+        append_haloarray!(append_base * ".h5", "field", halo)
     end, samples, warmups, metadata; comm=comm, rank=rank)
 
     if rank == 0

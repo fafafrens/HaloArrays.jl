@@ -4,8 +4,8 @@ using Test
 using HaloArrays
 
 # Dimensional reduction → MaybeHaloArray → save → read back, both ways:
-#   (1) collective MPI write (append_haloarray_to_file!, no gather)
-#   (2) gather-to-root then save (gather_and_save_haloarray)
+#   (1) collective MPI write (append_haloarray!, no gather)
+#   (2) gather-to-root then save (gather_haloarray + plain HDF5.jl)
 # Both must reproduce the serial reference reduction exactly. The kept dimension is
 # split across all ranks so the reduced result stays distributed (every rank
 # active) — exercising the real parallel-write path, not a single-rank degenerate.
@@ -31,18 +31,19 @@ _rm_on_root(path, comm) = (MPI.Comm_rank(comm) == 0 && rm(path; force=true); MPI
 
     ref = Float64[sum(f((i, j)) for j in 1:GY) for i in 1:GX]   # serial reference
 
-    col = joinpath(tempdir(), "haloarrays_reduce_collective_$(nr)")
-    gat = joinpath(tempdir(), "haloarrays_reduce_gather_$(nr)")
-    for base in (col, gat); _rm_on_root(base * ".h5", comm); end
+    col = joinpath(tempdir(), "haloarrays_reduce_collective_$(nr).h5")
+    gat = joinpath(tempdir(), "haloarrays_reduce_gather_$(nr).h5")
+    for path in (col, gat); _rm_on_root(path, comm); end
 
-    append_haloarray_to_file!(col, "reduced", r)   # (1) collective, no gather
+    append_haloarray!(col, "reduced", r)           # (1) collective, no gather
     MPI.Barrier(comm)
-    gather_and_save_haloarray(gat, r)              # (2) gather then save
+    A = gather_haloarray(r)                        # (2) gather then save
+    is_root(r) && h5write(gat, "dataset", A)
     MPI.Barrier(comm)
 
     if rank == 0
-        d_col = vec(h5open(col * ".h5", "r") do fid; read(fid["reduced"]); end)  # (1,GX) extensible
-        d_gat = vec(h5open(gat * ".h5", "r") do fid; read(fid["dataset"]); end)  # (GX,) snapshot
+        d_col = vec(h5read(col, "reduced"))        # (1,GX) extensible
+        d_gat = vec(h5read(gat, "dataset"))        # (GX,) snapshot
         @test length(d_col) == GX
         @test length(d_gat) == GX
         @test d_col ≈ ref          # collective write reproduces the serial reduction
@@ -50,6 +51,6 @@ _rm_on_root(path, comm) = (MPI.Comm_rank(comm) == 0 && rm(path; force=true); MPI
         @test d_col ≈ d_gat        # the two paths agree
     end
 
-    for base in (col, gat); _rm_on_root(base * ".h5", comm); end
+    for path in (col, gat); _rm_on_root(path, comm); end
     MPI.Barrier(comm)
 end
