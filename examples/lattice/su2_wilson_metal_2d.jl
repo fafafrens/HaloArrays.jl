@@ -316,8 +316,7 @@ function su2_wilson_sweep!(
     ranges = CellRanges(U)
 
     # Ghost-fill broadcasts and kernels share the backend queue, so each color's
-    # halo refresh is ordered before its kernel without a host sync in between;
-    # one synchronize at the end of the sweep is enough.
+    # halo refresh is ordered before its kernel without a host sync in between.
     for color in 0:1
         synchronize_halo!(U)
 
@@ -354,10 +353,8 @@ function su2_wilson_sweep!(
         )
     end
 
-    # Sweep returns with device work complete, so callers may read observables.
-    synchronize_halo!(U)
-    KA.synchronize(backend)
-
+    # No sync at the end of the sweep: the next sweep refreshes halos itself, and
+    # host reads such as `Array(...)` wait for the queued device work.
     return U
 end
 
@@ -432,6 +429,7 @@ function run_su2_wilson_metal_haloarray_2d(;
         end
     end
 
+    synchronize_halo!(U)   # sweeps leave ghost cells stale; return a synced field
     return U
 end
 
