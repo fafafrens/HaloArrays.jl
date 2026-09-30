@@ -4,6 +4,25 @@ All notable changes to HaloArrays.jl are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `siteview` also accepts single local, threaded, and MPI halo arrays, exposing
+  the cell as a writable one-component vector in padded-storage coordinates.
+
+### Changed
+- **Breaking:** replace `gather_fields!`, `scatter_fields!`, and `add_fields!`
+  with `siteview(state, I[, tile])`, a writable vector of components at a local
+  padded-storage site. Use `copyto!(buffer, q)`, `copyto!(q, buffer)`, and
+  `q .+= scale .* buffer`. Construction trusts caller-provided fields, indices,
+  and tiles without validation. Copying and broadcasting retain Julia's standard
+  capacity and shape checks; scalar indexing retains bounds checks. `copy(q)`
+  gives an independent vector snapshot. Site views carry no internal snapshot buffer;
+  operations requiring an automatic alias-protection copy throw `ArgumentError`.
+  Copy overlapping sources explicitly. Scalar site reads convert to the
+  collection's promoted element type, so `q[k] isa eltype(q)` holds for mixed
+  field types.
+
 ## [0.6.2] — 2026-09-16
 
 ### Added

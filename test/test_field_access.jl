@@ -1,97 +1,249 @@
-using Test, HaloArrays, MPI
-using StaticArrays: MVector
-
+using Test, HaloArrays, MPI, LinearAlgebra
+using StaticArrays: SVector
 MPI.Initialized() || MPI.Init()
 
-function exercise_field_access(state, tile=nothing)
+function site_allocations(state, I, tile, buffer)
+    scalar = @allocated begin
+        q = siteview(state, I, tile)
+        q[1] = q[1] + 1
+    end
+    q = siteview(state, I, tile)
+    gather = @allocated copyto!(buffer, q)
+    scatter = @allocated copyto!(q, buffer)
+    accumulation = @allocated q .+= 0.5 .* buffer
+    return (scalar, gather, scatter, accumulation)
+end
+
+function exercise_siteview(state, tile=nothing)
     I = first(interior_cells(CellRanges(state)))
-    v = [1.0, 2.0, 3.0, 4.0]
+    q = @inferred siteview(state, I, tile)
+    @test q isa AbstractVector{Float64}
+    @test parent(q) === state
+    @test size(q) == (4,)
+    @test size(q, 2) == 1
+    @test axes(q) == (Base.OneTo(4),)
+    @test IndexStyle(typeof(q)) == IndexLinear()
+    v = [1., 2., 3., 4.]
+    @test copyto!(q, v) === q
+    @test (@inferred q[1]) === 1.0
+    @test collect(q) == v
     out = zeros(4)
-    @test scatter_fields!(state, I, v, tile) === state
-    @test gather_fields!(out, state, I, tile) === out
+    @test copyto!(out, q) === out
     @test out == v
-    @test add_fields!(state, I, v, -0.5, tile) === state
-    gather_fields!(out, state, I, tile)
-    @test out == v / 2
-    @inbounds scatter_fields!(state, I, v, tile)
-    @inbounds add_fields!(state, I, v, -0.5, tile)
-    @inbounds gather_fields!(out, state, I, tile)
-    @test out == v / 2
-    m = MVector{4,Float64}(undef)
-    gather_fields!(m, state, I, tile)
-    @test m == out
-    @test_throws DimensionMismatch gather_fields!(zeros(3), state, I, tile)
-    @test_throws DimensionMismatch gather_fields!(out, state, CartesianIndex(1,1,1), tile)
-    @test_throws BoundsError scatter_fields!(state, CartesianIndex(0,1), v, tile)
-    @test_throws BoundsError add_fields!(state, I, v, 1, 0)
-    gather_fields!(out, state, I, tile)
-    @test out == v / 2
+    for T in (Float32, Float64)
+        permuted = PermutedDimsArray(zeros(T, 4), (1,))
+        @test copyto!(permuted, q) === permuted
+        @test permuted == v
+    end
+    q .+= -0.5 .* v
+    @test q == v / 2
+    @inbounds q[1] = q[1] + 1
+    @test q[1] == 1.5
+    @test q[CartesianIndex(2)] == 1
+    @test sum(q) == 6
+    @test dot(q, q) == sum(abs2, q)
+    @test q .+ 1 == collect(q) .+ 1
+    @test similar(q) isa Vector{Float64}
+    @test similar(q, Int, (2, 3)) isa Matrix{Int}
+    saved = copy(q)
+    fill!(q, 9)
+    @test all(==(9), q)
+    @test saved == [1.5, 1, 1.5, 2]
+    @test_throws BoundsError q[0]
+    @test_throws BoundsError q[5] = 1
+    # Standard Julia copying/broadcasting rejects incompatible sizes before writing.
+    @test_throws DimensionMismatch q .= zeros(3)
+    @test_throws BoundsError copyto!(q, zeros(5))
+    @test all(==(9), q)
+    short = fill(-1., 3)
+    @test_throws BoundsError copyto!(short, q)
+    @test_throws DimensionMismatch short .= q
+    @test short == fill(-1., 3)
+    q .= [2.0]  # singleton broadcast expansion
+    @test q == fill(2., 4)
+    larger = fill(-1., 5)
+    copyto!(larger, q)
+    @test larger == [2, 2, 2, 2, -1]
+    copyto!(q, [7., 8.])  # copy only the source length
+    @test q == [7, 8, 2, 2]
+    # Fused functions, scalar expansion, and direct lazy-broadcast copies.
+    q .= 2 .* sin.(v) .+ 1
+    @test q ≈ 2 .* sin.(v) .+ 1
+    broadcast!(+, q, v, 2)
+    @test q == v .+ 2
+    copyto!(q, Base.Broadcast.broadcasted(*, v, 3))
+    @test q == 3v
+
+    # Ordinary self-broadcast needs no alias-protection buffer.
+    copyto!(q, v)
+    q .*= 2
+    @test q == 2v
+    copyto!(q, v)
+
+    # Aliasing is detected, but callers must explicitly copy overlapping sources.
+    source = view(siteview(state, I, tile), 4:-1:1)
+    @test Base.mightalias(q, source)
+    @test_throws ArgumentError q .= source
+    @test q == v
+    q .= copy(source)
+    @test q == reverse(v)
+    copyto!(q, v)
+    @test_throws ArgumentError copyto!(view(q, 2:4), view(q, 1:3))
+    @test q == v
+    copyto!(view(q, 2:4), copy(view(q, 1:3)))
+    @test q == [1, 1, 2, 3]
+    q .= reverse(q)
+    @test q == [3, 2, 1, 1]
+    site_allocations(state, I, tile, out)
+    @test site_allocations(state, I, tile, out) == (0, 0, 0, 0)
 end
 
-# Measure inside compiled functions, with preallocated buffers.
-function access_allocations(v, state, I, tile)
-    a = @allocated gather_fields!(v, state, I, tile)
-    b = @allocated scatter_fields!(state, I, v, tile)
-    c = @allocated add_fields!(state, I, v, 0.5, tile)
-    return (a,b,c)
-end
-
-@testset "Field gather, scatter, and accumulation" begin
+@testset "Site vectors" begin
     local_state = ArrayOfHaloArray(LocalHaloArray, Float64, (2,2), (3,2), 1;
                                    boundary_condition=:periodic)
-    exercise_field_access(local_state)
+    exercise_siteview(local_state)
     I = first(interior_cells(CellRanges(local_state)))
-    scatter_fields!(local_state, I, [11.,12.,21.,22.])
+    q = siteview(local_state, I)
+    q .= [11.,12.,21.,22.]
     @test parent(local_state[1,1])[I] == 11
     @test parent(local_state[2,1])[I] == 12
     @test parent(local_state[1,2])[I] == 21
     @test parent(local_state[2,2])[I] == 22
-    @inbounds scatter_fields!(local_state, I, [11.,12.,21.,22.])
-    @inbounds add_fields!(local_state, I, zeros(4), 1.0)
-    unchecked_out = zeros(4)
-    @inbounds gather_fields!(unchecked_out, local_state, I)
-    @test unchecked_out == [11,12,21,22]
+    @test siteview(local_state, I, 1) == q
     synchronize_halo!(local_state)
-    out = zeros(4)
-    gather_fields!(out, local_state, CartesianIndex(5,2))
-    @test out == [11,12,21,22]
+    @test siteview(local_state, CartesianIndex(5,2)) == q
+    parent(local_state[1,1])[I] = 42
+    @test q[1] == 42
 
     named = LocalMultiHaloArray(Float64, (3,2), 1;
-                                fields=(:a,:b,:c,:d), boundary_condition=:periodic)
-    exercise_field_access(named)
-    @test parent(named.b)[I] == 1
+        fields=(:a,:b,:c,:d), boundary_condition=:periodic)
+    exercise_siteview(named)
+    @test siteview(named, I)[2] == parent(named.b)[I]
 
-    # A valid collection shape, but not a flat vector-of-fields accessor input.
-    nested = MultiHaloArray((; rho=named.a, q=local_state))
-    before = map(field -> copy(parent(field)), eachfield(local_state))
-    rho_before = copy(parent(named.a))
-    nested_out = fill(-99.0, prod(field_shape(nested)))
-    # The flat-collection test is a @boundscheck, so the checked path rejects a
-    # nested collection before touching anything. Under @inbounds it is skipped
-    # and the behaviour is the caller's responsibility (documented on
-    # gather_fields!): the loop reaches a field with no storage accessor, and a
-    # scatter may already have written the flat fields before it. That is not
-    # asserted here because it depends on inlining.
-    @test_throws ArgumentError gather_fields!(nested_out, nested, I)
-    @test_throws ArgumentError scatter_fields!(nested, I, nested_out)
-    @test_throws ArgumentError add_fields!(nested, I, nested_out, 1.0)
-    @test all(==(-99.0), nested_out)
-    @test parent(named.a) == rho_before
-    @test map(field -> parent(field), eachfield(local_state)) == before
+    # Broadly typed flat containers remain valid.
+    broad_fields = Any[named.a, named.b]
+    broad = ArrayOfHaloArray(broad_fields)
+    @test collect(siteview(broad, I)) == [parent(named.a)[I], parent(named.b)[I]]
 
     threaded = ArrayOfHaloArray(ThreadedHaloArray, Float64, (4,), (3,2), 1;
-                                dims=(2,1), boundary_condition=:periodic)
-    exercise_field_access(threaded, 2)
-    @test_throws ArgumentError gather_fields!(out, threaded, I)
-    @test_throws BoundsError gather_fields!(out, threaded, I, 3)
-    @test tile_parent(threaded[1],1)[I] == 0
+        dims=(2,1), boundary_condition=:periodic)
+    exercise_siteview(threaded, 2)
+    @test all(iszero, siteview(threaded, I, 1))
 
     topology = CartesianTopology(MPI.COMM_SELF, (1,1); periodic=(true,true))
     distributed = ArrayOfHaloArray(HaloArray, Float64, (3,2), 1, topology;
-                                   boundary_conditions=fill(:periodic,4))
-    exercise_field_access(distributed)
-    for (state,tile) in ((local_state,nothing),(named,nothing),(threaded,2),(distributed,nothing))
-        access_allocations(out,state,I,tile)
-        @test access_allocations(out,state,I,tile) == (0,0,0)
+        boundary_conditions=fill(:periodic,4))
+    exercise_siteview(distributed)
+
+    # Shared fields in a different collection/order must be recognized as aliases.
+    q .= [1, 2, 3, 4]
+    reordered = ArrayOfHaloArray(reverse(vec(parent(local_state))))
+    @test_throws ArgumentError q .= siteview(reordered, I)
+    @test q == [1, 2, 3, 4]
+    q .= copy(siteview(reordered, I))
+    @test q == [4, 3, 2, 1]
+
+    a = LocalHaloArray(Int, (3,2), 1; boundary_condition=:periodic)
+    b = LocalHaloArray(Float64, (3,2), 1; boundary_condition=:periodic)
+    mixed = siteview(MultiHaloArray((; a, b)), I)
+    mixed .= [2., 3.5]
+    @test mixed[1] === 2.0
+    @test mixed[2] === 3.5
+    @test eltype(mixed) === Float64
+    @test all(x -> x isa eltype(mixed), mixed)
+    @test map(identity, mixed) isa Vector{Float64}
+    @test [x for x in mixed] isa Vector{Float64}
+    @test Base.return_types(getindex, Tuple{typeof(mixed),Int}) == [Float64]
+    @test copy(mixed) isa Vector{Float64}
+    @test copy(mixed) == [2., 3.5]
+    @test parent(a)[I] === 2
+    @test_throws InexactError mixed[1] = 1.5
+
+    # The component count remains runtime-sized, including large collections.
+    types = []
+    for n in (8, 64, 256, 1024)
+        state = ArrayOfHaloArray(LocalHaloArray, Float64, (n,), (3,2), 1;
+            boundary_condition=:periodic)
+        qn = siteview(state, I)
+        push!(types, typeof(qn))
+        qn .= 1:n
+        @test sum(qn) == n * (n + 1) / 2
+        buffer = zeros(n)
+        site_allocations(state, I, nothing, buffer)
+        @test site_allocations(state, I, nothing, buffer) == (0, 0, 0, 0)
     end
+    @test all(==(first(types)), types)
+    @test !isdefined(HaloArrays, :gather_fields!)
+    @test !isdefined(HaloArrays, :scatter_fields!)
+    @test !isdefined(HaloArrays, :add_fields!)
+end
+
+@testset "Single-field site vectors" begin
+    single = LocalHaloArray(Float64, (3,2), 1; boundary_condition=:periodic)
+    threaded = ThreadedHaloArray(Float64, (3,2), 1;
+        dims=(2,1), boundary_condition=:periodic)
+    topology = CartesianTopology(MPI.COMM_SELF, (1,1); periodic=(true,true))
+    distributed = HaloArray(Float64, (3,2), 1, topology; boundary_condition=:periodic)
+    I = first(interior_cells(CellRanges(single)))
+
+    for (state, tile) in ((single, nothing), (threaded, 2), (distributed, nothing))
+        q = @inferred siteview(state, I, tile)
+        @test q isa AbstractVector{Float64}
+        @test parent(q) === state
+        @test size(q) == (1,)
+        @test axes(q) == (Base.OneTo(1),)
+        q[1] = 3
+        @test (@inferred q[1]) === 3.0
+        @test tile_parent(state, something(tile, 1))[I] == 3
+        tile_parent(state, something(tile, 1))[I] = 4
+        @test q[1] == 4
+        q .*= 2
+        @test q[1] == 8
+        out = zeros(1)
+        @test copyto!(out, q) === out
+        @test out == [8]
+        copyto!(q, [5.])
+        @test sum(q) == 5
+        saved = copy(q)
+        q[1] = 7
+        @test saved == [5]
+        @test similar(q) isa Vector{Float64}
+        @test_throws BoundsError q[0]
+        @test_throws BoundsError q[2] = 1
+        @test_throws DimensionMismatch q .= [1., 2.]
+        @test_throws BoundsError copyto!(q, [1., 2.])
+        @test q[1] == 7
+        @test Base.mightalias(q, tile_parent(state, something(tile, 1)))
+        @test Base.dataids(q) == Base.dataids(tile_parent(state, something(tile, 1)))
+        # Alias detection works between a single field and a collection containing it.
+        collection_view = siteview(MultiHaloArray((; a=state)), I, tile)
+        @test Base.mightalias(q, collection_view)
+        @test Base.mightalias(collection_view, q)
+        @test_throws ArgumentError q .= collection_view
+        q .= copy(collection_view)
+        @test q[1] == 7
+        site_allocations(state, I, tile, out)
+        @test site_allocations(state, I, tile, out) == (0, 0, 0, 0)
+    end
+
+    @test siteview(single, I, 1) == siteview(single, I)
+    @test siteview(threaded, I, 1)[1] == 0
+    @test_throws ArgumentError siteview(threaded, I)[1]
+    @test_throws BoundsError siteview(threaded, I, 3)[1]
+    @test_throws BoundsError siteview(single, I, 2)[1]
+    @test_throws BoundsError siteview(single, CartesianIndex(0,2))[1]
+    synchronize_halo!(single)
+    @test siteview(single, CartesianIndex(5,2))[1] == siteview(single, I)[1]
+    siteview(single, CartesianIndex(1,2))[1] = -3
+    @test parent(single)[1,2] == -3
+
+    # A structured cell is still a single field, with no implicit flattening.
+    vector_cell = LocalHaloArray(SVector{2,Float64}, (3,2), 1; boundary_condition=:periodic)
+    q = siteview(vector_cell, I)
+    q[1] = SVector(2., 3.)
+    @test length(q) == 1
+    @test eltype(q) === SVector{2,Float64}
+    @test q[1] === SVector(2., 3.)
+    @test parent(vector_cell)[I] === SVector(2., 3.)
+    @test copy(q) == [SVector(2., 3.)]
 end
