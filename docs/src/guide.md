@@ -94,8 +94,9 @@ and broadcast with local operands.
 
 ### Reading and writing all fields at one cell
 
-Use `siteview(u, I[, tile])` to access all components as a writable vector,
-without copying values or building a container of backing arrays. These CPU
+Use `siteview(u, I[, tile])` to access all components as a lazy, writable array
+shaped like the fields, without copying values or building a container of
+backing arrays. These CPU
 operations use **local padded-storage indices**, including ghost cells, and
 perform no communication:
 
@@ -111,6 +112,21 @@ q .+= 0.5 .* U               # accumulate into initialized fields
 snapshot = copy(q)           # independent Vector
 ```
 
+An `ArrayOfHaloArray` with a multidimensional field shape gives a site array of
+that shape. For fields of size `(2, 2, nx, ny, nz)`, each site is a lazy 2×2
+matrix:
+
+```julia
+U = ArrayOfHaloArray(LocalHaloArray, Float64, (2, 2), (16, 16, 16), 1;
+                     boundary_condition=:periodic)
+I = first(interior_cells(CellRanges(U)))
+m = siteview(U, I)          # 2×2: m[a, b] is field (a, b) at cell I
+m[1, 2] = 1.0               # writes field (1, 2) directly
+m .+= 0.5 .* M              # broadcast operands must be 2×2 (or broadcastable)
+copyto!(buf, m)             # a flat buffer of length 4, column-major
+vec(m) .= buf               # flat view for broadcasting with flat buffers
+```
+
 Single halo arrays are also supported, yielding a one-component vector:
 
 ```julia
@@ -122,10 +138,11 @@ q .*= 3                     # the cell now contains 6.0
 ```
 
 A vector- or matrix-valued cell is one component; its contents are not flattened.
-Collections must be flat. Multidimensional array field containers use column-major
-order; named collections use declaration order. Threaded arrays and collections
-require a final tile ID argument. The number of
-components is runtime-sized; the view is not contiguous memory.
+Collections must be flat. `size(q) == field_shape(u)`; linear indexing and
+`copyto!` follow column-major field order, and named collections use declaration
+order. Threaded arrays and collections require a final tile ID argument. The
+number of dimensions is part of the view's type; the extents of an
+`ArrayOfHaloArray` site are runtime values. The view is not contiguous memory.
 
 Writes take effect immediately. Take a snapshot if a calculation needs the
 original state throughout an update. Site views have no internal snapshot buffer.

@@ -4,6 +4,17 @@ All notable changes to HaloArrays.jl are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Breaking:** `siteview` of an `ArrayOfHaloArray` is shaped like the fields:
+  fields of size `(2, 2, nx, ny, nz)` give a lazy 2×2 matrix, with `q[a, b]` the
+  field `(a, b)` at the site. `size(q) == field_shape(state)`. Linear indexing
+  and `copyto!` with flat buffers are unchanged (column-major), but broadcasts
+  now need operands of the site's shape; use `vec(q)` with flat buffers.
+  `copy(q)` and `similar(q)` return arrays of that shape. One-dimensional field
+  shapes, `MultiHaloArray`, and single arrays are unaffected.
+
 ## [0.7.0] — 2026-09-30
 
 ### Added

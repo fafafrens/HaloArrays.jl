@@ -10,13 +10,16 @@ end
 """
     siteview(state, I::CartesianIndex[, tile])
 
-Return a writable `AbstractVector` of all fields at local padded-storage index
-`I`, without copying component values. A single `LocalHaloArray`, `HaloArray`, or
-`ThreadedHaloArray` gives a one-component vector: `q[1]` reads or writes its cell
-value. Array-valued cell elements are preserved as one component, not flattened.
-Flat `ArrayOfHaloArray` and `MultiHaloArray` collections give one component per
-field, in column-major or declaration order respectively. Their length is
-`prod(field_shape(state))` and is not encoded in the view's type.
+Return a lazy, writable array of all fields at local padded-storage index `I`,
+shaped like the collection's fields, without copying component values. An
+`ArrayOfHaloArray` of size `(2, 2, nx, ny, nz)` gives a 2×2 matrix whose entry
+`q[a, b]` is field `(a, b)` at the site. A `MultiHaloArray` gives a vector in
+declaration order, and a single `LocalHaloArray`, `HaloArray`, or
+`ThreadedHaloArray` a one-element vector. `size(q) == field_shape(state)` for
+collections; the number of dimensions is part of the view's type, the extents of
+an `ArrayOfHaloArray` are not. Linear indexing `q[k]` follows the column-major
+field order, and `vec(q)` gives a flat view. Array-valued cell elements are
+preserved as one component, not flattened.
 
 `I` uses the storage coordinates of `interior_cells(CellRanges(state))`, including
 allocated halo cells. Threaded arrays and collections require an explicit tile id;
@@ -26,10 +29,12 @@ refresh them after modifying interior values when subsequent stencils need them.
 These scalar accessors are intended for CPU storage, not GPU kernel launches.
 
 Writes immediately modify the underlying fields. Use `copy(q)` for an independent
-snapshot; `similar(q)` creates an ordinary uninitialized vector. Copying and
-broadcasting use Julia's standard implementations and checks: `copyto!` checks
-destination capacity, and broadcast checks compatible shapes with singleton
-expansion. No additional component-length or shape checks are defined here.
+snapshot; `similar(q)` creates an ordinary uninitialized array of the same
+shape. Copying and
+broadcasting use Julia's standard implementations and checks: `copyto!` copies
+in linear (column-major) order and checks destination capacity, and broadcast
+checks compatible shapes with singleton expansion, so broadcasting into a 2×2
+site needs a 2×2 (or broadcastable) operand; use `vec(q)` with flat buffers. No additional component-length or shape checks are defined here.
 Operations requiring an automatic alias-protection copy of a site view throw
 `ArgumentError`; copy the source explicitly, e.g. `q .= copy(view(q, 4:-1:1))`.
 Alias detection is conservative: separate views sharing field storage may require
@@ -50,17 +55,25 @@ a storage index of the correct dimension and within bounds, and a valid tile
 
 ```julia
 q = siteview(state, I)          # pass a final tile id for threaded storage
-copyto!(buffer, q)             # gather
+copyto!(buffer, q)             # gather (any buffer of length(q), column-major)
 copyto!(q, buffer)             # scatter
-q .+= 0.5 .* buffer            # accumulate into initialized fields
+q .+= 0.5 .* buffer            # accumulate; buffer shaped like q
+U = ArrayOfHaloArray(LocalHaloArray, Float64, (2, 2), (nx, ny, nz), 1)
+m = siteview(U, I)             # lazy 2×2 matrix: m[a, b] is field (a, b)
 ```
 """
-@inline function siteview(state::Union{AbstractSingleHaloArray{T},AbstractHaloCollection{T}},
-        I::CartesianIndex, tile::Union{Nothing,Integer}=nothing) where {T}
-    return SiteView{T,typeof(state),typeof(I),typeof(tile)}(state, I, tile)
+@inline function siteview(state::AbstractSingleHaloArray{T}, I::CartesianIndex,
+        tile::Union{Nothing,Integer}=nothing) where {T}
+    return SiteView{T,1,typeof(state),typeof(I),typeof(tile)}(state, I, tile)
 end
 
-struct SiteView{T,C,I,K} <: AbstractVector{T}
+# A collection's first D - S dimensions select the field.
+@inline function siteview(state::AbstractHaloCollection{T,D,S}, I::CartesianIndex,
+        tile::Union{Nothing,Integer}=nothing) where {T,D,S}
+    return SiteView{T,D - S,typeof(state),typeof(I),typeof(tile)}(state, I, tile)
+end
+
+struct SiteView{T,N,C,I,K} <: AbstractArray{T,N}
     state::C
     index::I
     tile::K
@@ -71,7 +84,9 @@ end
 @inline _site_fields(state::AbstractHaloCollection) = eachfield(state)
 
 Base.parent(q::SiteView) = q.state
-Base.size(q::SiteView) = (length(_site_fields(q.state)),)
+Base.size(q::SiteView) = _site_size(q.state)
+@inline _site_size(::AbstractSingleHaloArray) = (1,)
+@inline _site_size(state::AbstractHaloCollection) = field_shape(state)
 Base.IndexStyle(::Type{<:SiteView}) = IndexLinear()
 
 # Ordinary arrays use column-major linear indexing directly. The general path
@@ -99,7 +114,7 @@ Base.@propagate_inbounds function Base.setindex!(q::SiteView, value, k::Int)
 end
 
 Base.similar(::SiteView, ::Type{T}, dims::Dims) where {T} = Array{T}(undef, dims)
-Base.copy(q::SiteView) = copyto!(Vector{eltype(q)}(undef, length(q)), q)
+Base.copy(q::SiteView) = copyto!(similar(q), q)
 Base.unaliascopy(::SiteView) = throw(ArgumentError(
     "overlapping site-view operations require an explicit copy of the source; use copy(source)"))
 
