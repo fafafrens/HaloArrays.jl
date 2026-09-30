@@ -50,7 +50,7 @@ function main()
     dir = tempdir()
     fA  = joinpath(dir, "rs_gather_reduce_$(nproc).h5")
     fB  = joinpath(dir, "rs_reduce_gather_$(nproc).h5")
-    fC  = joinpath(dir, "rs_reduce_collective_$(nproc)")   # append_ adds ".h5"
+    fC  = joinpath(dir, "rs_reduce_collective_$(nproc).h5")
 
     function root_write(file, data)
         if rank == 0 && data !== nothing
@@ -77,7 +77,7 @@ function main()
     # reduce in place, write the distributed result collectively (NO gather).
     reduce_save = function ()
         mr = mapreduce_haloarray_dims(identity, +, u, rdim)
-        append_haloarray_to_file!(fC, "profile", mr)     # per-rank block, collective
+        append_haloarray!(fC, "profile", mr)             # per-rank block, collective
         free!(mr)
     end
 

@@ -3,6 +3,8 @@ using HaloArrays
 using StaticArrays
 using LinearAlgebra: norm, dot
 import LinearAlgebra
+using OrdinaryDiffEq: ODEProblem, Tsit5, solve
+using DiffEqBase: NonNumberEltypeError
 
 # A struct that acts as a scalar cell: it has the vector-space contract (zero,
 # +, -, *, abs2, dot, norm) but is not iterable, like a user's field bundle.
@@ -186,6 +188,22 @@ end
         mc = MultiHaloArray((x=c, y=w))
         @test norm(mc) ≈ sqrt(sc + sq)
         @test dot(mc, mc) ≈ sc + sq
+    end
+
+    @testset "OrdinaryDiffEq refuses non-Number cells with SciML's own error" begin
+        # DiffEqBase applies this check only to a plain Array state; without the
+        # extension's guard a halo array of SVector cells failed deep in the
+        # solver's initialization instead.
+        decay!(du, u, p, t) = (du .= -u; nothing)
+        v = LocalHaloArray(V, (4,), 1; boundary_condition=:periodic)
+        fill!(v, SVector(1.0, 2.0, 3.0))
+        @test_throws NonNumberEltypeError solve(ODEProblem(decay!, v, (0.0, 1.0)), Tsit5())
+        c = LocalHaloArray(ScalarCell, (4,), 1; boundary_condition=:periodic)
+        @test_throws NonNumberEltypeError solve(ODEProblem(decay!, c, (0.0, 1.0)), Tsit5())
+        w = LocalHaloArray(Float64, (4,), 1; boundary_condition=:periodic)
+        fill!(w, 2.0)
+        sol = solve(ODEProblem(decay!, w, (0.0, 1.0)), Tsit5(); reltol=1e-8, abstol=1e-10)
+        @test norm(sol.u[end]) ≈ exp(-1.0) * norm(w) rtol=1e-6
     end
 
     @testset "copy / zero / similar preserve the SVector eltype" begin

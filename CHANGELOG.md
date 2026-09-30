@@ -4,6 +4,35 @@ All notable changes to HaloArrays.jl are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Breaking:** HDF5 output is one function, `append_haloarray!`, replacing
+  `append_haloarray_to_file!`, `gather_and_save_haloarray`,
+  `gather_and_append_haloarray!`, `create_haloarray_output_file`, and
+  `write_haloarray_timestep!` (and the unexported `save_array_hdf5` and
+  `create_*_dataset_from_haloarray` helpers). `append_haloarray!(file_or_group,
+  name, u)` appends the interior as the next step of a time-series dataset into a
+  file the caller opened (collectively for MPI) and returns the dataset or group;
+  `append_haloarray!(filename, name, u)` opens the file on the array's own
+  communicator (the form for `MaybeHaloArray` results). The on-disk layout is
+  unchanged (time on the leading axis; a `MultiHaloArray` is a group with one
+  dataset per field). Filenames are used as given: no `.h5` is appended. The
+  preallocated fixed-size dataset mode is gone; appending to a chunked
+  extendable dataset with the file kept open costs the same.
+
+  | 0.8 | 0.9 |
+  |---|---|
+  | `append_haloarray_to_file!(f, name, u)` | `append_haloarray!(f * ".h5", name, u)` |
+  | `gather_and_append_haloarray!(f, name, u)` | same, or the gather recipe below |
+  | `gather_and_save_haloarray(f, u)` | `A = gather_haloarray(u); is_root(u) && h5write(f * ".h5", "dataset", A)` |
+  | `create_haloarray_output_file` + `write_haloarray_timestep!` | `h5open(f, "w", comm, MPI.Info()) do file … append_haloarray!(file, name, u) … end` |
+
+### Added
+- `gather_haloarray` accepts a `MaybeHaloArray`: active ranks gather on its
+  sub-communicator, inactive ranks return `nothing`, so the gather recipe above
+  works for `dims=` reduction results too.
+
 ## [0.8.1] — 2026-09-30
 
 ### Added

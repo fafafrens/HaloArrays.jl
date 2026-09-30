@@ -445,9 +445,16 @@ collections the same way.
 [`gather_haloarray`](@ref)`(u)` assembles the global interior into an `Array` on
 any backend (a copy on `LocalHaloArray`, stitched tiles on `ThreadedHaloArray`,
 the root rank on MPI; collections give the field axes first, or a `NamedTuple`
-per field); [`gather_and_save_haloarray`](@ref) and the collective
-`append_haloarray_to_file!` write reduced or full arrays to HDF5 (weak
-dependency). See [Arrays, layout & reductions](@ref) for the full API.
+per field). HDF5 output (weak dependency, `using HDF5`) is one function,
+[`append_haloarray!`](@ref)`(file, name, u)`: it appends the interior as the next
+step of a time-series dataset (time on the leading axis) into a file you opened
+with HDF5.jl — collectively for a distributed array, each rank writing its own
+block — and returns the dataset so you can attach attributes. A snapshot is a
+single append. `append_haloarray!(filename, name, u)` opens the file for you on
+the array's own communicator, which suits a `dims=` reduction result
+(`MaybeHaloArray`). For a gathered global array use plain HDF5.jl:
+`A = gather_haloarray(u); is_root(u) && h5write("snap.h5", "rho", A)`.
+See [Arrays, layout & reductions](@ref) for the full API.
 
 ## Backend traits
 

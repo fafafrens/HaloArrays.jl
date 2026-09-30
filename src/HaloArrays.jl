@@ -145,15 +145,10 @@ export mapreduce_haloarray_dims,
 # Maybe helpers
 export is_active
 
-# HDF5 I/O helpers
-export append_haloarray_to_file!,
-    write_haloarray_timestep!,
-    create_haloarray_output_file,
-    gather_and_save_haloarray,
-    gather_and_append_haloarray!
+# HDF5 I/O (methods in the HDF5 extension)
+export append_haloarray!
 
 # Internal-but-stable helpers remain accessible qualified, e.g.
-# HaloArrays.to_bc, HaloArrays.unwrap, HaloArrays.interior_face_range,
-# HaloArrays.save_array_hdf5, HaloArrays.append_haloarray!.
+# HaloArrays.to_bc, HaloArrays.unwrap, HaloArrays.interior_face_range.
 
 end

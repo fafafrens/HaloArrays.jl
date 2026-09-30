@@ -11,6 +11,8 @@ Assemble the global interior (ghost-free) data of `u` into an ordinary `Array`.
   spatial axes (`field_shape(u)..., global_size...`). [`MultiHaloArray`](@ref):
   a `NamedTuple` with one assembled array per field. Distributed collections
   follow the `HaloArray` rule per field.
+- [`MaybeHaloArray`](@ref) (a `dims=` reduction result): active ranks gather on
+  its sub-communicator, inactive ranks return `nothing`.
 
 The same code therefore works on every backend, e.g. for output:
 ```julia
@@ -93,6 +95,11 @@ function gather_haloarray(halo::ArrayOfHaloArray; root::Int=0)
     end
     return data
 end
+
+# A dims-reduction result lives on a sub-communicator: active ranks gather on
+# it, inactive ranks return nothing (so `is_root(m) && h5write(...)` just works).
+gather_haloarray(m::MaybeHaloArray; root::Int=0) =
+    is_active(m) ? gather_haloarray(getdata(m); root=root) : nothing
 
 function gather_haloarray(halo::MultiHaloArray; root::Int=0)
     fields = map(f -> gather_haloarray(f; root=root), values(halo.arrays))

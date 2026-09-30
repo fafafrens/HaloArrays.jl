@@ -2,250 +2,153 @@ using HDF5
 using Test
 using HaloArrays
 
-function _serial_hdf5_base(name)
-    return joinpath(tempdir(), "haloarrays_$(name)_$(getpid())")
-end
-
-function _read_dataset(path, dataset)
-    h5open(path, "r") do fid
-        return read(fid[dataset])
-    end
-end
+_h5(name) = joinpath(tempdir(), "haloarrays_$(name)_$(getpid()).h5")
+_read(path, dset) = h5open(path, "r") do fid; read(fid[dset]); end
 
 @testset "Local and threaded HDF5 output" begin
-    @testset "LocalHaloArray append and fixed-size writes" begin
-        base = _serial_hdf5_base("local")
-        path = base * ".h5"
-        rm(path; force=true)
-
+    @testset "LocalHaloArray: filename form appends and validates" begin
+        path = _h5("local"); rm(path; force=true)
         halo = LocalHaloArray(Int, (2, 3), 1; boundary_condition=:repeating)
         interior_view(halo) .= reshape(collect(1:6), 2, 3)
 
-        append_haloarray_to_file!(base, "field", halo)
-        data = _read_dataset(path, "field")
+        @test append_haloarray!(path, "field", halo) === nothing
+        data = _read(path, "field")
         @test size(data) == (1, 2, 3)
         @test data[1, :, :] == interior_view(halo)
 
-        # Appending to an existing dataset validates its shape/eltype against the
-        # array (a smaller array would silently write a partial slab per step).
+        # An existing dataset is validated against the array: a smaller array
+        # would silently write a partial slab into each step.
         wrong_shape = LocalHaloArray(Int, (2, 4), 1; boundary_condition=:repeating)
-        @test_throws DimensionMismatch append_haloarray_to_file!(base, "field", wrong_shape)
+        @test_throws DimensionMismatch append_haloarray!(path, "field", wrong_shape)
         wrong_eltype = LocalHaloArray(Float64, (2, 3), 1; boundary_condition=:repeating)
-        @test_throws ArgumentError append_haloarray_to_file!(base, "field", wrong_eltype)
-        # a matched append still grows the dataset
-        append_haloarray_to_file!(base, "field", halo)
-        @test size(_read_dataset(path, "field")) == (2, 2, 3)
-
-        save_base = _serial_hdf5_base("local_save")
-        save_path = save_base * ".h5"
-        rm(save_path; force=true)
-        gather_and_save_haloarray(save_base, halo)
-        saved = _read_dataset(save_path, "dataset")
-        @test size(saved) == (2, 3)
-        @test saved == interior_view(halo)
-        rm(save_path; force=true)
-
+        @test_throws ArgumentError append_haloarray!(path, "field", wrong_eltype)
         interior_view(halo) .+= 10
-        fid, dset = create_haloarray_output_file(path, "fixed", halo, 2)
-        write_haloarray_timestep!(dset, halo, 0)
-        interior_view(halo) .+= 10
-        write_haloarray_timestep!(dset, halo, 1)
-        close(fid)
+        append_haloarray!(path, "field", halo)          # a matched append grows
+        data = _read(path, "field")
+        @test size(data) == (2, 2, 3)
+        @test data[2, :, :] == reshape(collect(11:16), 2, 3)
 
-        fixed = _read_dataset(path, "fixed")
-        @test size(fixed) == (2, 2, 3)
-        @test fixed[1, :, :] == reshape(collect(11:16), 2, 3)
-        @test fixed[2, :, :] == reshape(collect(21:26), 2, 3)
-
-        # Reopening the file must validate the existing "fixed" dataset against the
-        # halo array it will receive — a shape or eltype mismatch is refused loudly
-        # rather than silently corrupting the dataset on the next write.
-        wrong_shape = LocalHaloArray(Int, (2, 4), 1; boundary_condition=:repeating)
-        @test_throws DimensionMismatch create_haloarray_output_file(path, "fixed", wrong_shape, 2)
-        wrong_steps = LocalHaloArray(Int, (2, 3), 1; boundary_condition=:repeating)
-        @test_throws DimensionMismatch create_haloarray_output_file(path, "fixed", wrong_steps, 5)
-        wrong_eltype = LocalHaloArray(Float64, (2, 3), 1; boundary_condition=:repeating)
-        @test_throws ArgumentError create_haloarray_output_file(path, "fixed", wrong_eltype, 2)
-        # a matching reopen still succeeds and reuses the dataset
-        fid2, dset2 = create_haloarray_output_file(path, "fixed", halo, 2)
-        @test size(dset2) == (2, 2, 3)
-        close(fid2)
-
-        # appending to a FIXED-size dataset is refused up front (its time axis
-        # is not extendable; set_extent_dims would otherwise fail deep in HDF5)
-        @test_throws ArgumentError append_haloarray_to_file!(base, "fixed", halo)
-
-        # the MultiHaloArray group-append path validates each existing child
-        # dataset too (it used to reuse them unvalidated)
-        mk_mha(dims) = MultiHaloArray((;
-            rho=LocalHaloArray(Int, dims, 1; boundary_condition=:repeating),
-            mom=LocalHaloArray(Int, dims, 1; boundary_condition=:repeating),
-        ))
-        state = mk_mha((2, 3))
-        interior_view(state.rho) .= 1
-        interior_view(state.mom) .= 2
-        append_haloarray_to_file!(base, "state", state)
-        @test size(_read_dataset(path, "state/rho")) == (1, 2, 3)
-        @test_throws DimensionMismatch append_haloarray_to_file!(base, "state", mk_mha((2, 4)))
-        append_haloarray_to_file!(base, "state", state)   # matched append still grows
-        @test size(_read_dataset(path, "state/mom")) == (2, 2, 3)
-
+        # Something else under that name is refused too.
+        h5open(path, "r+") do fid; create_group(fid, "grp"); end
+        @test_throws ArgumentError append_haloarray!(path, "grp", halo)
+        # A fixed-time-axis dataset (not made for appending) is refused up front.
+        h5open(path, "r+") do fid
+            create_dataset(fid, "fixed", Int, dataspace((2, 2, 3)); chunk=(1, 2, 3))
+        end
+        @test_throws ArgumentError append_haloarray!(path, "fixed", halo)
         rm(path; force=true)
     end
 
-    @testset "ThreadedHaloArray append" begin
-        base = _serial_hdf5_base("threaded")
-        path = base * ".h5"
+    @testset "LocalHaloArray: handle form, returned dataset, attributes, groups" begin
+        path = _h5("local_handle"); rm(path; force=true)
+        halo = LocalHaloArray(Float64, (2, 3), 1; boundary_condition=:repeating)
+        h5open(path, "w") do fid
+            for step in 1:3
+                fill!(halo, Float64(step))
+                dset = append_haloarray!(fid, "field", halo)
+                @test dset isa HDF5.Dataset
+                @test size(dset) == (step, 2, 3)
+                step == 3 && (attributes(dset)["t"] = 1.5)   # the caller keeps the handle
+            end
+            g = create_group(fid, "run1")
+            @test append_haloarray!(g, "field", halo) isa HDF5.Dataset
+        end
+        data = _read(path, "field")
+        @test all(all(data[s, :, :] .== s) for s in 1:3)
+        @test h5open(path, "r") do fid; read(attributes(fid["field"])["t"]); end == 1.5
+        @test size(_read(path, "run1/field")) == (1, 2, 3)
         rm(path; force=true)
+    end
 
+    @testset "snapshot: gather_haloarray + plain HDF5.jl" begin
+        path = _h5("snapshot"); rm(path; force=true)
+        halo = LocalHaloArray(Int, (2, 3), 1; boundary_condition=:repeating)
+        interior_view(halo) .= reshape(collect(1:6), 2, 3)
+        A = gather_haloarray(halo)
+        is_root(halo) && h5write(path, "dataset", A)
+        @test _read(path, "dataset") == interior_view(halo)
+        rm(path; force=true)
+    end
+
+    @testset "ThreadedHaloArray append: tiles stitched in global order" begin
+        path = _h5("threaded"); rm(path; force=true)
         halo = ThreadedHaloArray(Int, (2,), 1; dims=(3,), boundary_condition=:repeating)
         for tile_id in 1:tile_count(halo)
             interior_view(halo, tile_id) .= (2 * tile_id - 1):(2 * tile_id)
         end
-
-        append_haloarray_to_file!(base, "field", halo)
-        data = _read_dataset(path, "field")
+        append_haloarray!(path, "field", halo)
+        data = _read(path, "field")
         @test size(data) == (1, 6)
         @test vec(data[1, :]) == collect(1:6)
-
-        save_base = _serial_hdf5_base("threaded_save")
-        save_path = save_base * ".h5"
-        rm(save_path; force=true)
-        gather_and_save_haloarray(save_base, halo)
-        saved = _read_dataset(save_path, "dataset")
-        @test size(saved) == (6,)
-        @test vec(saved) == collect(1:6)
-        rm(save_path; force=true)
-
         rm(path; force=true)
     end
 
-    @testset "ArrayOfHaloArray append" begin
-        base = _serial_hdf5_base("arrayof")
-        path = base * ".h5"
-        rm(path; force=true)
-
+    @testset "ArrayOfHaloArray append: field axes first" begin
+        path = _h5("arrayof"); rm(path; force=true)
         u = LocalHaloArray(Int, (2, 3), 1; boundary_condition=:repeating)
         v = similar(u)
         interior_view(u) .= reshape(collect(1:6), 2, 3)
         interior_view(v) .= reshape(collect(101:106), 2, 3)
         fields = ArrayOfHaloArray([u, v])
-
-        append_haloarray_to_file!(base, "state", fields)
-        data = _read_dataset(path, "state")
+        append_haloarray!(path, "state", fields)
+        data = _read(path, "state")
         @test size(data) == (1, 2, 2, 3)
         @test data[1, 1, :, :] == interior_view(u)
         @test data[1, 2, :, :] == interior_view(v)
-
-        save_base = _serial_hdf5_base("arrayof_save")
-        save_path = save_base * ".h5"
-        rm(save_path; force=true)
-        gather_and_save_haloarray(save_base, fields)
-        saved = _read_dataset(save_path, "dataset")
-        @test size(saved) == (2, 2, 3)
-        @test saved[1, :, :] == interior_view(u)
-        @test saved[2, :, :] == interior_view(v)
-        rm(save_path; force=true)
-
-        rm(path; force=true)
-    end
-
-    @testset "ArrayOfHaloArray with threaded fields" begin
-        base = _serial_hdf5_base("arrayof_threaded")
-        path = base * ".h5"
         rm(path; force=true)
 
-        u = ThreadedHaloArray(Int, (2,), 1; dims=(2,), boundary_condition=:repeating)
-        v = similar(u)
-        interior_view(u, 1) .= [1, 2]
-        interior_view(u, 2) .= [3, 4]
-        interior_view(v, 1) .= [10, 20]
-        interior_view(v, 2) .= [30, 40]
-        fields = ArrayOfHaloArray([u, v])
-
-        append_haloarray_to_file!(base, "state", fields)
-        data = _read_dataset(path, "state")
+        # threaded fields
+        path = _h5("arrayof_threaded"); rm(path; force=true)
+        tu = ThreadedHaloArray(Int, (2,), 1; dims=(2,), boundary_condition=:repeating)
+        tv = similar(tu)
+        interior_view(tu, 1) .= [1, 2]; interior_view(tu, 2) .= [3, 4]
+        interior_view(tv, 1) .= [10, 20]; interior_view(tv, 2) .= [30, 40]
+        append_haloarray!(path, "state", ArrayOfHaloArray([tu, tv]))
+        data = _read(path, "state")
         @test size(data) == (1, 2, 4)
         @test vec(data[1, 1, :]) == [1, 2, 3, 4]
         @test vec(data[1, 2, :]) == [10, 20, 30, 40]
-
         rm(path; force=true)
     end
 
-    @testset "MultiHaloArray append and save" begin
-        base = _serial_hdf5_base("multi")
-        path = base * ".h5"
+    @testset "MultiHaloArray append: a group with one dataset per field" begin
+        path = _h5("multi"); rm(path; force=true)
+        mk(dims) = MultiHaloArray((;
+            rho=LocalHaloArray(Int, dims, 1; boundary_condition=:repeating),
+            mom=LocalHaloArray(Int, dims, 1; boundary_condition=:repeating)))
+        state = mk((2, 3))
+        interior_view(state.rho) .= reshape(collect(1:6), 2, 3)
+        interior_view(state.mom) .= reshape(collect(101:106), 2, 3)
+
+        h5open(path, "w") do fid
+            g = append_haloarray!(fid, "state", state)
+            @test g isa HDF5.Group
+            @test keys(g) == ["mom", "rho"]
+        end
+        @test _read(path, "state/rho")[1, :, :] == interior_view(state.rho)
+        @test _read(path, "state/mom")[1, :, :] == interior_view(state.mom)
+        # each existing child dataset is validated
+        @test_throws DimensionMismatch append_haloarray!(path, "state", mk((2, 4)))
+        append_haloarray!(path, "state", state)          # matched append still grows
+        @test size(_read(path, "state/mom")) == (2, 2, 3)
         rm(path; force=true)
 
-        rho = LocalHaloArray(Int, (2, 3), 1; boundary_condition=:repeating)
-        mom = similar(rho)
-        interior_view(rho) .= reshape(collect(1:6), 2, 3)
-        interior_view(mom) .= reshape(collect(101:106), 2, 3)
-        fields = LocalMultiHaloArray((; rho, mom))
-
-        append_haloarray_to_file!(base, "state", fields)
-        rho_data = _read_dataset(path, "state/rho")
-        mom_data = _read_dataset(path, "state/mom")
-        @test size(rho_data) == (1, 2, 3)
-        @test size(mom_data) == (1, 2, 3)
-        @test rho_data[1, :, :] == interior_view(rho)
-        @test mom_data[1, :, :] == interior_view(mom)
-
-        save_base = _serial_hdf5_base("multi_save")
-        save_path = save_base * ".h5"
-        rm(save_path; force=true)
-        gather_and_save_haloarray(save_base, fields)
-        saved_rho = _read_dataset(save_path, "dataset/rho")
-        saved_mom = _read_dataset(save_path, "dataset/mom")
-        @test saved_rho == interior_view(rho)
-        @test saved_mom == interior_view(mom)
-
-        rm(path; force=true)
-        rm(save_path; force=true)
-    end
-
-    @testset "MultiHaloArray with threaded and nested fields" begin
-        base = _serial_hdf5_base("multi_threaded")
-        path = base * ".h5"
-        rm(path; force=true)
-
+        # threaded fields, and a nested ArrayOfHaloArray field
+        path = _h5("multi_nested"); rm(path; force=true)
         rho = ThreadedHaloArray(Int, (2,), 1; dims=(2,), boundary_condition=:repeating)
-        mom = similar(rho)
-        interior_view(rho, 1) .= [1, 2]
-        interior_view(rho, 2) .= [3, 4]
-        interior_view(mom, 1) .= [10, 20]
-        interior_view(mom, 2) .= [30, 40]
-        fields = ThreadedMultiHaloArray((; rho, mom))
-
-        append_haloarray_to_file!(base, "state", fields)
-        rho_data = _read_dataset(path, "state/rho")
-        mom_data = _read_dataset(path, "state/mom")
-        @test size(rho_data) == (1, 4)
-        @test vec(rho_data[1, :]) == [1, 2, 3, 4]
-        @test vec(mom_data[1, :]) == [10, 20, 30, 40]
+        interior_view(rho, 1) .= [1, 2]; interior_view(rho, 2) .= [3, 4]
+        q1 = LocalHaloArray(Int, (2,), 1; boundary_condition=:repeating)
+        q2 = similar(q1)
+        interior_view(q1) .= [1, 2]; interior_view(q2) .= [3, 4]
+        scalar = similar(q1); interior_view(scalar) .= [7, 8]
+        append_haloarray!(path, "t", ThreadedMultiHaloArray((; rho, mom=copy(rho))))
+        @test vec(_read(path, "t/rho")[1, :]) == [1, 2, 3, 4]
+        append_haloarray!(path, "n", MultiHaloArray((; scalar, q=ArrayOfHaloArray([q1, q2]))))
+        @test vec(_read(path, "n/scalar")[1, :]) == [7, 8]
+        q = _read(path, "n/q")
+        @test size(q) == (1, 2, 2)
+        @test vec(q[1, 1, :]) == [1, 2]
+        @test vec(q[1, 2, :]) == [3, 4]
         rm(path; force=true)
-
-        nested_base = _serial_hdf5_base("multi_nested")
-        nested_path = nested_base * ".h5"
-        rm(nested_path; force=true)
-
-        scalar = LocalHaloArray(Int, (2,), 1; boundary_condition=:repeating)
-        q1 = similar(scalar)
-        q2 = similar(scalar)
-        interior_view(scalar) .= [7, 8]
-        interior_view(q1) .= [1, 2]
-        interior_view(q2) .= [3, 4]
-        nested = MultiHaloArray((; scalar, q=ArrayOfHaloArray([q1, q2])))
-
-        append_haloarray_to_file!(nested_base, "state", nested)
-        scalar_data = _read_dataset(nested_path, "state/scalar")
-        q_data = _read_dataset(nested_path, "state/q")
-        @test size(scalar_data) == (1, 2)
-        @test vec(scalar_data[1, :]) == [7, 8]
-        @test size(q_data) == (1, 2, 2)
-        @test vec(q_data[1, 1, :]) == [1, 2]
-        @test vec(q_data[1, 2, :]) == [3, 4]
-
-        rm(nested_path; force=true)
     end
 end

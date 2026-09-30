@@ -3,291 +3,169 @@ using HDF5
 using Test
 using HaloArrays
 
-function _test_hdf5_path(name, comm)
-    return joinpath(tempdir(), "haloarrays_$(name)_$(MPI.Comm_size(comm)).h5")
-end
-
-function _remove_on_root(path, comm)
-    if MPI.Comm_rank(comm) == 0
-        rm(path; force=true)
-    end
+_h5(name, comm) = joinpath(tempdir(), "haloarrays_$(name)_$(MPI.Comm_size(comm)).h5")
+function _rm_on_root(path, comm)
+    MPI.Comm_rank(comm) == 0 && rm(path; force=true)
     MPI.Barrier(comm)
-    return nothing
 end
-
-function _owned_hdf5_slices(halo)
-    owned_dims = HaloArrays.interior_size(halo)
+function _owned(halo)
+    dims = HaloArrays.interior_size(halo)
     coords = halo.topology.cart_coords
-    return ntuple(d -> (coords[d] * owned_dims[d] + 1):((coords[d] + 1) * owned_dims[d]), Val(ndims(halo)))
+    return ntuple(d -> (coords[d] * dims[d] + 1):((coords[d] + 1) * dims[d]), Val(ndims(halo)))
 end
+_rank_owned(topology, r, owned_dims) = (coords = Tuple(MPI.Cart_coords(topology.cart_comm, r));
+    ntuple(d -> (coords[d] * owned_dims[d] + 1):((coords[d] + 1) * owned_dims[d]), Val(2)))
 
 @testset "MPI HDF5 output" begin
     comm = MPI.COMM_WORLD
     rank = MPI.Comm_rank(comm)
+    nranks = MPI.Comm_size(comm)
     owned_dims = (2, 3)
-    halo_width_value = 1
     boundary = ntuple(_ -> (Periodic(), Periodic()), Val(2))
+    topology = CartesianTopology(comm, (0, 0); periodic=(true, true))
+    mk() = HaloArray(Float64, owned_dims, 1, topology; boundary_condition=boundary)
 
-    @testset "append_haloarray!" begin
-        topology = CartesianTopology(comm, (0, 0); periodic=(true, true))
-        halo = HaloArray(Float64, owned_dims, halo_width_value, topology; boundary_condition=boundary)
-        filename = _test_hdf5_path("append", comm)
-        _remove_on_root(filename, comm)
-
-        fid = h5open(filename, "w", comm, MPI.Info())
-        dset = HaloArrays.create_dataset_from_haloarray(fid, "field", halo)
-
-        for step in 0:2
-            fill!(halo, rank + step / 10)
-            HaloArrays.append_haloarray!(dset, halo)
-        end
-
-        close(fid)
-        MPI.Barrier(comm)
-
-        fid = h5open(filename, "r", comm, MPI.Info())
-        dset = fid["field"]
-        @test size(dset) == (3, global_size(halo)...)
-
-        owned = _owned_hdf5_slices(halo)
-        for step in 1:3
-            slab = dset[step, owned...]
-            @test all(slab .== rank + (step - 1) / 10)
-        end
-        close(fid)
-
-        _remove_on_root(filename, comm)
-    end
-
-    @testset "write_haloarray_timestep!" begin
-        topology = CartesianTopology(comm, (0, 0); periodic=(true, true))
-        halo = HaloArray(Float64, owned_dims, halo_width_value, topology; boundary_condition=boundary)
-        filename = _test_hdf5_path("fixed", comm)
-        _remove_on_root(filename, comm)
-
-        num_timesteps = 3
-        fid = h5open(filename, "w", comm, MPI.Info())
-        dset = HaloArrays.create_fixedsize_dataset_from_haloarray(fid, "field", halo, num_timesteps)
-
-        for step in 0:(num_timesteps - 1)
-            fill!(halo, rank + 1 + step / 10)
-            write_haloarray_timestep!(dset, halo, step)
-        end
-
-        close(fid)
-        MPI.Barrier(comm)
-
-        fid = h5open(filename, "r", comm, MPI.Info())
-        dset = fid["field"]
-        @test size(dset) == (num_timesteps, global_size(halo)...)
-
-        owned = _owned_hdf5_slices(halo)
-        for step in 1:num_timesteps
-            slab = dset[step, owned...]
-            @test all(slab .== rank + 1 + (step - 1) / 10)
-        end
-        close(fid)
-
-        _remove_on_root(filename, comm)
-    end
-
-    @testset "ArrayOfHaloArray append" begin
-        topology = CartesianTopology(comm, (0, 0); periodic=(true, true))
-        u = HaloArray(Float64, owned_dims, halo_width_value, topology; boundary_condition=boundary)
-        v = similar(u)
-        filename = _test_hdf5_path("arrayof", comm)
-        _remove_on_root(filename, comm)
-
-        fill!(u, rank + 1)
-        fill!(v, 100 + rank)
-        fields = ArrayOfHaloArray([u, v])
-
-        fid = h5open(filename, "w", comm, MPI.Info())
-        dset = HaloArrays.create_dataset_from_haloarray(fid, "state", fields)
-        HaloArrays.append_haloarray!(dset, fields)
-        close(fid)
-        MPI.Barrier(comm)
-
-        fid = h5open(filename, "r", comm, MPI.Info())
-        dset = fid["state"]
-        @test size(dset) == (1, 2, global_size(u)...)
-
-        owned = _owned_hdf5_slices(u)
-        @test all(dset[1, 1, owned...] .== rank + 1)
-        @test all(dset[1, 2, owned...] .== 100 + rank)
-        close(fid)
-
-        _remove_on_root(filename, comm)
-    end
-
-    @testset "ArrayOfHaloArray gather save" begin
-        topology = CartesianTopology(comm, (0, 0); periodic=(true, true))
-        u = HaloArray(Float64, owned_dims, halo_width_value, topology; boundary_condition=boundary)
-        v = similar(u)
-        filename_base = joinpath(tempdir(), "haloarrays_arrayof_gather_$(MPI.Comm_size(comm))")
-        filename = filename_base * ".h5"
-        _remove_on_root(filename, comm)
-
-        fill!(u, rank + 10)
-        fill!(v, rank + 110)
-        fields = ArrayOfHaloArray([u, v])
-
-        gather_and_save_haloarray(filename_base, fields)
-
-        if rank == 0
-            data = h5open(filename, "r") do fid
-                read(fid["dataset"])
+    @testset "handle form: collective appends, every rank writes its block" begin
+        halo = mk()
+        path = _h5("append", comm)
+        _rm_on_root(path, comm)
+        h5open(path, "w", comm, MPI.Info()) do fid
+            for step in 0:2
+                fill!(halo, rank + step / 10)
+                dset = append_haloarray!(fid, "field", halo)
+                @test size(dset) == (step + 1, global_size(halo)...)
             end
+        end
+        MPI.Barrier(comm)
+        h5open(path, "r", comm, MPI.Info()) do fid
+            dset = fid["field"]
+            @test size(dset) == (3, global_size(halo)...)
+            for step in 1:3
+                @test all(dset[step, _owned(halo)...] .== rank + (step - 1) / 10)
+            end
+        end
+        _rm_on_root(path, comm)
+    end
+
+    @testset "filename form: opens on the array's communicator" begin
+        halo = mk()
+        path = _h5("append_file", comm)
+        _rm_on_root(path, comm)
+        for step in 0:1
+            fill!(halo, rank + 1 + step)
+            @test append_haloarray!(path, "field", halo) === nothing
+        end
+        MPI.Barrier(comm)
+        h5open(path, "r", comm, MPI.Info()) do fid
+            dset = fid["field"]
+            @test size(dset) == (2, global_size(halo)...)
+            @test all(dset[2, _owned(halo)...] .== rank + 2)
+        end
+        _rm_on_root(path, comm)
+    end
+
+    @testset "ArrayOfHaloArray and MultiHaloArray appends" begin
+        u = mk(); v = mk()
+        fill!(u, rank + 1); fill!(v, 100 + rank)
+        path = _h5("collections", comm)
+        _rm_on_root(path, comm)
+        h5open(path, "w", comm, MPI.Info()) do fid
+            dset = append_haloarray!(fid, "state", ArrayOfHaloArray([u, v]))
+            @test size(dset) == (1, 2, global_size(u)...)
+            g = append_haloarray!(fid, "named", MultiHaloArray((; rho=u, mom=v)))
+            @test g isa HDF5.Group
+        end
+        MPI.Barrier(comm)
+        h5open(path, "r", comm, MPI.Info()) do fid
+            dset = fid["state"]
+            @test all(dset[1, 1, _owned(u)...] .== rank + 1)
+            @test all(dset[1, 2, _owned(u)...] .== 100 + rank)
+            @test size(fid["named/rho"]) == (1, global_size(u)...)
+            @test all(fid["named/mom"][1, _owned(u)...] .== 100 + rank)
+        end
+        _rm_on_root(path, comm)
+    end
+
+    @testset "snapshot: gather_haloarray + plain HDF5.jl on root" begin
+        u = mk(); v = mk()
+        fill!(u, rank + 10); fill!(v, rank + 110)
+        path = _h5("gather", comm)
+        _rm_on_root(path, comm)
+        A = gather_haloarray(ArrayOfHaloArray([u, v]))
+        nt = gather_haloarray(MultiHaloArray((; rho=u, mom=v)))
+        if is_root(u)
+            h5write(path, "state", A)
+            h5write(path, "rho", nt.rho)
+        end
+        MPI.Barrier(comm)
+        if rank == 0
+            data = h5read(path, "state")
             @test size(data) == (2, global_size(u)...)
-
-            for r in 0:(MPI.Comm_size(comm) - 1)
-                coords = Tuple(MPI.Cart_coords(topology.cart_comm, r))
-                owned = ntuple(d -> (coords[d] * owned_dims[d] + 1):((coords[d] + 1) * owned_dims[d]), Val(2))
-                @test all(data[1, owned...] .== r + 10)
-                @test all(data[2, owned...] .== r + 110)
+            rho = h5read(path, "rho")
+            for r in 0:(nranks - 1)
+                o = _rank_owned(topology, r, owned_dims)
+                @test all(data[1, o...] .== r + 10)
+                @test all(data[2, o...] .== r + 110)
+                @test all(rho[o...] .== r + 10)
             end
+        else
+            @test A === nothing && nt.rho === nothing
         end
-
-        _remove_on_root(filename, comm)
+        _rm_on_root(path, comm)
     end
 
-    @testset "MultiHaloArray append" begin
-        topology = CartesianTopology(comm, (0, 0); periodic=(true, true))
-        rho = HaloArray(Float64, owned_dims, halo_width_value, topology; boundary_condition=boundary)
-        mom = similar(rho)
-        filename = _test_hdf5_path("multi", comm)
-        _remove_on_root(filename, comm)
-
-        fill!(rho, rank + 20)
-        fill!(mom, rank + 120)
-        fields = MultiHaloArray((; rho, mom))
-
-        fid = h5open(filename, "w", comm, MPI.Info())
-        group = HaloArrays.create_dataset_from_haloarray(fid, "state", fields)
-        HaloArrays.append_haloarray!(group, fields)
-        close(fid)
-        MPI.Barrier(comm)
-
-        fid = h5open(filename, "r", comm, MPI.Info())
-        rho_dset = fid["state/rho"]
-        mom_dset = fid["state/mom"]
-        @test size(rho_dset) == (1, global_size(rho)...)
-        @test size(mom_dset) == (1, global_size(mom)...)
-
-        owned = _owned_hdf5_slices(rho)
-        @test all(rho_dset[1, owned...] .== rank + 20)
-        @test all(mom_dset[1, owned...] .== rank + 120)
-        close(fid)
-
-        _remove_on_root(filename, comm)
-    end
-
-    @testset "MultiHaloArray gather save" begin
-        topology = CartesianTopology(comm, (0, 0); periodic=(true, true))
-        rho = HaloArray(Float64, owned_dims, halo_width_value, topology; boundary_condition=boundary)
-        mom = similar(rho)
-        filename_base = joinpath(tempdir(), "haloarrays_multi_gather_$(MPI.Comm_size(comm))")
-        filename = filename_base * ".h5"
-        _remove_on_root(filename, comm)
-
-        fill!(rho, rank + 30)
-        fill!(mom, rank + 130)
-        fields = MultiHaloArray((; rho, mom))
-
-        gather_and_save_haloarray(filename_base, fields)
-
-        if rank == 0
-            rho_data = h5open(filename, "r") do fid
-                read(fid["dataset/rho"])
-            end
-            mom_data = h5open(filename, "r") do fid
-                read(fid["dataset/mom"])
-            end
-
-            @test size(rho_data) == global_size(rho)
-            @test size(mom_data) == global_size(mom)
-
-            for r in 0:(MPI.Comm_size(comm) - 1)
-                coords = Tuple(MPI.Cart_coords(topology.cart_comm, r))
-                owned = ntuple(d -> (coords[d] * owned_dims[d] + 1):((coords[d] + 1) * owned_dims[d]), Val(2))
-                @test all(rho_data[owned...] .== r + 30)
-                @test all(mom_data[owned...] .== r + 130)
-            end
-        end
-
-        _remove_on_root(filename, comm)
-    end
-
-    @testset "MaybeHaloArray reduction append" begin
-        topology = CartesianTopology(comm, (0, 0); periodic=(true, true))
-        u = HaloArray(Int, owned_dims, halo_width_value, topology; boundary_condition=boundary)
-        filename = _test_hdf5_path("maybe_reduce_append", comm)
-        _remove_on_root(filename, comm)
-
+    @testset "MaybeHaloArray (dims= reduction) appends and gathers" begin
+        u = HaloArray(Int, owned_dims, 1, topology; boundary_condition=boundary)
         fill!(u, rank + 40)
-        maybe_reduced = mapreduce_haloarray_dims(identity, +, u, (1,))
-        append_haloarray_to_file!(filename[1:(end - 3)], "reduced", maybe_reduced)
-        MPI.Barrier(comm)
-
-        if rank == 0
-            data = h5open(filename, "r") do fid
-                read(fid["reduced"])
-            end
-            @test size(data) == (1, topology.dims[2] * owned_dims[2])
-
-            for y in 0:(topology.dims[2] - 1)
-                expected = sum(0:(topology.dims[1] - 1)) do x
-                    source_rank = MPI.Cart_rank(topology.cart_comm, (x, y))
-                    owned_dims[1] * (source_rank + 40)
-                end
-                y_range = (y * owned_dims[2] + 1):((y + 1) * owned_dims[2])
-                @test all(data[1, y_range] .== expected)
-            end
+        reduced = mapreduce_haloarray_dims(identity, +, u, (1,))   # lives on one slice of the grid
+        expected_col(y) = sum(0:(topology.dims[1] - 1)) do x
+            owned_dims[1] * (MPI.Cart_rank(topology.cart_comm, (x, y)) + 40)
         end
 
-        _remove_on_root(filename, comm)
-    end
+        path = _h5("maybe_append", comm)
+        _rm_on_root(path, comm)
+        append_haloarray!(path, "reduced", reduced)           # inactive ranks: no-op
+        append_haloarray!(path, "reduced", reduced)
+        MPI.Barrier(comm)
+        if rank == 0
+            data = h5read(path, "reduced")
+            @test size(data) == (2, topology.dims[2] * owned_dims[2])
+            for y in 0:(topology.dims[2] - 1)
+                yr = (y * owned_dims[2] + 1):((y + 1) * owned_dims[2])
+                @test all(data[2, yr] .== expected_col(y))
+            end
+        end
+        _rm_on_root(path, comm)
 
-    @testset "MaybeHaloArray MultiHaloArray reduction save" begin
-        topology = CartesianTopology(comm, (0, 0); periodic=(true, true))
-        rho = HaloArray(Int, owned_dims, halo_width_value, topology; boundary_condition=boundary)
+        # gather recipe on the reduced result
+        A = gather_haloarray(reduced)
+        if is_root(reduced)
+            @test size(A) == (topology.dims[2] * owned_dims[2],)
+            @test all(A[1:owned_dims[2]] .== expected_col(0))
+        elseif !is_active(reduced)
+            @test A === nothing
+        end
+
+        # a reduced MultiHaloArray: group per field, filename form
+        rho = HaloArray(Int, owned_dims, 1, topology; boundary_condition=boundary)
         mom = similar(rho)
-        filename_base = joinpath(tempdir(), "haloarrays_maybe_multi_reduce_$(MPI.Comm_size(comm))")
-        filename = filename_base * ".h5"
-        _remove_on_root(filename, comm)
-
-        fill!(rho, rank + 50)
-        fill!(mom, rank + 150)
+        fill!(rho, rank + 50); fill!(mom, rank + 150)
         # collection-global dims: field axis 1, spatial axes 2… → spatial dim 1 is (2,)
-        maybe_fields = HaloArrays.mapreduce_mhaloarray_dims(identity, +, MultiHaloArray((; rho, mom)), (2,))
-        gather_and_save_haloarray(filename_base, maybe_fields)
+        reduced_fields = HaloArrays.mapreduce_mhaloarray_dims(identity, +, MultiHaloArray((; rho, mom)), (2,))
+        path = _h5("maybe_multi", comm)
+        _rm_on_root(path, comm)
+        append_haloarray!(path, "reduced", reduced_fields)
         MPI.Barrier(comm)
-
         if rank == 0
-            rho_data = h5open(filename, "r") do fid
-                read(fid["dataset/rho"])
-            end
-            mom_data = h5open(filename, "r") do fid
-                read(fid["dataset/mom"])
-            end
-            @test size(rho_data) == (topology.dims[2] * owned_dims[2],)
-            @test size(mom_data) == (topology.dims[2] * owned_dims[2],)
-
+            rho_data = h5read(path, "reduced/rho")
+            mom_data = h5read(path, "reduced/mom")
+            @test size(rho_data) == (1, topology.dims[2] * owned_dims[2])
             for y in 0:(topology.dims[2] - 1)
-                expected_rho = sum(0:(topology.dims[1] - 1)) do x
-                    source_rank = MPI.Cart_rank(topology.cart_comm, (x, y))
-                    owned_dims[1] * (source_rank + 50)
-                end
-                expected_mom = sum(0:(topology.dims[1] - 1)) do x
-                    source_rank = MPI.Cart_rank(topology.cart_comm, (x, y))
-                    owned_dims[1] * (source_rank + 150)
-                end
-                y_range = (y * owned_dims[2] + 1):((y + 1) * owned_dims[2])
-                @test all(rho_data[y_range] .== expected_rho)
-                @test all(mom_data[y_range] .== expected_mom)
+                yr = (y * owned_dims[2] + 1):((y + 1) * owned_dims[2])
+                @test all(rho_data[1, yr] .== expected_col(y) + owned_dims[1] * 10 * topology.dims[1])
+                @test all(mom_data[1, yr] .== expected_col(y) + owned_dims[1] * 110 * topology.dims[1])
             end
         end
-
-        _remove_on_root(filename, comm)
+        _rm_on_root(path, comm)
     end
 end
