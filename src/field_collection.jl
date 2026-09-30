@@ -105,7 +105,20 @@ function _check_fields_compatible(what::AbstractString, ref, labeled_fields)
             throw(DimensionMismatch("$what field `$label` has halo width $(halo_width(a)) != $ref_halo"))
         halo_backend(a) isa typeof(ref_backend) ||
             throw(ArgumentError("$what field `$label` has backend $(typeof(halo_backend(a))) != $(typeof(ref_backend))"))
+        _check_same_layout(what, label, a, ref)
     end
+    return nothing
+end
+
+# Threaded fields must also share the tiling: equal global sizes with different
+# tile sizes or tile grids would let tile-indexed operations (siteview with a
+# tile id, per-tile kernels) address different global cells in different fields.
+@inline _check_same_layout(what, label, a, ref) = nothing
+function _check_same_layout(what, label, a::ThreadedHaloArray, ref::ThreadedHaloArray)
+    tile_size(a) == tile_size(ref) ||
+        throw(DimensionMismatch("$what field `$label` has tile size $(tile_size(a)) != $(tile_size(ref))"))
+    a.topology.dims == ref.topology.dims ||
+        throw(DimensionMismatch("$what field `$label` has tile grid $(a.topology.dims) != $(ref.topology.dims)"))
     return nothing
 end
 

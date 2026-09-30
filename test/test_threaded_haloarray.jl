@@ -458,6 +458,12 @@
         @test_throws DimensionMismatch MultiHaloArray((; rho, bad_halo))
         @test_throws DimensionMismatch MultiHaloArray((; rho, bad_topology))
         @test_throws ArgumentError MultiHaloArray((; rho, local_halo=LocalHaloArray(Int, (6,), 1)))   # same geometry, other backend
+        # Same global size, different tiling: tile-indexed access would address
+        # different global cells per field, so every collection rejects it.
+        other_tiling = ThreadedHaloArray(Int, (2,), 1; dims=(3,), boundary_condition=:repeating)
+        @test size(other_tiling) == size(rho)
+        @test_throws DimensionMismatch MultiHaloArray((; rho, other_tiling))
+        @test_throws DimensionMismatch ArrayOfHaloArray([rho, other_tiling])
     end
 
     @testset "fields shorthand and default dims for MultiHaloArray(ThreadedHaloArray, …)" begin

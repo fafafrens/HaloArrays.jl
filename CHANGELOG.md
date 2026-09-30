@@ -51,6 +51,13 @@ will be removed in 0.10:
 | `mapreduce_haloarray_dims(f, op, u, dims)` | `mapreduce(f, op, u; dims)` (also `sum(u; dims)` etc.) |
 | `global_size(u)` | `size(u)` (on an inactive `MaybeHaloArray`, `size(getdata(u))`: `size` itself is all zeros there, `global_size` looked through) |
 
+### Fixed
+- `MultiHaloArray(nt)` and `ArrayOfHaloArray([…])` reject threaded fields that
+  share a global size but not a tiling (tile size or tile grid); before, only
+  the `ThreadedMultiHaloArray` constructor checked this, and a mismatched
+  collection let tile-indexed operations address different global cells in
+  different fields.
+
 ### Removed (internal)
 - The second, `MPI.Request`-based halo-exchange implementation and its seven
   unexported compatibility wrappers (`halo_exchange_wait!`, `halo_exchange_async!`, …);
