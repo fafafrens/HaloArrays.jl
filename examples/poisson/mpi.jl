@@ -54,7 +54,7 @@ function run_distributed_poisson(; owned=(32, 32))
     rhs = HaloArray(Float64, owned, 1, topo; boundary_condition=bc)
     uex = HaloArray(Float64, owned, 1, topo; boundary_condition=bc)
 
-    ng = global_size(u)                        # global cell counts (Nx, Ny)
+    ng = size(u)                        # global cell counts (Nx, Ny)
     hx, hy = 1.0 / ng[1], 1.0 / ng[2]
     cx(i) = (i - 0.5) * hx
     cy(j) = (j - 0.5) * hy

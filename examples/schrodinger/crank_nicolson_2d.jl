@@ -127,7 +127,7 @@ ground state displaced to `centre` and boosted so that it orbits the origin —
 its centre must follow the classical trajectory exactly.
 """
 function solve_backend(ψ; lengths, ω, dt, steps, centre)
-    nx, ny = global_size(ψ)
+    nx, ny = size(ψ)
     hx, hy = lengths[1] / nx, lengths[2] / ny
     momentum = (-ω * centre[2], ω * centre[1])   # tangential kick → circular orbit
 

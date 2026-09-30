@@ -38,7 +38,7 @@ function HaloArrays.apply_coupled_bc!(bc::RelativisticOutflow, state, ::Side{Sd}
 end
 
 # x-boundaries opt out of the per-field BC so the coupled hook can fill them.
-make_state(nx) = LocalMultiHaloArray(Float64, (nx,), 1;
+make_state(nx) = MultiHaloArray(LocalHaloArray, Float64, (nx,), 1;
     boundary_conditions=(D=:noboundary, S=:noboundary, tau=:noboundary))
 
 eos = IdealGas(5.0 / 3.0)

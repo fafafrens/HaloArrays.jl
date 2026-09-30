@@ -18,7 +18,7 @@
 include("relativistic_common.jl")
 
 # Every field gets :repeating; synchronize_halo! fills the ghosts for us.
-make_state(nx) = LocalMultiHaloArray(Float64, (nx,), 1;
+make_state(nx) = MultiHaloArray(LocalHaloArray, Float64, (nx,), 1;
     fields=(:D, :S, :tau), boundary_condition=:repeating)
 
 run_relativistic_sod(make_state, u -> nothing;

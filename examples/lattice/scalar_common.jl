@@ -142,12 +142,12 @@ function heatbath_rng(fields::ArrayOfHaloArray, seed)
 end
 
 function print_observables(label, phi, obs)
-    @printf("%-22s size=%s mean=% .6e phi2=%.6e\n", label, string(global_size(phi)), obs.mean, obs.phi2)
+    @printf("%-22s size=%s mean=% .6e phi2=%.6e\n", label, string(size(phi)), obs.mean, obs.phi2)
     return nothing
 end
 
 function print_free_scalar_check(label, phi, obs, p)
-    exact = exact_free_scalar_phi2(global_size(phi), p)
+    exact = exact_free_scalar_phi2(size(phi), p)
     relerr = abs(obs.phi2 - exact) / exact
     @printf("%-22s exact_phi2=%.6e relerr=%.3e\n", label, exact, relerr)
     return nothing

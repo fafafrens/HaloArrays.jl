@@ -18,7 +18,7 @@ using MPI
 import HaloArrays:
     AbstractHaloArray, AbstractSingleHaloArray, AbstractSerialHaloArray,
     AbstractHaloCollection, HaloArray, MultiHaloArray, ArrayOfHaloArray,
-    MaybeHaloArray, global_size, field_shape, interior_size, interior_view,
+    MaybeHaloArray, field_shape, interior_size, interior_view,
     communicator, _first_field, gather_haloarray, is_active, getdata,
     append_haloarray!
 
@@ -26,7 +26,7 @@ const _Parent = Union{HDF5.File,HDF5.Group}
 
 # ---- geometry helpers ---------------------------------------------------------
 
-@inline _dataset_dims(halo::AbstractSingleHaloArray) = global_size(halo)
+@inline _dataset_dims(halo::AbstractSingleHaloArray) = size(halo)
 @inline _dataset_dims(halo::ArrayOfHaloArray) =
     (field_shape(halo)..., _dataset_dims(first(parent(halo)))...)
 

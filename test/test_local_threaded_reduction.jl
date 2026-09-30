@@ -221,8 +221,8 @@ using LinearAlgebra: dot, norm
         @test all(≈(c * 2.0 - s * 1.0), interior_view(tx, 1))
 
         # field collection: delegators apply the single-array kernel per field
-        cx = LocalMultiHaloArray((; u = mk([1.0, 2, 3, 4]), v = mk([5.0, 6, 7, 8])))
-        cy = LocalMultiHaloArray((; u = mk([10.0, 20, 30, 40]), v = mk([50.0, 60, 70, 80])))
+        cx = MultiHaloArray((; u = mk([1.0, 2, 3, 4]), v = mk([5.0, 6, 7, 8])))
+        cy = MultiHaloArray((; u = mk([10.0, 20, 30, 40]), v = mk([50.0, 60, 70, 80])))
         rotate!(cx, cy, c, s)
         @test collect(interior_view(cx.u)) ≈ c .* [1.0, 2, 3, 4] .+ s .* [10.0, 20, 30, 40]
         @test collect(interior_view(cy.v)) ≈ c .* [50.0, 60, 70, 80] .- s .* [5.0, 6, 7, 8]

@@ -78,7 +78,7 @@ u = HaloArray(Float64, owned_dims, halo_w, topology; boundary_condition=:periodi
 if rank == 0
     println("interior_size: ", interior_size(u))
     println("storage_size : ", storage_size(u))   # includes ghost cells
-    println("global_size  : ", global_size(u))    # entire distributed grid
+    println("global_size  : ", size(u))    # entire distributed grid
     println("halo_width   : ", halo_width(u))
 end
 
@@ -142,7 +142,7 @@ boundary_condition!(u)
 #
 # To collapse only SOME axes (and keep a distributed array) pass `dims=`
 # to the ordinary functions — sum(u; dims), maximum(u; dims), … — or call
-# mapreduce_haloarray_dims(f, op, u, dims) directly.  The result is a
+# mapreduce(f, op, u; dims=dims) directly.  The result is a
 # MaybeHaloArray on the sub-topology that spans the kept axes (active only
 # on the coordinate-0 slice of the reduced axes); free! it when done to
 # release its sub-communicator.  For a reduction run every step, build a
@@ -236,7 +236,7 @@ function run_distributed_heat_2d(; owned_dims=(16,16), alpha=1.0, nt=50, cfl=0.4
     u_nxt = similar(u)
     du    = similar(u)
 
-    n_global = global_size(u)
+    n_global = size(u)
     dx = (1.0/n_global[1], 1.0/n_global[2])
     dt = cfl / (alpha * (inv(dx[1]^2) + inv(dx[2]^2)))
 

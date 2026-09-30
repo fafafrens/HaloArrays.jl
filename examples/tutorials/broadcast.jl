@@ -162,7 +162,7 @@ println("u .+ 100   : ", collect(interior_view(w)))   # [103, 100, 109, 100]
 # 5. MultiHaloArray BROADCAST
 # ============================================================
 #
-# Broadcast on a MultiHaloArray (or LocalMultiHaloArray) applies
+# Broadcast on a MultiHaloArray applies
 # the operation field-by-field.  Each field's interior is updated
 # independently.  The field structure is preserved in the result.
 #
@@ -176,7 +176,7 @@ println()
 println("Section 5 — MultiHaloArray broadcast")
 println("-" ^ 40)
 
-state = LocalMultiHaloArray(Float64, (4,), 1;
+state = MultiHaloArray(LocalHaloArray, Float64, (4,), 1;
     boundary_conditions=(
         rho = ((Repeating(), Repeating()),),
         vel = ((Reflecting(), Reflecting()),),
@@ -191,7 +191,7 @@ println("rho after *=2 : ", collect(interior_view(state.rho)))   # [2, 4, 6, 8]
 println("vel after *=2 : ", collect(interior_view(state.vel)))   # [0.2, 0.4, 0.6, 0.8]
 
 # Add two MultiHaloArrays (same field names)
-state2 = LocalMultiHaloArray(Float64, (4,), 1;
+state2 = MultiHaloArray(LocalHaloArray, Float64, (4,), 1;
     boundary_conditions=(
         rho = ((Repeating(), Repeating()),),
         vel = ((Reflecting(), Reflecting()),),
@@ -240,9 +240,9 @@ println("tu .+= tv → max : ", maximum(tu))   # should be 3.0
 result_t = tu .* tv .+ 1.0    # parallel out-of-place
 println("tu*tv+1 → max   : ", maximum(result_t))   # should be 7.0
 
-# ThreadedMultiHaloArray broadcast behaves the same — per-field,
+# A MultiHaloArray of ThreadedHaloArray fields broadcasts the same way — per-field,
 # per-tile in parallel:
-tstate = ThreadedMultiHaloArray(Float64, tile_size, 1;
+tstate = MultiHaloArray(ThreadedHaloArray, Float64, tile_size, 1;
     dims=tile_dims,
     boundary_conditions=(
         a=((Repeating(), Repeating()),),

@@ -117,7 +117,7 @@ end
     parent(local_state[1,1])[I] = 42
     @test q[1] == 42
 
-    named = LocalMultiHaloArray(Float64, (3,2), 1;
+    named = MultiHaloArray(LocalHaloArray, Float64, (3,2), 1;
         fields=(:a,:b,:c,:d), boundary_condition=:periodic)
     exercise_siteview(named)
     @test siteview(named, I)[2] == parent(named.b)[I]

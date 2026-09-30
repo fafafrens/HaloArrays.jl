@@ -257,12 +257,12 @@ end
 # ---- public exchange API ----------------------------------------------
 # All return `halo`, like every other backend's mutating driver.
 
-halo_exchange!(halo::HaloArray) = (halo_exchange_waitall_unsafe!(halo); halo)
+halo_exchange!(halo::HaloArray; threads::Bool=false) = (halo_exchange_waitall_unsafe!(halo); halo)
 
 start_halo_exchange!(halo::HaloArray)  = (start_halo_exchange_async_unsafe!(halo); halo)
 finish_halo_exchange!(halo::HaloArray) = (end_halo_exchange_async_wait_unsafe!(halo); halo)
 
-function synchronize_halo!(halo::HaloArray)
+function synchronize_halo!(halo::HaloArray; threads::Bool=false)
     halo_exchange!(halo)
     boundary_condition!(halo)
     return halo
@@ -277,13 +277,13 @@ end
 # released within the call) and returns a fresh reduced array every time. The
 # result has the reduced dimensions DROPPED and lives on the coordinate-0 slice
 # of the topology (a `MaybeHaloArray`, inactive elsewhere) — same semantics as
-# `mapreduce_haloarray_dims`, unlike Base's kept-singleton-dims shape. The
+# `mapreduce(…; dims)`, unlike Base's kept-singleton-dims shape. The
 # result owns its sub-communicator: `free!` it when reducing in a loop.
 function Base.mapreduce(
         f::F, op::OP, halo::HaloArray, etc::Vararg{HaloArray}; kws...,
     ) where {F<:Function,OP}
     dims = _dims_kwarg(kws, 1 + length(etc))
-    dims === nothing || return mapreduce_haloarray_dims(f, op, halo, dims)
+    dims === nothing || return _mapreduce_dims(f, op, halo, dims)
     comm   = communicator(halo)
     rlocal = _local_mapreduce(mapreduce, f, op, (halo, etc...))  # shared local part (no init)
     # Normalize AFTER the local part (add_sum's integer widening already
@@ -370,7 +370,7 @@ LinearAlgebra.norm(u::HaloArray) =
 Base.sum(u::HaloArray) =
     _allreduce(_local_sum(identity, u), +, communicator(u); iscommutative=true)
 
-# mapreduce_haloarray_dims (all backends + collections) lives in reduction.jl.
+# _mapreduce_dims (all backends + collections) lives in reduction.jl.
 
 
 # ============================================================
@@ -381,7 +381,7 @@ Base.sum(u::HaloArray) =
 # no hand-rolled color/key splits), the reduced output array is preallocated,
 # and each `reduce!` costs a single `MPI.Reduce`. `free!` releases the
 # communicators deterministically. The one-shot forms (`sum(u; dims=…)`,
-# `mapreduce_haloarray_dims`) run a transient plan per call and transfer the
+# `mapreduce(…; dims)`) run a transient plan per call and transfer the
 # output — with its sub-communicator — to the caller; reusing a plan skips the
 # per-call communicator construction entirely.
 # ============================================================
@@ -481,7 +481,7 @@ produce, except that its element type was fixed at plan construction, so
 throws with a pointer to the one-shot forms). `u` must share the plan's
 geometry (and, on MPI, its topology; there each call costs a single
 `MPI.Reduce` and is collective — every rank of the topology must call it).
-Same result as [`mapreduce_haloarray_dims`](@ref).
+Same result as `mapreduce(f, op, u; dims=…)`.
 """
 function reduce!(plan::MPIDimReductionPlan, f::F, op::OP, u::HaloArray{T,N}) where {F,OP,T,N}
     plan.freed[] && throw(ArgumentError("reduce! on a freed DimReductionPlan"))
@@ -534,7 +534,7 @@ end
     free!(m::MaybeHaloArray) -> m
 
 Release the MPI sub-communicator owned by a reduced array returned by a
-`dims=` keyword reduction or [`mapreduce_haloarray_dims`](@ref) (a no-op for
+`dims=` keyword reduction (a no-op for
 serial-backed results, which own no communicator, so backend-generic code can
 call it unconditionally). Optional —
 unreleased communicators are reclaimed at `MPI.Finalize` — but calling it when

@@ -20,8 +20,8 @@ validity is predictable and the hot path stays local.
   - [`HaloArray`](@ref) — distributed over an MPI [`CartesianTopology`](@ref)
 - **Explicit semantics** — global `size`/`axes`, [`interior_size`](@ref)/[`interior_axes`](@ref),
   [`interior_view`](@ref), `parent`; no hidden communication in `getindex`.
-- **Multi-field containers** ([`MultiHaloArray`](@ref), `LocalMultiHaloArray`,
-  `ThreadedMultiHaloArray`, [`ArrayOfHaloArray`](@ref)) that exchange every field at once.
+- **Multi-field containers** ([`MultiHaloArray`](@ref) on any backend,
+  [`ArrayOfHaloArray`](@ref)) that exchange every field at once.
 - **Boundary conditions** — periodic, reflecting, antireflecting, repeating,
   custom, and *coupled* (characteristic) conditions across fields.
 - **Global reductions** — `sum`, `maximum`, `minimum`, `dot`, `norm`, … that

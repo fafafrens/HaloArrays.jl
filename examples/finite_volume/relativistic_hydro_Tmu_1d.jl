@@ -199,7 +199,7 @@ function run_Tmu_sod(; A=1.0, nx=400, cfl=0.4, t_end=0.4)
     eos = UltraRelGas(A)
     dx  = 1.0 / nx
 
-    u  = LocalMultiHaloArray(Float64, (nx,), 1;
+    u  = MultiHaloArray(LocalHaloArray, Float64, (nx,), 1;
         fields=(:N, :M, :E), boundary_condition=:repeating)
     u1 = similar(u)
     du = similar(u)

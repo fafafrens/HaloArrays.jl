@@ -79,7 +79,7 @@ edges), so it is safe to call on a decomposed grid. The condition per
 [`Periodic`](@ref), [`Reflecting`](@ref), [`Repeating`](@ref),
 [`Antireflecting`](@ref), [`NoBoundaryCondition`](@ref).
 """
-function boundary_condition!(halo::AbstractSingleHaloArray{T,N}) where {T,N}
+function boundary_condition!(halo::AbstractSingleHaloArray{T,N}; threads::Bool=false) where {T,N}
     _foreach_face(boundary_condition!, halo, Val(N))
     return halo
 end
@@ -139,8 +139,8 @@ boundary_condition!(::ThreadedHaloArray, ::Integer, ::Side, ::Dim, ::NoBoundaryC
 # Collection delegators
 # ============================================================
 
-function boundary_condition!(c::AbstractHaloCollection)
-    foreach_field!(boundary_condition!, c)
+function boundary_condition!(c::AbstractHaloCollection; threads::Bool=false)
+    foreach_field!(f -> boundary_condition!(f; threads), c)
     return c
 end
 

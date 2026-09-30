@@ -5,9 +5,7 @@
 - [`HaloArray`](@ref): MPI-backed array with local interior cells and halo cells.
 - [`LocalHaloArray`](@ref): no-MPI halo array for local problems and boundary-condition-only workflows.
 - [`ThreadedHaloArray`](@ref): thread-local tiled halo array for shared-memory workflows.
-- `ThreadedMultiHaloArray`: named collection of threaded halo fields.
 - [`MultiHaloArray`](@ref): named collection of MPI-backed halo fields.
-- `LocalMultiHaloArray`: named collection of local halo fields.
 - [`ArrayOfHaloArray`](@ref): index-addressed collection of fields.
 - [`CartesianTopology`](@ref): MPI Cartesian topology helper.
 
@@ -201,8 +199,8 @@ array on **every** backend, so backend-agnostic chaining like
 For `ThreadedHaloArray`, the default `halo_exchange!`, `boundary_condition!`, and
 `synchronize_halo!` use a serial tile loop because this is allocation-free and
 fastest for small halo surfaces. Explicit threaded variants
-(`halo_exchange_threads!`, `boundary_condition_threads!`,
-`synchronize_halo_threads!`) are available; reach for them only after
+(`halo_exchange!(u; threads=true)`, `boundary_condition!(u; threads=true)`,
+`synchronize_halo!(u; threads=true)`) are available; reach for them only after
 benchmarking, when the halo surface is large.
 
 ## Boundary conditions
@@ -332,7 +330,7 @@ synchronize_halo!(u)
 
 ### When multi-field containers are useful
 
-`MultiHaloArray` / `ThreadedMultiHaloArray` (named) and `ArrayOfHaloArray`
+`MultiHaloArray` (named) and `ArrayOfHaloArray`
 (indexed) help when a solver evolves several fields on one grid (`rho`, `u`, `v`,
 `p`, …). Use one when all fields share geometry and halo width and you want a
 single `synchronize_halo!(state)` for the whole state. Keep independent arrays
@@ -373,7 +371,7 @@ conditions):
 #   ThreadedHaloArray → ThreadedHaloArray (tiled by the kept dimensions)
 #   HaloArray (MPI)   → MaybeHaloArray    (see below)
 r = sum(u; dims=2)
-r = mapreduce_haloarray_dims(abs2, +, u, 2)   # explicit form, same result
+r = mapreduce(abs2, +, u; dims=2)   # explicit form, same result
 ```
 
 For an MPI `HaloArray` the collapsed result lives only on the **coordinate‑0
@@ -437,7 +435,7 @@ sum(state; dims=3)                       # reduce spatial-y → collection (nx,)
 sum(state; dims=(1, 3))                  # both → one HaloArray (nx,)
 ```
 
-`mapreduce_haloarray_dims(f, op, c, dims)` and `DimReductionPlan(c, dims)` accept
+`mapreduce(f, op, c; dims=dims)` and `DimReductionPlan(c, dims)` accept
 collections the same way.
 
 ### Gather and output

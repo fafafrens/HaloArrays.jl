@@ -40,7 +40,7 @@ struct UnimplementedBC <: AbstractCoupledBoundaryCondition end
     @testset "swap BC ($(nameof(typeof(bc)))) on $(nameof(typeof(make())))" for bc in (SwapBC(), LegacySwapBC()), make in (
             () -> ArrayOfHaloArray(LocalHaloArray, Float64, (2,), (nx,), 1;
                       boundary_condition=((:noboundary, :noboundary),)),
-            () -> LocalMultiHaloArray(Float64, (nx,), 1; boundary_conditions=(
+            () -> MultiHaloArray(LocalHaloArray, Float64, (nx,), 1; boundary_conditions=(
                       a=((NoBoundaryCondition(), NoBoundaryCondition()),),
                       b=((NoBoundaryCondition(), NoBoundaryCondition()),))),
         )

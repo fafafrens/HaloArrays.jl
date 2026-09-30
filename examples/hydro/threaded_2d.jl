@@ -48,7 +48,7 @@ function threaded_ideal_hydro_state(nx, ny; tile_dims=nothing, halo=1, boundary_
         throw(ArgumentError("ny=$ny must be divisible by tile_dims[2]=$(tile_dims[2])"))
 
     tile_size = (nx ÷ tile_dims[1], ny ÷ tile_dims[2])
-    return ThreadedMultiHaloArray(Float64, tile_size, halo;
+    return MultiHaloArray(ThreadedHaloArray, Float64, tile_size, halo;
         dims=tile_dims,
         boundary_conditions=ideal_hydro_boundary_conditions(boundary_condition))
 end
@@ -67,7 +67,7 @@ end
 
 function main()
     u, info, initial, final = run_threaded_ideal_hydro_2d()
-    print_hydro_summary("ThreadedMultiHaloArray", u, info, initial, final)
+    print_hydro_summary("MultiHaloArray(ThreadedHaloArray)", u, info, initial, final)
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__

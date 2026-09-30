@@ -130,14 +130,14 @@ end
     # on the topology and must agree with the explicit mapreduce_haloarray_dims
     # path; order-sensitive folds stay rejected.
     kw_sum = sum(ha; dims=1)
-    kw_ref = mapreduce_haloarray_dims(identity, +, ha, 1)
+    kw_ref = mapreduce(identity, +, ha; dims=1)
     @test kw_sum isa MaybeHaloArray
     @test is_active(kw_sum) == is_active(kw_ref)
     if is_active(kw_sum)
         @test collect(interior_view(parent(kw_sum))) == collect(interior_view(parent(kw_ref)))
     end
     kw_max = maximum(ha; dims=2)
-    kw_max_ref = mapreduce_haloarray_dims(identity, max, ha, 2)
+    kw_max_ref = mapreduce(identity, max, ha; dims=2)
     @test is_active(kw_max) == is_active(kw_max_ref)
     if is_active(kw_max)
         @test collect(interior_view(parent(kw_max))) == collect(interior_view(parent(kw_max_ref)))
@@ -145,7 +145,7 @@ end
     @test_throws ArgumentError mapfoldl(identity, +, ha; dims=1)
     foreach(free!, (kw_sum, kw_ref, kw_max, kw_max_ref))
 
-    maybe_reduced = mapreduce_haloarray_dims(identity, +, ha, (1,))
+    maybe_reduced = mapreduce(identity, +, ha; dims=(1,))
 
     if topology.cart_coords[1] == 0
         @test is_active(maybe_reduced)
@@ -153,7 +153,7 @@ end
         reduced_global_size = (topology.dims[2] * local_dims[2],)
         reduced_owned_size = (local_dims[2],)
         @test size(reduced) == reduced_global_size
-        @test global_size(reduced) == reduced_global_size
+        @test size(reduced) == reduced_global_size
         @test interior_size(reduced) == reduced_owned_size
         @test halo_width(reduced) == halo
 

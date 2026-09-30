@@ -26,7 +26,7 @@ _rm_on_root(path, comm) = (MPI.Comm_rank(comm) == 0 && rm(path; force=true); MPI
     fill_from_global_indices!(f, u)
 
     # reduce over dim 2 → MaybeHaloArray (global length GX, distributed over dim 1)
-    r = mapreduce_haloarray_dims(identity, +, u, 2)
+    r = mapreduce(identity, +, u; dims=2)
     @test r isa MaybeHaloArray
 
     ref = Float64[sum(f((i, j)) for j in 1:GY) for i in 1:GX]   # serial reference

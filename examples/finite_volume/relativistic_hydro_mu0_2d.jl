@@ -174,7 +174,7 @@ function run_mu0_blast_2d(; a=1.0, n=160, cfl=0.3, t_end=0.20,
     eos = ConformalGas(a)
     dx = 1.0 / n;  dy = 1.0 / n
 
-    u  = LocalMultiHaloArray(Float64, (n, n), 1;
+    u  = MultiHaloArray(LocalHaloArray, Float64, (n, n), 1;
         fields=(:Mx, :My, :E), boundary_condition=:repeating)
     u1 = similar(u)
     du = similar(u)

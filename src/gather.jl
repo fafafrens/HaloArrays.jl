@@ -8,7 +8,7 @@ Assemble the global interior (ghost-free) data of `u` into an ordinary `Array`.
 - [`LocalHaloArray`](@ref) / [`ThreadedHaloArray`](@ref): returns the assembled
   interior directly (tiles are stitched in global order); `root` is ignored.
 - [`ArrayOfHaloArray`](@ref): an array with the field axes first, then the
-  spatial axes (`field_shape(u)..., global_size...`). [`MultiHaloArray`](@ref):
+  spatial axes (`field_shape(u)..., size(field)...`). [`MultiHaloArray`](@ref):
   a `NamedTuple` with one assembled array per field. Distributed collections
   follow the `HaloArray` rule per field.
 - [`MaybeHaloArray`](@ref) (a `dims=` reduction result): active ranks gather on
@@ -47,8 +47,8 @@ function gather_haloarray(halo::HaloArray; root::Int=0)
 
     # Reconstruct the full array at the root
     if rank == root
-        global_size = ntuple(i -> dims[i] * owned_shape[i], Val(N))
-        global_array = Array{T}(undef, global_size)
+        gsize = ntuple(i -> dims[i] * owned_shape[i], Val(N))
+        global_array = Array{T}(undef, gsize)
 
         for r in 0:nproc-1
             coords_r = MPI.Cart_coords(comm, r) |> Tuple
@@ -69,7 +69,7 @@ end
 gather_haloarray(halo::LocalHaloArray; root::Int=0) = Array(interior_view(halo))
 
 function gather_haloarray(halo::ThreadedHaloArray{T,N}; root::Int=0) where {T,N}
-    data = Array{T}(undef, global_size(halo))
+    data = Array{T}(undef, size(halo))
     owned = tile_size(halo)
     for tile_id in 1:tile_count(halo)
         coords = tile_coordinates(halo, tile_id)

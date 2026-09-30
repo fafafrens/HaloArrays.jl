@@ -73,7 +73,7 @@ end
 
 @testset "MultiHaloArray neighbor_tile_id fallback" begin
     nthreads = max(1, Threads.nthreads())
-    state = ThreadedMultiHaloArray(Float64, (8,), 1;
+    state = MultiHaloArray(ThreadedHaloArray, Float64, (8,), 1;
         dims=(nthreads,),
         boundary_conditions=(
             a=((Repeating(), Repeating()),),

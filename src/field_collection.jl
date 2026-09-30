@@ -35,8 +35,8 @@ and broadcast/reduce over all fields at once (`state .*= 2`).
 
 `boundary_conditions` is a `NamedTuple` mapping each field name to its boundary
 condition; the field names are taken from its keys. The backing fields are
-[`HaloArray`](@ref)s (MPI) here; use [`LocalMultiHaloArray`](@ref) or
-[`ThreadedMultiHaloArray`](@ref) for local/threaded fields, or pass a
+[`HaloArray`](@ref)s (MPI) here; use `MultiHaloArray(LocalHaloArray, …)` or
+`MultiHaloArray(ThreadedHaloArray, …)` for local/threaded fields, or pass a
 `NamedTuple` of pre-built arrays.
 
 Use this when a solver evolves several fields on one grid (e.g. `rho`, `u`, `v`,

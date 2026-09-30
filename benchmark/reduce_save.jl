@@ -45,7 +45,7 @@ function main()
     topology = make_periodic_topology(comm, ndims_)
     u = HaloArray(Float64, owned, halo, topology; boundary_condition=:periodic)
     fill_benchmark_data!(u)
-    gsize = global_size(u)
+    gsize = size(u)
 
     dir = tempdir()
     fA  = joinpath(dir, "rs_gather_reduce_$(nproc).h5")
@@ -69,14 +69,14 @@ function main()
     end
     # reduce in place, gather the small result to root, write on root.
     reduce_gather_save = function ()
-        mr = mapreduce_haloarray_dims(identity, +, u, rdim)
+        mr = mapreduce(identity, +, u; dims=rdim)
         r  = is_active(mr) ? gather_haloarray(parent(mr); root=0) : nothing
         root_write(fB, r)
         free!(mr)
     end
     # reduce in place, write the distributed result collectively (NO gather).
     reduce_save = function ()
-        mr = mapreduce_haloarray_dims(identity, +, u, rdim)
+        mr = mapreduce(identity, +, u; dims=rdim)
         append_haloarray!(fC, "profile", mr)             # per-rank block, collective
         free!(mr)
     end
@@ -84,7 +84,7 @@ function main()
     # correctness: the full-gather reduction and the in-place reduction agree on root.
     g = gather_haloarray(u; root=0)
     a = rank == 0 ? dropdims(sum(g; dims=rdim); dims=rdim) : nothing
-    mr = mapreduce_haloarray_dims(identity, +, u, rdim)
+    mr = mapreduce(identity, +, u; dims=rdim)
     b  = is_active(mr) ? gather_haloarray(parent(mr); root=0) : nothing
     free!(mr)
     if rank == 0 && a !== nothing && b !== nothing

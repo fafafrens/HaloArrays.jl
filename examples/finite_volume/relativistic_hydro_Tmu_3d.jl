@@ -175,7 +175,7 @@ function run_Tmu_blast_3d(; A=1.0, n=32, cfl=0.3, t_end=0.14,
     eos = UltraRelGas(A)
     dx = 1.0 / n;  dy = dx;  dz = dx;  dV = dx * dy * dz
 
-    u  = LocalMultiHaloArray(Float64, (n, n, n), 1;
+    u  = MultiHaloArray(LocalHaloArray, Float64, (n, n, n), 1;
         fields=(:N, :Mx, :My, :Mz, :E), boundary_condition=:repeating)
     u1 = similar(u)
     du = similar(u)

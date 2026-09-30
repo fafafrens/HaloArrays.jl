@@ -35,12 +35,12 @@ end
     @test HaloArrays.n_field(fields) == 4
     @test ndims(fields) == 3
     @test size(fields) == (2, 2, 3)
-    @test size(fields) == global_size(fields)
-    @test axes(fields) == map(Base.OneTo, global_size(fields))
+    @test size(fields) == size(fields)
+    @test axes(fields) == map(Base.OneTo, size(fields))
     @test interior_axes(fields) == map(Base.OneTo, interior_size(fields))
     @test interior_size(fields) == (2, 2, 3)
     @test interior_size(fields) == (2, 2, 3)
-    @test global_size(fields) == (2, 2, 3)
+    @test size(fields) == (2, 2, 3)
     @test storage_size(fields) == (2, 2, 5)
     @test halo_width(fields) == 1
     @test parent(fields) === arrays
@@ -154,7 +154,7 @@ end
     @test local_fields[1] isa LocalHaloArray
     @test field_shape(local_fields) == (2,)
     @test size(local_fields) == (2, 3)
-    @test size(local_fields) == global_size(local_fields)
+    @test size(local_fields) == size(local_fields)
     @test interior_axes(local_fields) == map(Base.OneTo, interior_size(local_fields))
     @test interior_size(local_fields) == (2, 3)
     @test local_fields[2, 3] == 30

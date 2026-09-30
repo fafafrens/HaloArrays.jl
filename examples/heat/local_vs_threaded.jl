@@ -26,7 +26,7 @@ end
 
 function stepped_threaded(; tile_size=(32, 32), dims=(2, 2), nt=100)
     u  = ThreadedHaloArray(Float64, tile_size, 1; dims, boundary_condition=:periodic)
-    dx = ntuple(d -> 1.0 / global_size(u)[d], Val(2))
+    dx = ntuple(d -> 1.0 / size(u)[d], Val(2))
     dt = stable_heat_dt(ALPHA, CFL, dx)
     fill_centered_gaussian!(u; baseline=1.0, amplitude=1.0)
     solve_heat!(u; alpha=ALPHA, dt, dx, nt)
@@ -35,7 +35,7 @@ end
 
 # ---- (2) OrdinaryDiffEq with Tsit5 ----------------------------------------
 function diffeq_solve(u0; nt=100, reltol=1.0e-6, abstol=1.0e-8)
-    dx    = ntuple(d -> 1.0 / global_size(u0)[d], Val(ndims(u0)))
+    dx    = ntuple(d -> 1.0 / size(u0)[d], Val(ndims(u0)))
     tspan = (0.0, nt * stable_heat_dt(ALPHA, CFL, dx))
     sol   = solve(ODEProblem(heat_rhs!, u0, tspan, (ALPHA, dx)), Tsit5(); reltol, abstol)
     u = sol.u[end]

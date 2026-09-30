@@ -195,7 +195,7 @@ function run_cylindrical_blast_threaded(; A=1.0, nx=400, ntiles=max(1, Threads.n
     dr  = (r_max - r_min) / nx
 
     # Axis (inner): N, E even → reflecting; M odd → antireflecting. Outer: outflow.
-    u  = ThreadedMultiHaloArray(Float64, (nx ÷ ntiles,), 1; dims=(ntiles,),
+    u  = MultiHaloArray(ThreadedHaloArray, Float64, (nx ÷ ntiles,), 1; dims=(ntiles,),
         boundary_conditions=(
             N=((:reflecting, :repeating),),
             M=((:antireflecting, :repeating),),

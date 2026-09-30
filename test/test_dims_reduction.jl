@@ -31,7 +31,7 @@ _fill_global!(u, g) = (for I in CartesianIndices(axes(u)); u[Tuple(I)...] = g(Tu
         @test vec(collect(interior_view(maximum(lu; dims=2)))) ≈ refmax_d2
 
         # Explicit form agrees; free! is a safe no-op on serial results.
-        re = mapreduce_haloarray_dims(abs2, +, lu, 2)
+        re = mapreduce(abs2, +, lu; dims=2)
         @test vec(collect(interior_view(re))) ≈
               [sum(abs2(g((i, j))) for j in 1:GY) for i in 1:GX]
         @test free!(r) === r
@@ -108,7 +108,7 @@ _fill_global!(u, g) = (for I in CartesianIndices(axes(u)); u[Tuple(I)...] = g(Tu
         @test interior_view(sum(aog; dims=(1, 2)))[1, 1] ≈ sum(10p + q for p in 1:2, q in 1:3)
 
         # Explicit collection form agrees with the kwarg form.
-        rme = mapreduce_haloarray_dims(identity, +, m, 3)
+        rme = mapreduce(identity, +, m; dims=3)
         @test vec(collect(interior_view(rme.arrays.a))) ≈ ref_d2
 
         # Reducing every axis is rejected (use sum(c)).
@@ -199,7 +199,7 @@ _fill_global!(u, g) = (for I in CartesianIndices(axes(u)); u[Tuple(I)...] = g(Tu
         # `return_types` (the actual inference property) rather than `@inferred`
         # / `@allocated`, which vary across Julia versions.
         lu = LocalHaloArray(Float64, (GX, GY), 1; boundary_condition=:periodic)
-        red_local(u, d) = mapreduce_haloarray_dims(identity, +, u, d)
+        red_local(u, d) = mapreduce(identity, +, u; dims=d)
         plan_reduce(u, d) = (p = DimReductionPlan(u, d); reduce!(p, identity, +, u))
 
         @test isconcretetype(only(Base.return_types(red_local,  (typeof(lu), Int))))

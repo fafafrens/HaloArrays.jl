@@ -157,7 +157,7 @@ function run_Tmu_diffeq(; A=1.0, nx=400, cfl=0.4, t_end=0.4)
     eos = UltraRelGas(A)
     dx  = 1.0 / nx
 
-    u0 = LocalMultiHaloArray(Float64, (nx,), 1;
+    u0 = MultiHaloArray(LocalHaloArray, Float64, (nx,), 1;
         fields=(:N, :M, :E), boundary_condition=:repeating)
 
     function set_state!(i, n, p)

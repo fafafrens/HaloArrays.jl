@@ -105,7 +105,7 @@ unpack_args_ha( args::Tuple{Any}) = (unpack_ha(args[1]),)
 @inline function _tile_global_view(x::AbstractArray, ref::ThreadedHaloArray{T,N},
         tile_id::Integer) where {T,N}
     Base.require_one_based_indexing(x)
-    gsz = global_size(ref)
+    gsz = _global_size(ref)
     # the tile's global window, from the shared tile-origin helper
     gr  = _tile_interior_range(tile_coordinates(ref, tile_id), tile_size(ref))
     rngs = ntuple(Val(N)) do d

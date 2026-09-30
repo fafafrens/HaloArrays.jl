@@ -70,7 +70,7 @@ function _fv_rhs_1d!(du::ThreadedHaloArray, u::ThreadedHaloArray, numerical_flux
 end
 
 function _fv_fill_profile_1d!(u::_FVSerialHaloArray, profile)
-    nx = global_size(u)[1]
+    nx = size(u)[1]
 
     fill_from_global_indices!(u) do I
         profile((I[1] - 0.5) / nx)
@@ -81,7 +81,7 @@ function _fv_fill_profile_1d!(u::_FVSerialHaloArray, profile)
 end
 
 function _fv_fill_profile_1d!(u::ThreadedHaloArray, profile)
-    nx = global_size(u)[1]
+    nx = size(u)[1]
 
     for I in CartesianIndices(axes(u))
         u[Tuple(I)...] = profile((I[1] - 0.5) / nx)
@@ -100,7 +100,7 @@ function _fv_solve_diffeq_1d(rhs!, u0, p; dt, steps, info=(;))
     return u, sol, merge(info, (; dt, time=last(tspan)))
 end
 
-_fv_mass(u) = sum(u) / global_size(u)[1]
+_fv_mass(u) = sum(u) / size(u)[1]
 _fv_mass(u, dx) = dx * sum(u)
 
 function _fv_run_local_1d(fill_initial!, solve_problem!; nx, halo=1, boundary_condition=:periodic, kwargs...)
@@ -154,7 +154,7 @@ end
 
 function _fv_max_exact_error_1d(u::_FVSerialHaloArray, exact_value, args...)
     h = halo_width(u)
-    nx = global_size(u)[1]
+    nx = size(u)[1]
     local_error = 0.0
 
     @inbounds for I in CartesianIndices(interior_range(u))
@@ -169,7 +169,7 @@ end
 
 function _fv_max_exact_error_1d(u::ThreadedHaloArray, exact_value, args...)
     h = halo_width(u)
-    nx = global_size(u)[1]
+    nx = size(u)[1]
     owned_tile_size = tile_size(u)
 
     return tmapreduce(tile_id -> begin
@@ -197,7 +197,7 @@ function _fv_root_print_summary(label, u, sol, info, initial_mass, final_mass; e
             @printf(
                 "%-32s nx=%d dt=%.3e time=%.3f saved=%d max=%.6f mass_error=%.3e\n",
                 label,
-                global_size(u)[1],
+                size(u)[1],
                 info.dt,
                 info.time,
                 length(sol.t) - 1,
@@ -208,7 +208,7 @@ function _fv_root_print_summary(label, u, sol, info, initial_mass, final_mass; e
             @printf(
                 "%-32s nx=%d a=%.2f dt=%.3e time=%.3f saved=%d max=%.6f mass_error=%.3e exact_error=%.3e\n",
                 label,
-                global_size(u)[1],
+                size(u)[1],
                 info.velocity,
                 info.dt,
                 info.time,

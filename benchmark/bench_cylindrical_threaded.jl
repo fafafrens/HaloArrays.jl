@@ -137,7 +137,7 @@ function run_bench(; A=1.0, nx=12000, cfl=0.4, r_min=0.0, r_max=1.0, r_mid=0.3, 
                cons_from_prim(eos, T, T * log(n / (A * T^3)), 0.0))
 
     # serial state
-    us = LocalMultiHaloArray(Float64, (nx,), 1; boundary_conditions=(
+    us = MultiHaloArray(LocalHaloArray, Float64, (nx,), 1; boundary_conditions=(
         N=((:reflecting, :repeating),), M=((:antireflecting, :repeating),),
         E=((:reflecting, :repeating),)))
     for i in 1:nx
@@ -148,7 +148,7 @@ function run_bench(; A=1.0, nx=12000, cfl=0.4, r_min=0.0, r_max=1.0, r_mid=0.3, 
     serial_ms = 1e3 * time_steps(rel_rhs_serial!, us, similar(us), similar(us), eos, r_min, dr, dt, nsteps)
 
     # threaded state (nt tiles)
-    ut = ThreadedMultiHaloArray(Float64, (nx ÷ nt,), 1; dims=(nt,), boundary_conditions=(
+    ut = MultiHaloArray(ThreadedHaloArray, Float64, (nx ÷ nt,), 1; dims=(nt,), boundary_conditions=(
         N=((:reflecting, :repeating),), M=((:antireflecting, :repeating),),
         E=((:reflecting, :repeating),)))
     h = halo_width(ut.N)

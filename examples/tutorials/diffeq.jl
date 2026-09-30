@@ -13,7 +13,7 @@
 #   2. The RHS contract — synchronize_halo! in the RHS
 #   3. Solving a scalar decay ODE (LocalHaloArray)
 #   4. Heat equation with Tsit5 (adaptive time-stepping)
-#   5. Multi-field ODE state (LocalMultiHaloArray)
+#   5. Multi-field ODE state (MultiHaloArray)
 #   6. ThreadedHaloArray as ODE state
 #   7. Comparing DiffEq with manual time-stepping
 # ============================================================
@@ -198,10 +198,10 @@ println("  saved time points: ", round.(sol_heat.t; digits=2))
 println("  typeof(sol.u[1])  : ", typeof(sol_heat.u[1]))   # LocalHaloArray
 
 # ============================================================
-# 5. MULTI-FIELD ODE STATE (LocalMultiHaloArray)
+# 5. MULTI-FIELD ODE STATE (MultiHaloArray)
 # ============================================================
 #
-# Pass a MultiHaloArray (or LocalMultiHaloArray) directly as the
+# Pass a MultiHaloArray directly as the
 # ODE state.  The solver treats it as a single composite array.
 # Access named fields inside the RHS through the named-tuple API.
 #
@@ -239,7 +239,7 @@ end
 function run_reaction_diffusion(; n=(24, 24), tspan=(0.0, 0.2))
     dx  = 1.0 / n[1]
     bc  = ((Periodic(), Periodic()), (Periodic(), Periodic()))
-    u0  = LocalMultiHaloArray(Float64, n, 1;
+    u0  = MultiHaloArray(LocalHaloArray, Float64, n, 1;
         boundary_conditions=(A=bc, B=bc))
 
     fill_from_global_indices!(u0.A) do I

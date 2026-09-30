@@ -12,7 +12,7 @@ burgers_rhs!(du, u, dx, t) = _fv_rhs_1d!(du, u, rusanov_flux, dx)
 fill_burgers_initial_condition!(u) = _fv_fill_profile_1d!(u, burgers_initial_profile)
 
 function solve_burgers_diffeq(u0; steps=300, cfl=0.4)
-    dx = 1 / global_size(u0)[1]
+    dx = 1 / size(u0)[1]
     dt = cfl * dx / 1.5
     return _fv_solve_diffeq_1d(burgers_rhs!, u0, dx; dt, steps, info=(; dx))
 end

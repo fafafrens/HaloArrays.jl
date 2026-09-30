@@ -10,14 +10,14 @@ common API isn't buried among the advanced kernel and threading internals.
 - Distributed (MPI): [`HaloArray`](@ref) on a [`CartesianTopology`](@ref)
 - Shared-memory tiles: [`ThreadedHaloArray`](@ref)
 - Several fields on one grid: [`MultiHaloArray`](@ref) — built per backend with
-  [`LocalMultiHaloArray`](@ref) / [`ThreadedMultiHaloArray`](@ref) — or, for
+  `MultiHaloArray(LocalHaloArray, …)` / `MultiHaloArray(ThreadedHaloArray, …)` — or, for
   index- rather than name-addressed fields, [`ArrayOfHaloArray`](@ref)
 
 ## Reading and sizing the data
 
 - [`interior_view`](@ref) — a view of the ghost-free cells this process owns
   (read or write the owned region directly)
-- Sizes: [`interior_size`](@ref) (owned), [`global_size`](@ref) (whole domain),
+- Sizes: [`interior_size`](@ref) (owned), `size` (whole domain),
   [`storage_size`](@ref) (padded backing); index ranges with
   [`interior_range`](@ref)
 - `parent` — the field container of a collection; `field_storages` —

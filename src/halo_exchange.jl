@@ -25,7 +25,7 @@ Returns `u` on every backend.
 For overlapping communication with computation, use the split
 [`start_halo_exchange!`](@ref) / [`finish_halo_exchange!`](@ref) pair.
 """
-halo_exchange!(halo::LocalHaloArray) = halo
+halo_exchange!(halo::LocalHaloArray; threads::Bool=false) = halo
 
 """
     start_halo_exchange!(u)
@@ -48,19 +48,21 @@ or thread tiles) **and** apply the [`boundary_condition!`](@ref) at the physical
 domain edges. Call this before any stencil that reads ghost cells. Works on a
 single array or a collection (refreshing every field). Returns `u`.
 
-For [`ThreadedHaloArray`](@ref), `synchronize_halo!` is serial; a parallel
-variant [`synchronize_halo_threads!`](@ref) exists but the serial version
-usually wins for the common case (halo width 1, tiles ≈ threads).
+`threads=true` runs the per-tile work of a [`ThreadedHaloArray`](@ref) in
+parallel through its [`thread_backend`](@ref) (also for [`halo_exchange!`](@ref)
+and [`boundary_condition!`](@ref)); the default serial tile loop is
+allocation-free and usually wins for the common case (halo width 1, tiles ≈
+threads). Other backends accept and ignore the keyword.
 """
-function synchronize_halo!(halo::LocalHaloArray)
+function synchronize_halo!(halo::LocalHaloArray; threads::Bool=false)
     boundary_condition!(halo)
     return halo
 end
 
 # ---- AbstractHaloCollection (covers MultiHaloArray + ArrayOfHaloArray) --
 
-function halo_exchange!(halo::AbstractHaloCollection)
-    foreach_field!(halo_exchange!, halo)
+function halo_exchange!(halo::AbstractHaloCollection; threads::Bool=false)
+    foreach_field!(f -> halo_exchange!(f; threads), halo)
     return halo
 end
 
@@ -74,9 +76,9 @@ function finish_halo_exchange!(halo::AbstractHaloCollection)
     return halo
 end
 
-function synchronize_halo!(halo::AbstractHaloCollection)
-    halo_exchange!(halo)
-    boundary_condition!(halo)
+function synchronize_halo!(halo::AbstractHaloCollection; threads::Bool=false)
+    halo_exchange!(halo; threads)
+    boundary_condition!(halo; threads)
     return halo
 end
 

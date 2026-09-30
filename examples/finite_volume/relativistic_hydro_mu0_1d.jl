@@ -143,7 +143,7 @@ function run_mu0_sod(; a=1.0, nx=400, cfl=0.4, t_end=0.4)
     eos = ConformalGas(a)
     dx  = 1.0 / nx
 
-    u  = LocalMultiHaloArray(Float64, (nx,), 1;
+    u  = MultiHaloArray(LocalHaloArray, Float64, (nx,), 1;
         fields=(:M, :E), boundary_condition=:repeating)
     u1 = similar(u)
     du = similar(u)

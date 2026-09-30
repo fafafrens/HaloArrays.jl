@@ -90,8 +90,8 @@ Reference (4 ranks, 128²; median): `mpi_mapreduce` ~68 µs, `threaded` all/any
 
 ## Ideal Hydro
 
-Benchmarks the 2D ideal-hydrodynamics example with `LocalMultiHaloArray`,
-`ThreadedMultiHaloArray`, and MPI `MultiHaloArray`. The output includes full-run
+Benchmarks the 2D ideal-hydrodynamics example with a `MultiHaloArray` of
+local, threaded, and MPI fields. The output includes full-run
 allocation bytes and diagnostics for the package-owned fill, RHS, and
 wave-speed reduction kernels.
 
@@ -167,8 +167,8 @@ julia --project=benchmark benchmark/threaded.jl --owned-size=128,128 --tile-dims
 
 Compares the `ThreadBackend` implementations — `OhMyThreadsBackend` (default),
 `SerialBackend`, and `PolyesterBackend` — on the operations that dispatch through
-the trait (`tile_foreach` / `tile_mapreduce`): `synchronize_halo_threads!`,
-`boundary_condition_threads!`, `fill!`, `mapreduce`, and broadcast. Each case
+the trait (`tile_foreach` / `tile_mapreduce`): `synchronize_halo!(u; threads=true)`,
+`boundary_condition!(u; threads=true)`, `fill!`, `mapreduce`, and broadcast. Each case
 reports timing and per-call allocations. **Start Julia with `-t N`** or the
 backends cannot be distinguished.
 
@@ -256,7 +256,7 @@ JULIA_NUM_THREADS=4 julia --project=benchmark benchmark/threaded_sync_variants.j
 ### Reference results (8 threads, Apple M-series; median, indicative only)
 
 `serial` is the production `synchronize_halo!`; `threads` is
-`synchronize_halo_threads!` (an `OhMyThreads` `tforeach`).
+`synchronize_halo!(u; threads=true)` (an `OhMyThreads` `tforeach`).
 
 | Config | tiles | serial | threads | winner |
 | --- | ---: | ---: | ---: | --- |

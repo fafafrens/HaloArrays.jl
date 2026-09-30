@@ -186,7 +186,7 @@ end
 
 # ─── Shared driver: relativistic Sod shock tube ───────────────────────────────
 #
-# `make_state(nx)` builds the LocalMultiHaloArray with the chosen boundary
+# `make_state(nx)` builds the MultiHaloArray with the chosen boundary
 # condition; `apply_bc!(u)` is the per-step boundary strategy (see above);
 # `eos` is any AbstractEOS (defaults to a γ=5/3 ideal gas).
 
