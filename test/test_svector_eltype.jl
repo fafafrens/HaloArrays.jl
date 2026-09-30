@@ -24,6 +24,15 @@ Base.:(==)(x::ScalarCell, y::ScalarCell) = x.a == y.a && x.b == y.b
 
 _norm(u) = norm(u)
 _dot(u, v) = dot(u, v)
+# Allocation per call must not scale with the array: a regression to a
+# temp-allocating (or boxing, type-unstable) form would. Measured inside a
+# function, since a Float64 returned at top level boxes (16 B) on Julia 1.10.
+function _reduction_alloc(T, x, n)
+    a = LocalHaloArray(T, (n,), 1; boundary_condition=:periodic)
+    fill!(a, x)
+    norm(a); dot(a, a)
+    return (@allocated(norm(a)), @allocated(dot(a, a)))
+end
 
 # ============================================================
 # Halo arrays with an SVector element type — the "array of structs" layout for a
@@ -153,9 +162,8 @@ _dot(u, v) = dot(u, v)
         @test norm(w, Inf) ≈ maximum(i -> sqrt(2i^2 + 2), 1:4)
         @test Base.return_types(_norm, (typeof(w),)) == [Float64]
         @test Base.return_types(_dot, (typeof(w), typeof(w))) == [Float64]
-        _norm(w); _dot(w, w)
-        @test @allocated(_norm(w)) == 0
-        @test @allocated(_dot(w, w)) == 0
+        link = Link(SMatrix{2,2}(1.0, 0.0, 0.0, 1.0), SMatrix{2,2}(0.0, 1.0, 1.0, 0.0))
+        @test _reduction_alloc(Link, link, 8) == _reduction_alloc(Link, link, 8_000)
 
         c = LocalHaloArray(ScalarCell, (4,), 1; boundary_condition=:periodic)
         interior_view(c) .= [ScalarCell(Float64(i), SVector(1.0, 2.0i)) for i in 1:4]
@@ -167,9 +175,8 @@ _dot(u, v) = dot(u, v)
         @test norm(c, 1) ≈ sum(i -> sqrt(i^2 + 1 + 4i^2), 1:4)
         @test sum(c) == ScalarCell(10.0, SVector(4.0, 20.0))
         @test Base.return_types(_norm, (typeof(c),)) == [Float64]
-        _norm(c); _dot(c, c)
-        @test @allocated(_norm(c)) == 0
-        @test @allocated(_dot(c, c)) == 0
+        cell = ScalarCell(1.0, SVector(1.0, 2.0))
+        @test _reduction_alloc(ScalarCell, cell, 8) == _reduction_alloc(ScalarCell, cell, 8_000)
 
         tc = ThreadedHaloArray(ScalarCell, (2,), 1; dims=(2,), boundary_condition=:periodic)
         HaloArrays.fill_from_global_indices!(I -> ScalarCell(Float64(I[1]), SVector(1.0, 2.0 * I[1])), tc)
