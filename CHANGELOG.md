@@ -4,7 +4,7 @@ All notable changes to HaloArrays.jl are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.8.0] — 2026-09-30
 
 ### Changed
 - **Breaking:** `siteview` of an `ArrayOfHaloArray` is shaped like the fields:
@@ -14,6 +14,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   now need operands of the site's shape; use `vec(q)` with flat buffers.
   `copy(q)` and `similar(q)` return arrays of that shape. One-dimensional field
   shapes, `MultiHaloArray`, and single arrays are unaffected.
+- The Metal lattice examples (`phi4_metal_2d.jl`, `phi4_metal_philox_2d.jl`,
+  `su2_wilson_metal_2d.jl`) no longer refresh halos and synchronize the device at
+  the end of every sweep; 2.6–6.5× faster on an M2 with bit-identical results.
+
+### Fixed
+- The README's MPI `HaloArray` constructor example threw on a periodic topology;
+  it now passes `boundary_condition=:periodic`.
 
 ## [0.7.0] — 2026-09-30
 
