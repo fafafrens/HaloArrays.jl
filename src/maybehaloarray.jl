@@ -118,17 +118,6 @@ function apply_if_active(f::Function, m::MaybeHaloArray, args...; kwargs...)
     m.active ? f(m.data, args...; kwargs...) : nothing
 end
 
-function apply_if_active!(f::Function, m::MaybeHaloArray, args...; kwargs...)
-    if is_active(m)
-        f(m.data, args...; kwargs...)
-    end
-    return m
-end
-
-function setactive(m::MaybeHaloArray, flag::Bool)
-    MaybeHaloArray{eltype(m),ndims(m),typeof(m.data)}(m.data, flag)
-end
-
 macro maybe_delegate(funs...)
     bodies = Expr[]
     for fn in funs

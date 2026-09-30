@@ -338,11 +338,6 @@ end
     @views return tile_parent(halo, tile_id)[ranges...]
 end
 
-@inline function full_view(halo::ThreadedHaloArray, tile_id::Integer)
-    ranges = full_range(halo, tile_id)
-    @views return tile_parent(halo, tile_id)[ranges...]
-end
-
 @inline function edge_view(halo::ThreadedHaloArray, s::Side, ::Dim{D}, tile_id::Int) where {D}
     return edge_view(tile_parent(halo, tile_id), s, Dim(D), halo_width(halo))
 end

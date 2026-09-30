@@ -151,7 +151,7 @@ _rank_owned(topology, r, owned_dims) = (coords = Tuple(MPI.Cart_coords(topology.
         mom = similar(rho)
         fill!(rho, rank + 50); fill!(mom, rank + 150)
         # collection-global dims: field axis 1, spatial axes 2… → spatial dim 1 is (2,)
-        reduced_fields = HaloArrays.mapreduce_mhaloarray_dims(identity, +, MultiHaloArray((; rho, mom)), (2,))
+        reduced_fields = sum(MultiHaloArray((; rho, mom)); dims=2)
         path = _h5("maybe_multi", comm)
         _rm_on_root(path, comm)
         append_haloarray!(path, "reduced", reduced_fields)

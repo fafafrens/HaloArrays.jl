@@ -71,11 +71,6 @@ end
     @views return halo.data[ranges...]
 end
 
-function full_view(halo::LocalHaloArray)
-    ranges = full_range(halo)
-    @views return halo.data[ranges...]
-end
-
 @inline edge_view(array::LocalHaloArray, s::Side, d::Dim)  = edge_view(parent(array), s, d, halo_width(array))
 @inline ghost_view(array::LocalHaloArray, s::Side, d::Dim) = ghost_view(parent(array), s, d, halo_width(array))
 # versors, Base.similar dispatchers, Base.map!/map inherited from AbstractSingleHaloArray

@@ -66,16 +66,15 @@ which the benchmark environment provides.
 
 ```sh
 mpiexec -n 4 julia --project=benchmark benchmark/halo_exchange.jl --owned-size=128,128
-mpiexec -n 4 julia --project=benchmark benchmark/halo_exchange.jl --ndims=3 --owned-size=64,64,64 --methods=blocking,waitall_unsafe,waitall,async_unsafe
+mpiexec -n 4 julia --project=benchmark benchmark/halo_exchange.jl --ndims=3 --owned-size=64,64,64 --methods=blocking,split
 ```
 
-`blocking` is the public `halo_exchange!` path. The other method names benchmark
-compatibility wrappers and implementation variants.
+`blocking` is `halo_exchange!` (one `Waitall`); `split` is the
+`start_halo_exchange!` / `finish_halo_exchange!` pair (one `Wait` per face).
 
 Reference (4 ranks, 2×2, 128², 8-core M-series; median): `blocking` ~49 µs,
-`public_split` ~51 µs, `async` ~55 µs, `waitall` ~75 µs. All variants land in
-the ~50–75 µs range; the async/split paths mainly help when overlapped with
-compute, not in this back-to-back microbenchmark.
+`split` ~51 µs. The split path mainly helps when overlapped with compute, not
+in this back-to-back microbenchmark.
 
 ## Reductions
 
