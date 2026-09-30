@@ -404,8 +404,28 @@ function Base.mapreduce(
     # Normalize AFTER the local part (add_sum's integer widening already
     # happened in rlocal): the builtin MPI_SUM/MPI_PROD then applies — required
     # on non-Intel, where MPI.jl cannot register custom reduction ops.
-    op_mpi = MPI.Op(_normalize_reduction_op(op), typeof(rlocal); iscommutative=true)
-    return _apply_init(op, MPI.Allreduce(rlocal, op_mpi, comm), kws)  # seed once, after Allreduce
+    r = _allreduce(rlocal, _normalize_reduction_op(op), comm; iscommutative=true)
+    return _apply_init(op, r, kws)  # seed once, after Allreduce
+end
+
+# MPI.jl sends an AbstractArray value down its strided-buffer path, which a
+# static array cannot serve (`strides(::SVector)` is undefined), so `sum` of
+# SVector cells failed on this backend while `norm`/`dot` (scalar results)
+# worked. Reduce a static value inside an isbits wrapper with a named `+`:
+# MPI.jl then takes its scalar path with its statically registered `+`, which
+# works on non-Intel too (a closure as the reduction op does not). Only `+` is
+# defined on the wrapper; no other reduction op is defined on static arrays.
+struct _MPICell{T}
+    x::T
+end
+Base.:+(a::_MPICell, b::_MPICell) = _MPICell(a.x + b.x)
+
+@inline _allreduce(x, op, comm; iscommutative) =
+    MPI.Allreduce(x, MPI.Op(op, typeof(x); iscommutative), comm)
+function _allreduce(x::StaticArray, op, comm; iscommutative)
+    _normalize_reduction_op(op) === (+) || throw(ArgumentError(
+        "only `+` reductions of static-array cells are supported over MPI (got `$op`)"))
+    return MPI.Allreduce(_MPICell(x), MPI.Op(+, _MPICell{typeof(x)}; iscommutative=true), comm).x
 end
 
 for func in (:mapfoldl, :mapfoldr)
@@ -418,8 +438,7 @@ for func in (:mapfoldl, :mapfoldr)
             "with `dims=` (commutative ops only)."))
         comm   = communicator(halo)
         rlocal = _local_mapreduce($func, f, op, (halo, etc...); kws...)  # shared local part
-        op_mpi = MPI.Op(op, typeof(rlocal); iscommutative=false)
-        MPI.Allreduce(rlocal, op_mpi, comm)
+        _allreduce(rlocal, op, comm; iscommutative=false)
     end
 end
 
@@ -464,7 +483,7 @@ LinearAlgebra.dot(x::HaloArray, y::HaloArray) =
 LinearAlgebra.norm(u::HaloArray) =
     sqrt(MPI.Allreduce(_local_sum(_elt_abs2, u), +, communicator(u)))
 Base.sum(u::HaloArray) =
-    MPI.Allreduce(_local_sum(identity, u), +, communicator(u))
+    _allreduce(_local_sum(identity, u), +, communicator(u); iscommutative=true)
 
 # mapreduce_haloarray_dims (all backends + collections) lives in reduction.jl.
 

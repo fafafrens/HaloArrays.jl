@@ -1,7 +1,7 @@
 using Test
 using MPI
 using HaloArrays
-using StaticArrays: SVector
+using StaticArrays: SVector, SMatrix
 using LinearAlgebra: dot, norm
 
 function _periodic_bc(::Val{N}) where {N}
@@ -68,6 +68,27 @@ end
     @test minimum(array_fields) ≈ mapreduce(identity, min, array_fields)
     @test all(x -> x >= 0, array_fields)
     @test any(x -> x == 1, array_fields)
+end
+
+@testset "MPI sum/mapreduce of SVector cells (static-array result)" begin
+    # MPI.jl sends an AbstractArray value down its strided-buffer path, which
+    # an SVector cannot serve; the library reduces static cells in an isbits
+    # wrapper instead. norm/dot never hit this (their results are scalars).
+    comm = MPI.COMM_WORLD
+    nranks = MPI.Comm_size(comm)
+    topology = CartesianTopology(comm, (0,); periodic=(true,))
+    hv = HaloArray(SVector{3,Float64}, (4,), 1, topology; boundary_condition=_periodic_bc(Val(1)))
+    fill!(hv, SVector(1.0, 2.0, 3.0))
+    total = 4nranks .* SVector(1.0, 2.0, 3.0)
+    @test sum(hv) == total
+    @test mapreduce(identity, +, hv) == total
+    @test mapreduce(x -> 2x, +, hv) == 2 .* total
+    @test mapfoldl(identity, +, hv) == total
+    @test sum(hv; init=SVector(1.0, 1.0, 1.0)) == total .+ 1
+    hm = HaloArray(SMatrix{2,2,Float64,4}, (4,), 1, topology; boundary_condition=_periodic_bc(Val(1)))
+    fill!(hm, SMatrix{2,2}(1.0, 2.0, 3.0, 4.0))
+    @test sum(hm) == 4nranks .* SMatrix{2,2}(1.0, 2.0, 3.0, 4.0)
+    @test norm(hv) ≈ sqrt(4nranks * 14)
 end
 
 @testset "MPI norm/dot on SVector cells (global scalar reduction)" begin

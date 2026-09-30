@@ -64,7 +64,7 @@ alternative named in the error.
 | form | why | instead |
 |:-----|:----|:--------|
 | `u[3]` — linear indexing of an N-d array | would route generic code through a slow scalar path (and is ill-defined across ranks) | `interior_view(u)[3]`, or loop `eachindex(u)` / `CartesianIndices(interior_view(u))` |
-| `u[:]`, `u[:, 1]`, `u[1:2, :]` — slices | would materialize cross-rank/tile data cell by cell | slice the view: `interior_view(u)[:, 1]` (this rank's cells), or [`gather_haloarray`](@ref)`(u)` for the true global array (MPI, root-only) |
+| `u[:]`, `u[:, 1]`, `u[1:2, :]` — slices | would materialize cross-rank/tile data cell by cell | slice the view: `interior_view(u)[:, 1]` (this rank's cells), or [`gather_haloarray`](@ref)`(u)` for the true global array (on MPI: root only) |
 
 The idiomatic patterns:
 
@@ -73,7 +73,7 @@ interior_view(u) .= data              # bulk initialisation of this rank's cells
 fill_from_global_indices!(f, u)       # initial condition from GLOBAL indices, any backend
 interior_view(u)[2, :]                # arbitrary slicing — it is a normal array
 parent(u)[I...]                       # storage coordinates (ghosts included), for stencils
-A = gather_haloarray(u)               # the assembled global array on the MPI root
+A = gather_haloarray(u)               # the assembled global array (on the MPI root)
 ```
 
 Everything performance-relevant — broadcast, reductions, `dot`/`norm`, the
@@ -442,8 +442,10 @@ collections the same way.
 
 ### Gather and output
 
-[`gather_haloarray`](@ref)`(u)` collects a distributed array's global data onto
-the root rank; [`gather_and_save_haloarray`](@ref) and the collective
+[`gather_haloarray`](@ref)`(u)` assembles the global interior into an `Array` on
+any backend (a copy on `LocalHaloArray`, stitched tiles on `ThreadedHaloArray`,
+the root rank on MPI; collections give the field axes first, or a `NamedTuple`
+per field); [`gather_and_save_haloarray`](@ref) and the collective
 `append_haloarray_to_file!` write reduced or full arrays to HDF5 (weak
 dependency). See [Arrays, layout & reductions](@ref) for the full API.
 

@@ -51,7 +51,8 @@ common API isn't buried among the advanced kernel and threading internals.
 ## Distributed (MPI)
 
 - [`CartesianTopology`](@ref) — the process decomposition
-- [`gather_haloarray`](@ref) — collect a distributed array onto one rank
+- [`gather_haloarray`](@ref) — assemble the global interior into an `Array` on any
+  backend (on MPI: the root rank only)
 
 ## HDF5 output
 

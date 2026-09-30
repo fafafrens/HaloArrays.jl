@@ -42,83 +42,16 @@ function _hdf5_open_or_create_group(parent, name::String)
     return haskey(parent, name) ? HDF5.open_group(parent, name) : HDF5.create_group(parent, name)
 end
 
-function _hdf5_snapshot(halo::LocalHaloArray)
-    return Array(interior_view(halo))
-end
-
-function _hdf5_snapshot(halo::ThreadedHaloArray{T,N}) where {T,N}
-    data = Array{T}(undef, global_size(halo))
-    owned_tile_size = tile_size(halo)
-
-    for tile_id in 1:tile_count(halo)
-        coords = tile_coordinates(halo, tile_id)
-        inds = ntuple(Val(N)) do d
-            first_owned = (coords[d] - 1) * owned_tile_size[d] + 1
-            last_owned = coords[d] * owned_tile_size[d]
-            first_owned:last_owned
-        end
-        data[inds...] .= interior_view(halo, tile_id)
-    end
-
-    return data
-end
-
-function _hdf5_snapshot(halo::ArrayOfHaloArray)
-    first(parent(halo)) isa HaloArray &&
-        throw(ArgumentError("snapshot assembly for MPI ArrayOfHaloArray is not supported; write it collectively with append_haloarray! or write_haloarray_timestep!"))
-
-    data = Array{eltype(halo)}(undef, _hdf5_dataset_dims(halo))
-    for I in CartesianIndices(parent(halo))
-        field_data = _hdf5_snapshot(parent(halo)[I])
-        inds = (Tuple(I)..., ntuple(_ -> Colon(), ndims(field_data))...)
-        data[inds...] .= field_data
-    end
-
-    return data
-end
-
-function _hdf5_snapshot(halo::MultiHaloArray)
+# Local (per-rank) block for the serial timestep writers, and the gathered
+# global array for the gather-and-save entry points; both are gather_haloarray
+# (serial arrays assemble their tiles, distributed ones gather onto root).
+_hdf5_snapshot(halo::AbstractSerialHaloArray) = gather_haloarray(halo)
+function _hdf5_snapshot(halo::AbstractHaloCollection)
     _hdf5_comm(halo) === nothing ||
-        throw(ArgumentError("snapshot assembly for MPI MultiHaloArray is not supported; use gather_and_save_haloarray or write it collectively with append_haloarray!"))
-
-    fields = map(_hdf5_snapshot, values(halo.arrays))
-    return NamedTuple{keys(halo.arrays)}(fields)
+        throw(ArgumentError("snapshot assembly for a distributed collection is not supported; use gather_and_save_haloarray or write it collectively with append_haloarray!"))
+    return gather_haloarray(halo)
 end
-
-function _hdf5_gather_snapshot(halo::HaloArray; root::Int=0)
-    return gather_haloarray(halo; root=root)
-end
-
-function _hdf5_gather_snapshot(halo::AbstractSerialHaloArray; root::Int=0)
-    return _hdf5_snapshot(halo)
-end
-
-function _hdf5_gather_snapshot(halo::ArrayOfHaloArray; root::Int=0)
-    comm = _hdf5_comm(halo)
-    comm === nothing && return _hdf5_snapshot(halo)
-
-    rank = MPI.Comm_rank(comm)
-    data = nothing
-    for I in CartesianIndices(parent(halo))
-        field_data = gather_haloarray(parent(halo)[I]; root=root)
-        if rank == root
-            if data === nothing
-                data = Array{eltype(halo)}(undef, (field_shape(halo)..., size(field_data)...))
-            end
-            inds = (Tuple(I)..., ntuple(_ -> Colon(), ndims(field_data))...)
-            data[inds...] .= field_data
-        end
-    end
-
-    return data
-end
-
-function _hdf5_gather_snapshot(halo::MultiHaloArray; root::Int=0)
-    fields = map(values(halo.arrays)) do field
-        _hdf5_gather_snapshot(field; root=root)
-    end
-    return NamedTuple{keys(halo.arrays)}(fields)
-end
+_hdf5_gather_snapshot(halo; root::Int=0) = gather_haloarray(halo; root=root)
 
 function _hdf5_write_snapshot!(parent, name::String, data::AbstractArray)
     write(parent, name, data)

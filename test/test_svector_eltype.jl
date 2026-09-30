@@ -2,6 +2,37 @@ using Test
 using HaloArrays
 using StaticArrays
 using LinearAlgebra: norm, dot
+import LinearAlgebra
+
+# A struct that acts as a scalar cell: it has the vector-space contract (zero,
+# +, -, *, abs2, dot, norm) but is not iterable, like a user's field bundle.
+struct ScalarCell
+    a::Float64
+    b::SVector{2,Float64}
+end
+Base.zero(::Type{ScalarCell}) = ScalarCell(0.0, zero(SVector{2,Float64}))
+Base.zero(::ScalarCell) = zero(ScalarCell)
+Base.:+(x::ScalarCell, y::ScalarCell) = ScalarCell(x.a + y.a, x.b + y.b)
+Base.:-(x::ScalarCell, y::ScalarCell) = ScalarCell(x.a - y.a, x.b - y.b)
+Base.:-(x::ScalarCell) = ScalarCell(-x.a, -x.b)
+Base.:*(s::Number, x::ScalarCell) = ScalarCell(s * x.a, s * x.b)
+Base.:*(x::ScalarCell, s::Number) = s * x
+Base.abs2(x::ScalarCell) = abs2(x.a) + sum(abs2, x.b)
+LinearAlgebra.dot(x::ScalarCell, y::ScalarCell) = x.a * y.a + dot(x.b, y.b)
+LinearAlgebra.norm(x::ScalarCell) = sqrt(abs2(x))
+Base.:(==)(x::ScalarCell, y::ScalarCell) = x.a == y.a && x.b == y.b
+
+_norm(u) = norm(u)
+_dot(u, v) = dot(u, v)
+# Allocation per call must not scale with the array: a regression to a
+# temp-allocating (or boxing, type-unstable) form would. Measured inside a
+# function, since a Float64 returned at top level boxes (16 B) on Julia 1.10.
+function _reduction_alloc(T, x, n)
+    a = LocalHaloArray(T, (n,), 1; boundary_condition=:periodic)
+    fill!(a, x)
+    norm(a); dot(a, a)
+    return (@allocated(norm(a)), @allocated(dot(a, a)))
+end
 
 # ============================================================
 # Halo arrays with an SVector element type — the "array of structs" layout for a
@@ -114,6 +145,47 @@ using LinearAlgebra: norm, dot
         tref = [SVector(Float64(i), 0.0, -1.0) for i in 1:6]
         @test norm(t)   ≈ norm(tref)
         @test dot(t, t) ≈ dot(tref, tref)
+    end
+
+    @testset "norm / dot for nested static and custom cells" begin
+        # `_elt_abs2` assumed every non-number cell iterates over numbers:
+        # an SVector of SMatrix (gauge links) hit `abs2(::SMatrix)`, and a
+        # struct cell hit `iterate`. Both must reduce like Base, type-stably.
+        Link = SVector{2, SMatrix{2,2,Float64,4}}
+        w = LocalHaloArray(Link, (4,), 1; boundary_condition=:periodic)
+        interior_view(w) .= [Link(SMatrix{2,2}(i, 0.0, 0.0, i), SMatrix{2,2}(0.0, 1.0, 1.0, 0.0)) for i in 1:4]
+        sq = sum(i -> 2i^2 + 2, 1:4)
+        @test norm(w) ≈ sqrt(sq)
+        @test dot(w, w) ≈ sq
+        w2 = similar(w); w2 .= 2 .* w
+        @test dot(w, w2) ≈ 2sq
+        @test norm(w, Inf) ≈ maximum(i -> sqrt(2i^2 + 2), 1:4)
+        @test Base.return_types(_norm, (typeof(w),)) == [Float64]
+        @test Base.return_types(_dot, (typeof(w), typeof(w))) == [Float64]
+        link = Link(SMatrix{2,2}(1.0, 0.0, 0.0, 1.0), SMatrix{2,2}(0.0, 1.0, 1.0, 0.0))
+        @test _reduction_alloc(Link, link, 8) == _reduction_alloc(Link, link, 8_000)
+
+        c = LocalHaloArray(ScalarCell, (4,), 1; boundary_condition=:periodic)
+        interior_view(c) .= [ScalarCell(Float64(i), SVector(1.0, 2.0i)) for i in 1:4]
+        synchronize_halo!(c)
+        @test parent(c)[1] == ScalarCell(4.0, SVector(1.0, 8.0))
+        sc = sum(i -> i^2 + 1 + 4i^2, 1:4)
+        @test norm(c) ≈ sqrt(sc)
+        @test dot(c, c) ≈ sc
+        @test norm(c, 1) ≈ sum(i -> sqrt(i^2 + 1 + 4i^2), 1:4)
+        @test sum(c) == ScalarCell(10.0, SVector(4.0, 20.0))
+        @test Base.return_types(_norm, (typeof(c),)) == [Float64]
+        cell = ScalarCell(1.0, SVector(1.0, 2.0))
+        @test _reduction_alloc(ScalarCell, cell, 8) == _reduction_alloc(ScalarCell, cell, 8_000)
+
+        tc = ThreadedHaloArray(ScalarCell, (2,), 1; dims=(2,), boundary_condition=:periodic)
+        HaloArrays.fill_from_global_indices!(I -> ScalarCell(Float64(I[1]), SVector(1.0, 2.0 * I[1])), tc)
+        @test norm(tc) ≈ sqrt(sc)
+        @test dot(tc, tc) ≈ sc
+
+        mc = MultiHaloArray((x=c, y=w))
+        @test norm(mc) ≈ sqrt(sc + sq)
+        @test dot(mc, mc) ≈ sc + sq
     end
 
     @testset "copy / zero / similar preserve the SVector eltype" begin
