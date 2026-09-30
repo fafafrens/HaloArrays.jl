@@ -25,7 +25,8 @@ struct FieldCollection{T,D,S,C} <: AbstractHaloCollection{T,D,S}
 end
 
 """
-    MultiHaloArray(HaloArray, T, owned_dims, halo[, topology]; boundary_conditions)
+    MultiHaloArray(Backend, T, dims, halo[, topology]; boundary_conditions)
+    MultiHaloArray(Backend, T, dims, halo[, topology]; fields, boundary_condition)
     MultiHaloArray(named_tuple_of_fields)
 
 A collection of several **named** halo-array fields sharing the same geometry
@@ -33,11 +34,13 @@ A collection of several **named** halo-array fields sharing the same geometry
 name (`state.rho`), refresh them all with one [`synchronize_halo!`](@ref)`(state)`,
 and broadcast/reduce over all fields at once (`state .*= 2`).
 
-`boundary_conditions` is a `NamedTuple` mapping each field name to its boundary
-condition; the field names are taken from its keys. The backing fields are
-[`HaloArray`](@ref)s (MPI) here; use `MultiHaloArray(LocalHaloArray, …)` or
-`MultiHaloArray(ThreadedHaloArray, …)` for local/threaded fields, or pass a
-`NamedTuple` of pre-built arrays.
+`Backend` is the field type: [`LocalHaloArray`](@ref), [`ThreadedHaloArray`](@ref)
+(with `dims=` for the tile grid), or [`HaloArray`](@ref) (MPI, with a
+`topology`). `boundary_conditions` is a `NamedTuple` mapping each field name to
+its boundary condition, the field names being its keys; `fields=(:rho, :p)` with
+one `boundary_condition` for all of them is the shorthand. Or pass a `NamedTuple`
+of pre-built arrays, which must share geometry, halo width, backend, and (for
+threaded fields) tiling.
 
 Use this when a solver evolves several fields on one grid (e.g. `rho`, `u`, `v`,
 `p`). For an integer/matrix-indexed collection instead of names, see
@@ -46,12 +49,14 @@ Use this when a solver evolves several fields on one grid (e.g. `rho`, `u`, `v`,
 
 # Examples
 ```julia
-state = LocalMultiHaloArray(Float64, (64, 64), 1; boundary_conditions=(
+state = MultiHaloArray(LocalHaloArray, Float64, (64, 64), 1; boundary_conditions=(
     rho = ((Periodic(), Periodic()), (Periodic(), Periodic())),
     p   = ((Reflecting(), Reflecting()), (Periodic(), Periodic())),
 ))
 state.rho .= 1.0
 synchronize_halo!(state)   # refreshes every field
+q = MultiHaloArray(ThreadedHaloArray, Float64, (32, 32), 1; dims=(2, 2),
+                   fields=(:rho, :p), boundary_condition=:periodic)
 ```
 """
 const MultiHaloArray{T,D,S,C<:NamedTuple} = FieldCollection{T,D,S,C}

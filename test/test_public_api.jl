@@ -2,10 +2,18 @@ using Test
 using MPI
 using HaloArrays
 
+struct LegacyHalo <: HaloArrays.AbstractSingleHaloArray{Float64,2} end
+HaloArrays.global_size(::LegacyHalo) = (7, 5)
+struct NoSizeHalo <: HaloArrays.AbstractSingleHaloArray{Float64,2} end
+
 @testset "deprecated names still work and agree with the new spellings" begin
     u = LocalHaloArray(Float64, (4, 3), 1; boundary_condition=:periodic)
     fill!(u, 2.0)
     @test global_size(u) == size(u) == (4, 3)
+    # A downstream array type that implemented the old global_size interface
+    # still gets `size` through it; one with neither method errors cleanly.
+    @test size(LegacyHalo()) == (7, 5)
+    @test_throws MethodError size(NoSizeHalo())
     inactive = MaybeHaloArray(u, false)          # an MPI dims= result on a non-owning rank
     @test size(inactive) == (0, 0)               # by design
     @test global_size(inactive) == (4, 3)        # the alias keeps looking through, as before

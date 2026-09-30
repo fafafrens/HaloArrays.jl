@@ -589,3 +589,15 @@ function global_size(u)
                  "`MaybeHaloArray` use `size(getdata(u))` for the wrapped geometry.", :global_size)
     return _global_size(u)
 end
+const _deprecated_global_size = which(global_size, Tuple{Any})
+
+# A downstream AbstractSingleHaloArray that implemented the formerly exported
+# `global_size` keeps working during the deprecation window: `size` reaches its
+# method through this fallback (the built-in backends' `_global_size` methods
+# are more specific). A type with neither method gets a MethodError rather than
+# a recursion through the deprecated generic `global_size`.
+function _global_size(u::AbstractSingleHaloArray)
+    which(global_size, Tuple{typeof(u)}) === _deprecated_global_size &&
+        throw(MethodError(_global_size, (u,)))
+    return global_size(u)
+end
