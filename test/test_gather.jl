@@ -41,5 +41,22 @@ using HaloArrays
         @test gathered === nothing
     end
 
+    # Collections gather per field: an array with the field axis first, or a
+    # NamedTuple of per-field arrays; nothing on the other ranks.
+    hb = copy(ha)
+    interior_view(hb) .*= 2
+    aoh = gather_haloarray(ArrayOfHaloArray([ha, hb]); root=0)
+    nt = gather_haloarray(MultiHaloArray((a=ha, b=hb)); root=0)
+    if MPI.Comm_rank(topology.cart_comm) == 0
+        @test size(aoh) == (2, size(gathered)...)
+        @test aoh[1, :, :] == gathered
+        @test aoh[2, :, :] == 2 .* gathered
+        @test nt.a == gathered
+        @test nt.b == 2 .* gathered
+    else
+        @test aoh === nothing
+        @test nt.a === nothing && nt.b === nothing
+    end
+
     MPI.Barrier(comm)
 end

@@ -50,6 +50,7 @@ include_test(name) = include(joinpath(@__DIR__, name))
         include_test("test_local_threaded_reduction.jl")
         include_test("test_dims_reduction.jl")
         include_test("test_svector_eltype.jl")
+        include_test("test_gather_local.jl")
         include_test("test_hdf5_local_threaded.jl")
         # Adapt integration: JLArrays (GPUArrays' CPU backend) is a test extra —
         # available under Pkg.test, skipped on a bare --project=. run.

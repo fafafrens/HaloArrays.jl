@@ -4,6 +4,26 @@ All notable changes to HaloArrays.jl are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `gather_haloarray` works on every backend and on collections: `LocalHaloArray`
+  returns a copy of its interior, `ThreadedHaloArray` stitches its tiles,
+  `ArrayOfHaloArray` gives an array with the field axes first, and
+  `MultiHaloArray` a `NamedTuple` of per-field arrays. The HDF5 extension now
+  assembles snapshots through it.
+
+### Fixed
+- `norm` and `dot` work for any cell type: nested static arrays (an `SVector` of
+  `SMatrix` links) recurse to their scalars, and a struct cell that defines
+  `abs2`/`dot` uses them. Both threw a `MethodError` since 0.4.1 (the helper
+  assumed every non-number cell iterates over numbers). Numeric and flat
+  `SVector` cells are unchanged, and all cases are type-stable with no
+  allocations.
+- `sum` and `mapreduce` of static-array cells (`SVector`, `SMatrix`, nested) on
+  the MPI backend threw `MethodError: strides(::SVector)`: MPI.jl sent the value
+  down its strided-buffer path. They now reduce through an isbits wrapper.
+
 ## [0.8.0] — 2026-09-30
 
 ### Changed

@@ -27,15 +27,21 @@ end
 @inline _acc_zero(f::F, ::Type{T}) where {F,T} =
     (S = typeof(f(zero(T))); zero(Base.promote_op(Base.add_sum, S, S)))
 
-# Element-wise ‖·‖² and ⟨·,·⟩ so `norm`/`dot` work for vector-valued cells (e.g.
-# `SVector` fields) exactly like Base, which recurses `abs2`/`*` into the element.
-# For a scalar element these inline to `abs2` / `conj(x)*y`, so the numeric hot
-# path (and its `@simd`) is byte-for-byte unchanged; a static vector falls to
-# `sum(abs2, ·)` / `dot(·,·)`, returning the same scalar Base does.
-@inline _elt_abs2(x::Number) = abs2(x)
-@inline _elt_abs2(x) = sum(abs2, x)
-@inline _elt_dot(x::Number, y::Number) = conj(x) * y
-@inline _elt_dot(x, y) = LinearAlgebra.dot(x, y)
+# Element-wise ‖·‖² and ⟨·,·⟩ so `norm`/`dot` work for any cell type, like Base:
+# numbers inline to `abs2` / `conj(x)*y` (the numeric hot path and its `@simd`
+# are byte-for-byte unchanged); array-valued cells recurse one level per nesting
+# (an `SVector` of `SMatrix` links reaches its scalars); any other cell type
+# supplies its own `abs2` / `dot` (a struct that acts as a scalar). Static cells
+# go through `sum(map(…))`: `sum(f, nested_svector)` infers `Any` and allocates,
+# `sum(map(f, x))` stays type-stable.
+@inline _elt_abs2(x::Number)        = abs2(x)
+@inline _elt_abs2(x::StaticArray)   = sum(map(_elt_abs2, x))
+@inline _elt_abs2(x::AbstractArray) = sum(_elt_abs2, x)
+@inline _elt_abs2(x)                = abs2(x)
+@inline _elt_dot(x::Number, y::Number)               = conj(x) * y
+@inline _elt_dot(x::StaticArray, y::StaticArray)     = sum(map(_elt_dot, x, y))
+@inline _elt_dot(x::AbstractArray, y::AbstractArray) = mapreduce(_elt_dot, +, x, y)
+@inline _elt_dot(x, y)                               = LinearAlgebra.dot(x, y)
 # Scalar accumulator zero of ‖·‖² / ⟨·,·⟩ for a (possibly vector-valued) element
 # type — `Float64` for an `SVector{N,Float64}`, unchanged for numeric elements.
 @inline _sqnorm_zero(::Type{T}) where {T} = zero(Base.promote_op(_elt_abs2, T))
