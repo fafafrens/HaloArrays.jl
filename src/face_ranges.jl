@@ -1,7 +1,3 @@
-@inline function _dim_slab_range(ranges::NTuple{N,Any}, dim::Int, range) where {N}
-    return ntuple(d -> d == dim ? range : ranges[d], Val(N))
-end
-
 # Spatial dimensionality / interior range come from the shared _spatial_*
 # helpers in abstract_haloarray.jl (single arrays, collections, and raw arrays
 # of fields).

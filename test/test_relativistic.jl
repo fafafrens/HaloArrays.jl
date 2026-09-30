@@ -68,7 +68,7 @@ _include_example!(RelTmu2D,  joinpath("finite_volume", "relativistic_hydro_Tmu_2
         eos = RelCommon.IdealGas(5.0 / 3.0)
         nx = 128
         dx = 1.0 / nx
-        u  = LocalMultiHaloArray(Float64, (nx,), 1;
+        u  = MultiHaloArray(LocalHaloArray, Float64, (nx,), 1;
             fields=(:D, :S, :tau), boundary_condition=:periodic)
         for i in 1:nx
             x = (i - 0.5) * dx
@@ -141,7 +141,7 @@ _include_example!(RelTmu2D,  joinpath("finite_volume", "relativistic_hydro_Tmu_2
 
         n = 24
         dx = 1.0 / n; dy = dx
-        u = LocalMultiHaloArray(Float64, (n, n), 1;
+        u = MultiHaloArray(LocalHaloArray, Float64, (n, n), 1;
             fields=(:N, :Mx, :My, :E), boundary_condition=:periodic)
         for j in 1:n, i in 1:n
             x = (i - 0.5) * dx; y = (j - 0.5) * dy

@@ -150,7 +150,7 @@ end
 # ------------------------------------------------------------
 
 function _fill_rhs!(b)
-    n = global_size(b)
+    n = size(b)
     fill_from_global_indices!(b) do I
         x = I[1] / (n[1] + 1)
         y = I[2] / (n[2] + 1)

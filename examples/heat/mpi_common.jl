@@ -11,7 +11,7 @@ function _mpi_global_mean(u::HaloArray)
     comm = communicator(u)
     local_total = sum(interior_view(u))
     total = MPI.Allreduce(local_total, +, comm)
-    return total / prod(global_size(u))
+    return total / prod(size(u))
 end
 
 function run_mpi_heat(::Val{N};
@@ -32,7 +32,7 @@ function run_mpi_heat(::Val{N};
     u = HaloArray(Float64, owned_dims, 1, topology; boundary_condition=:periodic)
 
     lengths = _mpi_domain_lengths(domain_length, Val(N))
-    dx = ntuple(d -> lengths[d] / global_size(u)[d], Val(N))
+    dx = ntuple(d -> lengths[d] / size(u)[d], Val(N))
     dt = stable_heat_dt(alpha, cfl, dx)
 
     fill_centered_gaussian!(u; baseline=1.0, amplitude=1.0)
@@ -48,7 +48,7 @@ function run_mpi_heat(::Val{N};
         println("MPI heat diffusion $(N)D completed.")
         println("  ranks = ", MPI.Comm_size(comm))
         println("  topology dims = ", topology.dims)
-        println("  global size = ", global_size(u))
+        println("  global size = ", size(u))
         println("  dt = ", dt)
         println("  final mean = ", final_mean)
     end

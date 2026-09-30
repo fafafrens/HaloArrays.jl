@@ -76,7 +76,7 @@ function finite_volume_step!(u_next, u, du, dt, dx)
 end
 
 function fill_burgers_initial_condition!(u)
-    nx = global_size(u)[1]
+    nx = size(u)[1]
 
     for I in CartesianIndices(axes(u))
         x = (I[1] - 0.5) / nx
@@ -88,7 +88,7 @@ function fill_burgers_initial_condition!(u)
 end
 
 function solve_burgers!(u; steps=300, cfl=0.4)
-    dx = 1 / global_size(u)[1]
+    dx = 1 / size(u)[1]
     dt = cfl * dx / 1.5
     u_next = similar(u)
     du = similar(u)
@@ -134,7 +134,7 @@ end
 function print_summary(label, u, info, initial_mass, final_mass)
     @printf("%-22s nx=%d dt=%.3e time=%.3f max=%.6f mass_error=%.3e\n",
         label,
-        global_size(u)[1],
+        size(u)[1],
         info.dt,
         info.time,
         maximum(u),

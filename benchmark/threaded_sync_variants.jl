@@ -16,7 +16,7 @@ function sync_variant_functions()
     return Dict{Symbol,Function}(
         :serial => threaded_synchronize_halo_serial!,
         :tasks => threaded_synchronize_halo_tasks!,
-        :threads => synchronize_halo_threads!,
+        :threads => (u -> synchronize_halo!(u; threads=true)),
     )
 end
 

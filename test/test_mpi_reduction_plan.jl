@@ -25,7 +25,7 @@ using HaloArrays
     @testset "reduce kept-split dim 2 (every rank active)" begin
         plan   = DimReductionPlan(u, 2)
         r_plan = reduce!(plan, identity, +, u)
-        r_old  = mapreduce_haloarray_dims(identity, +, u, 2)
+        r_old  = mapreduce(identity, +, u; dims=2)
 
         @test r_plan isa MaybeHaloArray
         @test is_active(r_plan)
@@ -37,7 +37,7 @@ using HaloArrays
 
         # Same plan, different op: max along dim 2.
         r_max     = reduce!(plan, identity, max, u)
-        r_max_old = mapreduce_haloarray_dims(identity, max, u, 2)
+        r_max_old = mapreduce(identity, max, u; dims=2)
         @test collect(interior_view(parent(r_max))) ≈ collect(interior_view(parent(r_max_old)))
 
         # Reuse after the data changes: output must refresh, in place.
@@ -57,7 +57,7 @@ using HaloArrays
     @testset "reduce rank-split dim 1 (only slice coordinate 0 active)" begin
         plan   = DimReductionPlan(u, 1)
         r_plan = reduce!(plan, identity, +, u)
-        r_old  = mapreduce_haloarray_dims(identity, +, u, 1)
+        r_old  = mapreduce(identity, +, u; dims=1)
 
         @test is_active(r_plan) == (topo.cart_coords[1] == 0)
         @test is_active(r_plan) == is_active(r_old)
@@ -71,7 +71,7 @@ using HaloArrays
 
     @testset "sum/maximum dims= kwarg (transient plan per call)" begin
         r_sum = sum(u; dims=2)
-        r_ref = mapreduce_haloarray_dims(identity, +, u, 2)
+        r_ref = mapreduce(identity, +, u; dims=2)
         @test r_sum isa MaybeHaloArray
         @test is_active(r_sum) == is_active(r_ref)
         if is_active(r_sum)
@@ -89,14 +89,14 @@ using HaloArrays
         fill_from_global_indices!(f, u)
 
         r_max  = maximum(u; dims=1)
-        r_maxr = mapreduce_haloarray_dims(identity, max, u, 1)
+        r_maxr = mapreduce(identity, max, u; dims=1)
         @test is_active(r_max) == is_active(r_maxr)
         if is_active(r_max)
             @test collect(interior_view(parent(r_max))) ≈ collect(interior_view(parent(r_maxr)))
         end
 
         r_f  = sum(abs2, u; dims=2)
-        r_fr = mapreduce_haloarray_dims(abs2, +, u, 2)
+        r_fr = mapreduce(abs2, +, u; dims=2)
         if is_active(r_f)
             @test collect(interior_view(parent(r_f))) ≈ collect(interior_view(parent(r_fr)))
         end
@@ -143,7 +143,7 @@ using HaloArrays
         # of the fields is collection dim 3.
         m     = MultiHaloArray((; p=u, q=copy(u)))
         rm    = sum(m; dims=3)
-        r_ref = mapreduce_haloarray_dims(identity, +, u, 2)
+        r_ref = mapreduce(identity, +, u; dims=2)
         @test rm isa MaybeHaloArray                       # spatial → Maybe{collection}
         @test is_active(rm) == is_active(r_ref)
         if is_active(rm)
@@ -177,7 +177,7 @@ using HaloArrays
 
         plan   = DimReductionPlan(u3, (2, 3))
         r_plan = reduce!(plan, abs2, +, u3)
-        r_old  = mapreduce_haloarray_dims(abs2, +, u3, (2, 3))
+        r_old  = mapreduce(abs2, +, u3; dims=(2, 3))
         @test is_active(r_plan) == is_active(r_old)
         if is_active(r_plan)
             @test collect(interior_view(parent(r_plan))) ≈ collect(interior_view(parent(r_old)))

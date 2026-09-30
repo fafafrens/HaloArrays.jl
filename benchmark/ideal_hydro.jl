@@ -10,7 +10,7 @@ function _option_cases(options)
 end
 
 function _ideal_hydro_local_state(nx, ny, halo, boundary_condition)
-    return LocalMultiHaloArray(Float64, (nx, ny), halo;
+    return MultiHaloArray(LocalHaloArray, Float64, (nx, ny), halo;
         boundary_conditions=ideal_hydro_boundary_conditions(boundary_condition))
 end
 
@@ -18,7 +18,7 @@ function _ideal_hydro_threaded_state(nx, ny, halo, tile_dims, boundary_condition
     all(d -> (nx, ny)[d] % tile_dims[d] == 0, 1:2) ||
         error("--nx and --ny must be divisible by --tile-dims")
     tile_size = (nx ÷ tile_dims[1], ny ÷ tile_dims[2])
-    return ThreadedMultiHaloArray(Float64, tile_size, halo;
+    return MultiHaloArray(ThreadedHaloArray, Float64, tile_size, halo;
         dims=tile_dims,
         boundary_conditions=ideal_hydro_boundary_conditions(boundary_condition))
 end
@@ -62,7 +62,7 @@ end
 function _diagnose_ideal_hydro(label, make_state, gamma; comm=nothing, rank=0)
     u = make_state()
     du = similar(u)
-    nx, ny = global_size(u[:rho])
+    nx, ny = size(u[:rho])
     p = (; gamma, dx=1 / nx, dy=1 / ny)
 
     fill_pressure_bump!(u; gamma)

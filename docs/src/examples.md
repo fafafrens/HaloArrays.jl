@@ -12,9 +12,9 @@ Step-by-step, self-contained walkthroughs (start here):
 
 | File | What it covers |
 |---|---|
-| `tutorials/local.jl` | Storage layout, boundary conditions, `CellRanges`/`FaceRanges`, heat equation, `LocalMultiHaloArray`, `ThreadedHaloArray`, `ArrayOfHaloArray` |
+| `tutorials/local.jl` | Storage layout, boundary conditions, `CellRanges`/`FaceRanges`, heat equation, `MultiHaloArray`, `ThreadedHaloArray`, `ArrayOfHaloArray` |
 | `tutorials/mpi.jl` | `CartesianTopology`, `HaloArray`, halo exchange (blocking and async), global reductions, gather, distributed heat equation |
-| `tutorials/threaded.jl` | `ThreadedHaloArray` tile layout, tile loop pattern, synchronisation, threaded Burgers, `ThreadedMultiHaloArray` |
+| `tutorials/threaded.jl` | `ThreadedHaloArray` tile layout, tile loop pattern, synchronisation, threaded Burgers, `MultiHaloArray(ThreadedHaloArray, …)` |
 | `tutorials/broadcast.jl` | Interior-only broadcast semantics, in-place vs allocating, collections |
 | `tutorials/gpu.jl` | Moving a `LocalHaloArray` to Metal/GPU, KernelAbstractions kernels, kernel regions |
 | `tutorials/diffeq.jl` | `OrdinaryDiffEq.jl` integration, the `synchronize_halo!` contract in the RHS |

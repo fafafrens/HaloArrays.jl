@@ -35,8 +35,8 @@ end
 # Each case is a trait-routed operation whose dispatch depends on the backend.
 function backend_cases(halo, dest)
     return (
-        ("synchronize", () -> synchronize_halo_threads!(halo)),
-        ("boundary",    () -> boundary_condition_threads!(halo)),
+        ("synchronize", () -> synchronize_halo!(halo; threads=true)),
+        ("boundary",    () -> boundary_condition!(halo; threads=true)),
         ("fill",        () -> fill!(halo, 1.0)),
         ("mapreduce",   () -> mapreduce(abs2, +, halo)),
         ("broadcast",   () -> (dest .= halo .* 2)),

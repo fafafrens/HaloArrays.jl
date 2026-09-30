@@ -5,34 +5,24 @@
 # HaloCommState — MPI request bookkeeping
 # ============================================================
 
-# Outer dimension is NTuple{N,...} so the compiler can specialize exchange
-# loops on N (known at compile time from the HaloArray type parameter).
-# Inner dimension stays Vector{MPI.Request} because elements are reassigned
-# each exchange via recv_reqs[dim][side] = MPI.Irecv!(...).
-# The flat vectors are separate copies used for MPI.Waitall (which is more
-# efficient than N*2 individual MPI.Wait calls).
+# Requests are MPI.UnsafeRequest / UnsafeMultiRequest: no per-request Julia
+# object, so posting and waiting allocate nothing; the buffers they refer to
+# are pinned with GC.@preserve at each MPI call. The per-face containers serve
+# the split start/finish exchange (one Wait per face, ghosts unpacked as they
+# arrive); the flat MultiRequests serve the blocking exchange (one Waitall).
+# Outer dimension is NTuple{N,...} so exchange loops specialize on N.
 struct HaloCommState{N}
-    recv_reqs::NTuple{N, Vector{MPI.Request}}
-    send_reqs::NTuple{N, Vector{MPI.Request}}
     unsafe_recv_reqs_vv::NTuple{N, Vector{MPI.UnsafeRequest}}
     unsafe_send_reqs_vv::NTuple{N, Vector{MPI.UnsafeRequest}}
-    recv_reqs_flat::Vector{MPI.Request}
-    send_reqs_flat::Vector{MPI.Request}
     unsafe_recv_reqs::MPI.UnsafeMultiRequest
     unsafe_send_reqs::MPI.UnsafeMultiRequest
 end
 
 function HaloCommState(N::Int)
-    recv_reqs         = ntuple(_ -> [MPI.Request()       for _ in 1:2], N)
-    send_reqs         = ntuple(_ -> [MPI.Request()       for _ in 1:2], N)
     unsafe_recv_reqs_vv = ntuple(_ -> [MPI.UnsafeRequest() for _ in 1:2], N)
     unsafe_send_reqs_vv = ntuple(_ -> [MPI.UnsafeRequest() for _ in 1:2], N)
-    recv_reqs_flat    = reduce(vcat, recv_reqs)
-    send_reqs_flat    = reduce(vcat, send_reqs)
-    unsafe_recv_reqs  = MPI.UnsafeMultiRequest(length(recv_reqs_flat))
-    unsafe_send_reqs  = MPI.UnsafeMultiRequest(length(send_reqs_flat))
-    HaloCommState{N}(recv_reqs, send_reqs, unsafe_recv_reqs_vv, unsafe_send_reqs_vv,
-        recv_reqs_flat, send_reqs_flat, unsafe_recv_reqs, unsafe_send_reqs)
+    HaloCommState{N}(unsafe_recv_reqs_vv, unsafe_send_reqs_vv,
+        MPI.UnsafeMultiRequest(2N), MPI.UnsafeMultiRequest(2N))
 end
 
 # ============================================================
@@ -167,35 +157,14 @@ end
 # ntuple closures so the pinned roots are unambiguous local parameters.
 # ============================================================
 
-# Copy interior edge → send buffer.  Used by every pack path.
-@inline function _copy_to_send_buf!(send_bufs, halo, ::Val{D}, ::Val{S}) where {D, S}
-    halo.topology.neighbors[D][S] == MPI.PROC_NULL && return nothing
-    copyto!(send_bufs[D][S], edge_view(halo, Side(S), Dim(D)))
-    return nothing
-end
-
-# Copy recv buffer → ghost slab.  Used by every unpack path.
+# Copy recv buffer → ghost slab (blocking-exchange unpack).
 @inline function _copy_from_recv_buf!(recv_bufs, halo, ::Val{D}, ::Val{S}) where {D, S}
     halo.topology.neighbors[D][S] == MPI.PROC_NULL && return nothing
     copyto!(ghost_view(halo, Side(S), Dim(D)), recv_bufs[D][S])
     return nothing
 end
 
-# Pack + post using flat request index (waitall safe variant, no GC.@preserve needed).
-@inline function _pack_post_flat_safe!(halo, recv_reqs, send_reqs, recv_bufs, send_bufs, comm,
-        ::Val{D}, ::Val{S}) where {D, S}
-    nbrank = halo.topology.neighbors[D][S]
-    nbrank == MPI.PROC_NULL && return nothing
-    idx = tag_send(Val(D), Val(S))
-    _copy_to_send_buf!(send_bufs, halo, Val(D), Val(S))
-    recv_reqs[idx] = MPI.Irecv!(recv_bufs[D][S], comm, recv_reqs[idx];
-        source=nbrank, tag=tag_recv(Val(D), Val(S)))
-    send_reqs[idx] = MPI.Isend(send_bufs[D][S], comm, send_reqs[idx];
-        dest=nbrank, tag=tag_send(Val(D), Val(S)))
-    return nothing
-end
-
-# Pack + post using flat request index (waitall_unsafe variant).
+# Pack + post using the flat request index (blocking exchange: one Waitall).
 # recv_state = (UnsafeMultiRequest, recv_bufs),  send_state = (UnsafeMultiRequest, send_bufs)
 @inline function _pack_post_flat_unsafe!(halo, recv_state, send_state, comm,
         ::Val{D}, ::Val{S}) where {D, S}
@@ -212,7 +181,7 @@ end
     return nothing
 end
 
-# Pack + post using per-face request index (async_unsafe start variant).
+# Pack + post using the per-face request index (split exchange: start).
 # recv_state = (NTuple{N,Vector{UnsafeRequest}}, recv_bufs),  same for send.
 @inline function _pack_post_vv_unsafe!(halo, recv_state, send_state, comm,
         ::Val{D}, ::Val{S}) where {D, S}
@@ -228,7 +197,7 @@ end
     return nothing
 end
 
-# Wait + unpack using per-face unsafe requests (async_unsafe finish variant).
+# Wait + unpack using the per-face requests (split exchange: finish).
 # recv_state = (NTuple{N,Vector{UnsafeRequest}}, recv_bufs),  send_state = NTuple{N,Vector{UnsafeRequest}}
 @inline function _wait_unpack_vv_unsafe!(halo, recv_state, send_state,
         ::Val{D}, ::Val{S}) where {D, S}
@@ -245,17 +214,10 @@ end
 # Halo exchange
 #
 # Face iteration goes through the shared `_foreach_face` primitive (one
-# compile-time-unrolled, closure-free recursion — see haloarray.jl), replacing a
-# per-variant `ntuple(Val(N)) do D … end`. Each variant supplies a thin
-# `(halo, Side, Dim)` adapter that pulls its request/buffer state from `halo`;
-# most delegate to the per-face helpers above (whose MPI calls + `GC.@preserve`
-# logic are unchanged), while the two safe-async adapters carry their — formerly
-# inline — body directly (there was no extracted helper for that path).
+# compile-time-unrolled, closure-free recursion — see haloarray.jl). Each
+# adapter below is a thin `(halo, Side, Dim)` shim that pulls its request and
+# buffer state from `halo` and delegates to a per-face helper above.
 # ============================================================
-
-@inline _post_face_waitall!(halo, ::Side{S}, ::Dim{D}) where {D,S} =
-    _pack_post_flat_safe!(halo, halo.comm_state.recv_reqs_flat, halo.comm_state.send_reqs_flat,
-        halo.receive_bufs, halo.send_bufs, halo.topology.cart_comm, Val(D), Val(S))
 
 @inline _unpack_face!(halo, ::Side{S}, ::Dim{D}) where {D,S} =
     _copy_from_recv_buf!(halo.receive_bufs, halo, Val(D), Val(S))
@@ -271,42 +233,6 @@ end
 @inline _finish_face_async_unsafe!(halo, ::Side{S}, ::Dim{D}) where {D,S} =
     _wait_unpack_vv_unsafe!(halo, (halo.comm_state.unsafe_recv_reqs_vv, halo.receive_bufs),
         halo.comm_state.unsafe_send_reqs_vv, Val(D), Val(S))
-
-# safe async: the two whose per-face body was previously inline in the do-block.
-@inline function _post_face_async_safe!(halo, ::Side{S}, ::Dim{D}) where {D,S}
-    topo   = halo.topology
-    nbrank = topo.neighbors[D][S]
-    nbrank == MPI.PROC_NULL && return nothing
-    comm      = topo.cart_comm
-    recv_reqs = halo.comm_state.recv_reqs
-    send_reqs = halo.comm_state.send_reqs
-    recv_bufs = halo.receive_bufs
-    send_bufs = halo.send_bufs
-    _copy_to_send_buf!(send_bufs, halo, Val(D), Val(S))
-    recv_reqs[D][S] = MPI.Irecv!(recv_bufs[D][S], comm, recv_reqs[D][S];
-        source=nbrank, tag=tag_recv(Val(D), Val(S)))
-    send_reqs[D][S] = MPI.Isend(send_bufs[D][S], comm, send_reqs[D][S];
-        dest=nbrank, tag=tag_send(Val(D), Val(S)))
-    return nothing
-end
-
-@inline function _finish_face_async_safe!(halo, ::Side{S}, ::Dim{D}) where {D,S}
-    halo.topology.neighbors[D][S] == MPI.PROC_NULL && return nothing
-    recv_reqs = halo.comm_state.recv_reqs
-    send_reqs = halo.comm_state.send_reqs
-    MPI.Wait(recv_reqs[D][S])
-    _copy_from_recv_buf!(halo.receive_bufs, halo, Val(D), Val(S))
-    MPI.Wait(send_reqs[D][S])
-    return nothing
-end
-
-function halo_exchange_waitall!(halo::HaloArray{T,N}) where {T,N}
-    _foreach_face(_post_face_waitall!, halo, Val(N))
-    MPI.Waitall(halo.comm_state.recv_reqs_flat)
-    _foreach_face(_unpack_face!, halo, Val(N))
-    MPI.Waitall(halo.comm_state.send_reqs_flat)
-    return nothing
-end
 
 function halo_exchange_waitall_unsafe!(halo::HaloArray{T,N}) where {T,N}
     recv_state = (halo.comm_state.unsafe_recv_reqs, halo.receive_bufs)
@@ -328,56 +254,15 @@ function end_halo_exchange_async_wait_unsafe!(halo::HaloArray{T,N}) where {T,N}
     return nothing
 end
 
-# ---- safe (non-unsafe-request) async helpers --------------------------
-
-function _start_halo_exchange_safe!(halo::HaloArray{T,N}) where {T,N}
-    _foreach_face(_post_face_async_safe!, halo, Val(N))
-    return nothing
-end
-
-function _finish_halo_exchange_safe!(halo::HaloArray{T,N}) where {T,N}
-    _foreach_face(_finish_face_async_safe!, halo, Val(N))
-    return nothing
-end
-
 # ---- public exchange API ----------------------------------------------
 # All return `halo`, like every other backend's mutating driver.
 
-halo_exchange!(halo::HaloArray) = (halo_exchange_waitall_unsafe!(halo); halo)
+halo_exchange!(halo::HaloArray; threads::Bool=false) = (halo_exchange_waitall_unsafe!(halo); halo)
 
 start_halo_exchange!(halo::HaloArray)  = (start_halo_exchange_async_unsafe!(halo); halo)
 finish_halo_exchange!(halo::HaloArray) = (end_halo_exchange_async_wait_unsafe!(halo); halo)
 
-# ---- compatibility wrappers (used by MPI tests and benchmarks) --------
-
-halo_exchange_wait!(halo::HaloArray) = halo_exchange_waitall!(halo)
-
-function start_halo_exchange_async!(halo::HaloArray)
-    _start_halo_exchange_safe!(halo)
-    return nothing
-end
-
-function end_halo_exchange_wait!(halo::HaloArray)
-    _finish_halo_exchange_safe!(halo)
-    return nothing
-end
-
-function halo_exchange_async!(halo::HaloArray)
-    start_halo_exchange_async!(halo)
-    end_halo_exchange_wait!(halo)
-    return nothing
-end
-
-function halo_exchange_async_unsafe!(halo::HaloArray)
-    start_halo_exchange_async_unsafe!(halo)
-    end_halo_exchange_async_wait_unsafe!(halo)
-    return nothing
-end
-
-halo_exchange_async_wait!(halo::HaloArray)        = end_halo_exchange_wait!(halo)
-halo_exchange_async_wait_unsafe!(halo::HaloArray) = end_halo_exchange_async_wait_unsafe!(halo)
-
-function synchronize_halo!(halo::HaloArray)
+function synchronize_halo!(halo::HaloArray; threads::Bool=false)
     halo_exchange!(halo)
     boundary_condition!(halo)
     return halo
@@ -392,13 +277,13 @@ end
 # released within the call) and returns a fresh reduced array every time. The
 # result has the reduced dimensions DROPPED and lives on the coordinate-0 slice
 # of the topology (a `MaybeHaloArray`, inactive elsewhere) — same semantics as
-# `mapreduce_haloarray_dims`, unlike Base's kept-singleton-dims shape. The
+# `mapreduce(…; dims)`, unlike Base's kept-singleton-dims shape. The
 # result owns its sub-communicator: `free!` it when reducing in a loop.
 function Base.mapreduce(
         f::F, op::OP, halo::HaloArray, etc::Vararg{HaloArray}; kws...,
     ) where {F<:Function,OP}
     dims = _dims_kwarg(kws, 1 + length(etc))
-    dims === nothing || return mapreduce_haloarray_dims(f, op, halo, dims)
+    dims === nothing || return _mapreduce_dims(f, op, halo, dims)
     comm   = communicator(halo)
     rlocal = _local_mapreduce(mapreduce, f, op, (halo, etc...))  # shared local part (no init)
     # Normalize AFTER the local part (add_sum's integer widening already
@@ -485,7 +370,7 @@ LinearAlgebra.norm(u::HaloArray) =
 Base.sum(u::HaloArray) =
     _allreduce(_local_sum(identity, u), +, communicator(u); iscommutative=true)
 
-# mapreduce_haloarray_dims (all backends + collections) lives in reduction.jl.
+# _mapreduce_dims (all backends + collections) lives in reduction.jl.
 
 
 # ============================================================
@@ -496,7 +381,7 @@ Base.sum(u::HaloArray) =
 # no hand-rolled color/key splits), the reduced output array is preallocated,
 # and each `reduce!` costs a single `MPI.Reduce`. `free!` releases the
 # communicators deterministically. The one-shot forms (`sum(u; dims=…)`,
-# `mapreduce_haloarray_dims`) run a transient plan per call and transfer the
+# `mapreduce(…; dims)`) run a transient plan per call and transfer the
 # output — with its sub-communicator — to the caller; reusing a plan skips the
 # per-call communicator construction entirely.
 # ============================================================
@@ -596,7 +481,7 @@ produce, except that its element type was fixed at plan construction, so
 throws with a pointer to the one-shot forms). `u` must share the plan's
 geometry (and, on MPI, its topology; there each call costs a single
 `MPI.Reduce` and is collective — every rank of the topology must call it).
-Same result as [`mapreduce_haloarray_dims`](@ref).
+Same result as `mapreduce(f, op, u; dims=…)`.
 """
 function reduce!(plan::MPIDimReductionPlan, f::F, op::OP, u::HaloArray{T,N}) where {F,OP,T,N}
     plan.freed[] && throw(ArgumentError("reduce! on a freed DimReductionPlan"))
@@ -649,7 +534,7 @@ end
     free!(m::MaybeHaloArray) -> m
 
 Release the MPI sub-communicator owned by a reduced array returned by a
-`dims=` keyword reduction or [`mapreduce_haloarray_dims`](@ref) (a no-op for
+`dims=` keyword reduction (a no-op for
 serial-backed results, which own no communicator, so backend-generic code can
 call it unconditionally). Optional —
 unreleased communicators are reclaimed at `MPI.Finalize` — but calling it when
@@ -685,5 +570,3 @@ _free_result_comm!(c::AbstractHaloCollection) =
 
 # Compatibility name; the generic collection method above covers both
 # MultiHaloArray and ArrayOfHaloArray.
-mapreduce_mhaloarray_dims(f, op, mha::MultiHaloArray, dims) =
-    mapreduce_haloarray_dims(f, op, mha, dims)

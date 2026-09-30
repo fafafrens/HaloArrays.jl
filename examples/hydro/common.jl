@@ -122,7 +122,7 @@ function initial_hydro_state(global_i, global_j, nx, ny, gamma)
 end
 
 function fill_pressure_bump!(::_HydroFlatBackend, u; gamma=1.4)
-    nx, ny = global_size(u[:rho])
+    nx, ny = size(u[:rho])
     h = halo_width(u[:rho])
     data = field_storages(u)
 
@@ -142,7 +142,7 @@ function fill_pressure_bump!(::_HydroFlatBackend, u; gamma=1.4)
 end
 
 function fill_pressure_bump!(::ThreadedHaloBackend, u; gamma=1.4)
-    nx, ny = global_size(u[:rho])
+    nx, ny = size(u[:rho])
     h = halo_width(u[:rho])
     tile_cells = tile_size(u[:rho])
 
@@ -219,7 +219,7 @@ function solve_ideal_hydro!(
         reltol=1e-5,
         abstol=1e-7,
 )
-    nx, ny = global_size(u[:rho])
+    nx, ny = size(u[:rho])
     dx = 1 / nx
     dy = 1 / ny
     dt = cfl * min(dx, dy) / max_signal_speed(u, gamma)
@@ -244,7 +244,7 @@ function solve_ideal_hydro!(
 end
 
 function run_ideal_hydro_2d!(u; gamma=1.4, cfl=0.25, steps=80, adaptive=true, reltol=1e-5, abstol=1e-7)
-    nx, ny = global_size(u[:rho])
+    nx, ny = size(u[:rho])
     dx = 1 / nx
     dy = 1 / ny
 
@@ -263,8 +263,8 @@ function print_hydro_summary(label, u, info, initial, final)
             label,
             String(info.method),
             string(info.adaptive),
-            global_size(u[:rho])[1],
-            global_size(u[:rho])[2],
+            size(u[:rho])[1],
+            size(u[:rho])[2],
             info.time,
             info.dt,
             info.steps,

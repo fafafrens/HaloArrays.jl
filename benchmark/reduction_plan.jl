@@ -70,7 +70,7 @@ function main()
             round(1e6 * build_time, digits=2), " us")
 
         t_old = benchmark_case!(rows, "oneshot_per_call dims=$dim",
-            () -> free!(mapreduce_haloarray_dims(identity, +, u, dim)),
+            () -> free!(mapreduce(identity, +, u; dims=dim)),
             samples, warmups, metadata; comm=comm, rank=rank)
         t_plan = benchmark_case!(rows, "plan_reduce! dims=$dim",
             () -> reduce!(plan, identity, +, u),

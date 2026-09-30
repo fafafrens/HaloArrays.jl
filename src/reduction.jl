@@ -141,7 +141,7 @@ function Base.mapreduce(
         f::F, op::OP, halo::AbstractSingleHaloArray, etc::Vararg{AbstractSingleHaloArray}; kws...,
     ) where {F<:Function, OP}
     dims = _dims_kwarg(kws, 1 + length(etc))
-    dims === nothing || return mapreduce_haloarray_dims(f, op, halo, dims)
+    dims === nothing || return _mapreduce_dims(f, op, halo, dims)
     r = _local_mapreduce(mapreduce, f, op, (halo, etc...))   # per-tile, no init
     return _apply_init(op, r, kws)                            # seed once (commutative)
 end
@@ -205,7 +205,7 @@ end
 # and the same collection kind is rebuilt around the reduced fields.
 function Base.mapreduce(f::F, op::OP, c::AbstractHaloCollection; kws...) where {F<:Function, OP}
     dims = _dims_kwarg(kws, 1)
-    dims === nothing || return mapreduce_haloarray_dims(f, op, c, dims)
+    dims === nothing || return _mapreduce_dims(f, op, c, dims)
     return mapreduce(field -> mapreduce(f, op, field), op, eachfield(c); kws...)
 end
 
@@ -343,7 +343,7 @@ over any array sharing `u`'s geometry. The plan's output has its build-time
 element type baked in — `eltype(u)` unless overridden with the
 `output_eltype` keyword — so a reduction whose result type differs (e.g. `+`
 on `Bool`) needs the keyword, or the one-shot forms
-(`sum(u; dims=…)`/[`mapreduce_haloarray_dims`](@ref)), which are transient
+(`sum(u; dims=…)`/`mapreduce(f, op, u; dims=…)`), which are transient
 plans built with the promoted element type and so follow Base's promotion.
 
 - `LocalHaloArray` / `ThreadedHaloArray`: holds the preallocated reduced array
@@ -423,7 +423,7 @@ end
     reduced_eltype === out_eltype || throw(ArgumentError(
         "this reduction promotes $out_eltype to $reduced_eltype, but a " *
         "DimReductionPlan's output is typed at construction; use the one-shot " *
-        "form (`sum(u; dims=…)`/`mapreduce_haloarray_dims`), which promotes " *
+        "form (`sum(u; dims=…)`/`mapreduce(f, op, u; dims=…)`), which promotes " *
         "like Base, or convert the array first."))
     return nothing
 end
@@ -461,43 +461,41 @@ function _reduced_eltype(f::F, op::OP, ::Type{T}) where {F,OP,T}
     return isconcretetype(R) ? R : T
 end
 
-"""
-    mapreduce_haloarray_dims(f, op, u, dims)
-
-Map `f` over the interior cells of `u` and reduce with `op` along the spatial
-dimensions in `dims`, returning a reduced array of the **same backend** with
-those dimensions **dropped** (kept dimensions retain their halo width and
-boundary conditions). Works on every backend and on field collections —
-equivalent to the `dims=` keyword forms (`sum(u; dims=…)`,
-`maximum(u; dims=…)`, …):
-
-- `LocalHaloArray` → a reduced `LocalHaloArray`.
-- `ThreadedHaloArray` → a reduced `ThreadedHaloArray` whose tile layout is the
-  original layout with the reduced dimensions dropped, on the same thread
-  backend — ready for further threaded work.
-- `HaloArray` (MPI) → a `MaybeHaloArray`: collective across the topology; the
-  result lives on the coordinate-0 slice of the reduced dimensions (inactive
-  elsewhere) and **owns the sub-communicator** its topology lives on —
-  [`free!`](@ref) it when done to keep communicator use bounded when reducing
-  in a loop (otherwise it is reclaimed at `MPI.Finalize`).
-- `MultiHaloArray` / `ArrayOfHaloArray` → `dims` is in **collection**
-  coordinates: field axes come first (`1:F`), then the shared spatial axes
-  (`F+1:D`). Field axes reduce **locally** (an elementwise fold across fields —
-  no communication, always a bare result), collapsing every field axis into one
-  `HaloArray` (`MultiHaloArray` drops the field names) or a partial set into a
-  smaller collection. Spatial axes reduce per field as above. The result is
-  `MaybeHaloArray`-wrapped (outermost) only when a spatial axis was reduced on
-  MPI; a pure field reduction is never wrapped.
-
-Implemented as a transient [`DimReductionPlan`](@ref) — built with the
-promoted output element type (so `Bool` sums count in `Int`, like Base), used
-for one [`reduce!`](@ref), and released. For a reduction that runs repeatedly
-over the same array shape, build the plan once instead. `is_active`,
-`interior_view`, and [`free!`](@ref) behave uniformly on every return kind
-(serial results are always active; `free!` is a no-op on them), so
-backend-generic code needs no branches.
-"""
-function mapreduce_haloarray_dims(f::F, op::OP, u::AbstractSingleHaloArray, dims) where {F,OP}
+#     _mapreduce_dims(f, op, u, dims)
+#
+# Map `f` over the interior cells of `u` and reduce with `op` along the spatial
+# dimensions in `dims`, returning a reduced array of the **same backend** with
+# those dimensions **dropped** (kept dimensions retain their halo width and
+# boundary conditions). Works on every backend and on field collections —
+# equivalent to the `dims=` keyword forms (`sum(u; dims=…)`,
+# `maximum(u; dims=…)`, …):
+#
+# - `LocalHaloArray` → a reduced `LocalHaloArray`.
+# - `ThreadedHaloArray` → a reduced `ThreadedHaloArray` whose tile layout is the
+#   original layout with the reduced dimensions dropped, on the same thread
+#   backend — ready for further threaded work.
+# - `HaloArray` (MPI) → a `MaybeHaloArray`: collective across the topology; the
+#   result lives on the coordinate-0 slice of the reduced dimensions (inactive
+#   elsewhere) and **owns the sub-communicator** its topology lives on —
+#   [`free!`](@ref) it when done to keep communicator use bounded when reducing
+#   in a loop (otherwise it is reclaimed at `MPI.Finalize`).
+# - `MultiHaloArray` / `ArrayOfHaloArray` → `dims` is in **collection**
+#   coordinates: field axes come first (`1:F`), then the shared spatial axes
+#   (`F+1:D`). Field axes reduce **locally** (an elementwise fold across fields —
+#   no communication, always a bare result), collapsing every field axis into one
+#   `HaloArray` (`MultiHaloArray` drops the field names) or a partial set into a
+#   smaller collection. Spatial axes reduce per field as above. The result is
+#   `MaybeHaloArray`-wrapped (outermost) only when a spatial axis was reduced on
+#   MPI; a pure field reduction is never wrapped.
+#
+# Implemented as a transient [`DimReductionPlan`](@ref) — built with the
+# promoted output element type (so `Bool` sums count in `Int`, like Base), used
+# for one [`reduce!`](@ref), and released. For a reduction that runs repeatedly
+# over the same array shape, build the plan once instead. `is_active`,
+# `interior_view`, and [`free!`](@ref) behave uniformly on every return kind
+# (serial results are always active; `free!` is a no-op on them), so
+# backend-generic code needs no branches.
+function _mapreduce_dims(f::F, op::OP, u::AbstractSingleHaloArray, dims) where {F,OP}
     op_n = _normalize_reduction_op(op)
     plan = DimReductionPlan(u, dims; output_eltype=_reduced_eltype(f, op_n, eltype(u)))
     out  = reduce!(plan, f, op_n, u)
@@ -575,7 +573,7 @@ end
 # The collection one-shot is a transient CollectionDimReductionPlan (built with
 # the promoted output eltype, one reduce!, released) — mirroring the array
 # one-shot, so `sum(c; dims=…)` and a hoisted plan share one code path.
-function mapreduce_haloarray_dims(f::F, op::OP, c::AbstractHaloCollection, dims) where {F,OP}
+function _mapreduce_dims(f::F, op::OP, c::AbstractHaloCollection, dims) where {F,OP}
     op_n = _normalize_reduction_op(op)
     plan = DimReductionPlan(c, dims; output_eltype=_reduced_eltype(f, op_n, eltype(c)))
     out  = reduce!(plan, f, op_n, c)
@@ -625,7 +623,7 @@ Reduce collection `c` along the plan's dimensions. Field axes fold locally each
 call; spatial axes reuse the plan's per-field [`DimReductionPlan`](@ref)s (no
 communicator rebuild). Returns a bare array/collection, or a `MaybeHaloArray`
 around one when spatial axes were reduced on MPI — the same shape the one-shot
-[`mapreduce_haloarray_dims`](@ref) produces. `op` must be commutative.
+`mapreduce(f, op, u; dims=…)` produces. `op` must be commutative.
 """
 function reduce!(plan::CollectionDimReductionPlan, f::F, op::OP, c::AbstractHaloCollection) where {F,OP}
     op_n = _normalize_reduction_op(op)
@@ -703,3 +701,7 @@ end
         j === nothing ? Tuple(ok)[findfirst(==(d), kept)::Int] : Tuple(rk)[j]
     end
 end
+
+# The keyword form `mapreduce(f, op, u; dims=…)` (and `sum(u; dims=…)` etc.) is
+# the API; the positional name remains as a deprecated alias.
+Base.@deprecate mapreduce_haloarray_dims(f, op, u, dims) mapreduce(f, op, u; dims=dims) false

@@ -71,7 +71,7 @@ using Polyester  # loads HaloArraysPolyesterExt so PolyesterBackend works
 
         # fill! and the threaded synchronize variant respect the backend
         fill!(u, 3.0)
-        synchronize_halo_threads!(u)
+        synchronize_halo!(u; threads=true)
         @test maximum(u) ≈ 3.0
         @test minimum(u) ≈ 3.0
     end

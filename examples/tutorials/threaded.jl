@@ -9,7 +9,7 @@
 #   2. Tile loop pattern
 #   3. Synchronisation — halo exchange between tiles
 #   4. Threaded finite-volume Burgers equation (1-D)
-#   5. ThreadedMultiHaloArray — multiple fields
+#   5. MultiHaloArray of threaded fields
 #   6. ArrayOfHaloArray with ThreadedHaloArray fields
 # ============================================================
 
@@ -60,7 +60,7 @@ println("tile_size   : ", tile_size)
 println("tile_dims   : ", tile_dims)
 println("tile_count  : ", tile_count(u))
 println("interior_size  : ", interior_size(u))    # full global interior extent
-println("global_size : ", global_size(u))
+println("global_size : ", size(u))
 println("halo_width  : ", halo_width(u))
 println("storage per tile: ", storage_size(u))   # tile_size + 2*halo in each dim
 
@@ -116,11 +116,11 @@ println("tile_count on ArrayOfHaloArray: ", tile_count(vel))
 # which is why a parallel sweep over tiles is race-free.
 #
 # synchronize_halo! itself is SERIAL (a plain loop over tiles).  A
-# parallel variant exists — synchronize_halo_threads! — but for the
+# parallel variant exists — (u -> synchronize_halo!(u; threads=true)) — but for the
 # usual case (halo width 1, tiles ≈ threads) the per-tile exchange is
 # tiny and the task-spawn overhead dominates: benchmarks show the
 # serial version winning by 7–25×, and allocating nothing.  Reach for
-# synchronize_halo_threads! only when the exchange is genuinely large
+# (u -> synchronize_halo!(u; threads=true)) only when the exchange is genuinely large
 # (3-D domains, wide halos, many tiles).  See
 # benchmark/threaded_sync_variants.jl.
 
@@ -238,19 +238,19 @@ end
 run_burgers_threaded()
 
 # ============================================================
-# 5. ThreadedMultiHaloArray — MULTIPLE FIELDS
+# 5. MULTIPLE FIELDS — MultiHaloArray(ThreadedHaloArray, …)
 # ============================================================
 #
-# ThreadedMultiHaloArray is a named-tuple container of
+# MultiHaloArray(ThreadedHaloArray, …) is a named-tuple container of
 # ThreadedHaloArrays all sharing the same tile layout.
 # synchronize_halo! exchanges every field in a single call.
 
 println()
 println("=" ^ 60)
-println("Section 5 — ThreadedMultiHaloArray")
+println("Section 5 — MultiHaloArray of threaded fields")
 println("=" ^ 60)
 
-state = ThreadedMultiHaloArray(Float64, tile_size, 1;
+state = MultiHaloArray(ThreadedHaloArray, Float64, tile_size, 1;
     dims=tile_dims,
     boundary_conditions=(
         rho = ((Periodic(), Periodic()),),

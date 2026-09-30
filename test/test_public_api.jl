@@ -2,6 +2,37 @@ using Test
 using MPI
 using HaloArrays
 
+struct LegacyHalo <: HaloArrays.AbstractSingleHaloArray{Float64,2} end
+HaloArrays.global_size(::LegacyHalo) = (7, 5)
+struct NoSizeHalo <: HaloArrays.AbstractSingleHaloArray{Float64,2} end
+
+@testset "deprecated names still work and agree with the new spellings" begin
+    u = LocalHaloArray(Float64, (4, 3), 1; boundary_condition=:periodic)
+    fill!(u, 2.0)
+    @test global_size(u) == size(u) == (4, 3)
+    # A downstream array type that implemented the old global_size interface
+    # still gets `size` through it; one with neither method errors cleanly.
+    @test size(LegacyHalo()) == (7, 5)
+    @test_throws MethodError size(NoSizeHalo())
+    inactive = MaybeHaloArray(u, false)          # an MPI dims= result on a non-owning rank
+    @test size(inactive) == (0, 0)               # by design
+    @test global_size(inactive) == (4, 3)        # the alias keeps looking through, as before
+    @test mapreduce_haloarray_dims(identity, +, u, 2) == sum(u; dims=2)
+    old = LocalMultiHaloArray(Float64, (4, 3), 1; fields=(:a, :b), boundary_condition=:periodic)
+    new = MultiHaloArray(LocalHaloArray, Float64, (4, 3), 1; fields=(:a, :b), boundary_condition=:periodic)
+    @test propertynames(old) == propertynames(new) == (:a, :b)
+    @test LocalMultiHaloArray((; a=u, b=copy(u))) isa MultiHaloArray
+    t = ThreadedHaloArray(Float64, (2, 3), 1; dims=(2, 1), boundary_condition=:periodic)
+    fill!(t, 1.0)
+    @test ThreadedMultiHaloArray(Float64, (2, 3), 1; dims=(2, 1), fields=(:a,), boundary_condition=:periodic) isa MultiHaloArray
+    @test synchronize_halo_threads!(t) === t
+    @test halo_exchange_threads!(t) === t
+    @test boundary_condition_threads!(t) === t
+    @test synchronize_halo!(t; threads=true) === t
+    @test synchronize_halo!(u; threads=true) === u          # accepted and ignored off-thread
+    @test synchronize_halo!(new; threads=true) === new
+end
+
 @testset "public API exports" begin
     ha = HaloArray(Float64, (5,), 2; boundary_condition=:repeating)
 
@@ -15,12 +46,12 @@ using HaloArrays
     @test interior_size(ha) == (5,)
     @test storage_size(ha) == (9,)
     @test halo_width(ha) == 2
-    @test size(ha) == global_size(ha)
-    @test axes(ha) == map(Base.OneTo, global_size(ha))
+    @test size(ha) == size(ha)
+    @test axes(ha) == map(Base.OneTo, size(ha))
     @test interior_axes(ha) == axes(interior_view(ha))
     @test length(axes(ha, 1)) == size(ha, 1)
     @test length(interior_axes(ha, 1)) == interior_size(ha, 1)
-    @test length(ha) == prod(global_size(ha))
+    @test length(ha) == prod(size(ha))
     owned_first = ha.topology.cart_coords[1] * interior_size(ha, 1) + 1
     owned_last = owned_first + interior_size(ha, 1) - 1
     @test interior_to_global_index(ha, (1,)) == (owned_first,)
@@ -54,7 +85,7 @@ using HaloArrays
     @test resized isa HaloArray
     @test eltype(resized) === Float32
     @test size(resized) == resized_global_size
-    @test size(resized) == global_size(resized)
+    @test size(resized) == size(resized)
     @test interior_size(resized) == (3,)
     @test storage_size(resized) == (7,)
 
@@ -71,8 +102,8 @@ using HaloArrays
     @test local_ha isa AbstractArray{Float64,1}
     @test eltype(typeof(local_ha)) === Float64
     @test interior_size(local_ha) == (3,)
-    @test global_size(local_ha) == interior_size(local_ha)
-    @test axes(local_ha) == map(Base.OneTo, global_size(local_ha))
+    @test size(local_ha) == interior_size(local_ha)
+    @test axes(local_ha) == map(Base.OneTo, size(local_ha))
     @test interior_axes(local_ha) == axes(interior_view(local_ha))
     interior_view(local_ha) .= [1.0, 2.0, 3.0]
     @test start_halo_exchange!(local_ha) === local_ha

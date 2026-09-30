@@ -212,7 +212,7 @@ function run_cylindrical_blast(; A=1.0, nx=400, cfl=0.4, r_min=0.0, r_max=1.0,
 
     # Axis (inner/side-1): N, E even → reflecting; M odd → antireflecting (M→0).
     # Outer (side-2): zeroth-order outflow.
-    u  = LocalMultiHaloArray(Float64, (nx,), 1; boundary_conditions=(
+    u  = MultiHaloArray(LocalHaloArray, Float64, (nx,), 1; boundary_conditions=(
         N=((:reflecting, :repeating),),
         M=((:antireflecting, :repeating),),
         E=((:reflecting, :repeating),),

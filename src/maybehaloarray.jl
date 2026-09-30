@@ -25,10 +25,10 @@ MaybeHaloArray(a::A) where {T,N,A<:AbstractHaloArray{T,N}} =
 # global-shaped `size` with `length == 0` would make `collect` return
 # uninitialized garbage). Use `is_active` to gate before touching the data.
 Base.size(m::MaybeHaloArray{T,N}) where {T,N} =
-    is_active(m) ? global_size(m) : ntuple(_ -> 0, Val(N))
+    is_active(m) ? _global_size(m) : ntuple(_ -> 0, Val(N))
 interior_axes(m::MaybeHaloArray) = interior_axes(m.data)
 interior_size(m::MaybeHaloArray) = interior_size(m.data)
-global_size(m::MaybeHaloArray) = global_size(m.data)
+_global_size(m::MaybeHaloArray) = _global_size(m.data)
 storage_size(m::MaybeHaloArray) = storage_size(m.data)
 Base.parent(m::MaybeHaloArray) = m.data
 # axes must agree with `size` (empty when inactive), or `collect`/`similar` —
@@ -116,17 +116,6 @@ end
 
 function apply_if_active(f::Function, m::MaybeHaloArray, args...; kwargs...)
     m.active ? f(m.data, args...; kwargs...) : nothing
-end
-
-function apply_if_active!(f::Function, m::MaybeHaloArray, args...; kwargs...)
-    if is_active(m)
-        f(m.data, args...; kwargs...)
-    end
-    return m
-end
-
-function setactive(m::MaybeHaloArray, flag::Bool)
-    MaybeHaloArray{eltype(m),ndims(m),typeof(m.data)}(m.data, flag)
 end
 
 macro maybe_delegate(funs...)

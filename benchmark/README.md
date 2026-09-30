@@ -66,16 +66,15 @@ which the benchmark environment provides.
 
 ```sh
 mpiexec -n 4 julia --project=benchmark benchmark/halo_exchange.jl --owned-size=128,128
-mpiexec -n 4 julia --project=benchmark benchmark/halo_exchange.jl --ndims=3 --owned-size=64,64,64 --methods=blocking,waitall_unsafe,waitall,async_unsafe
+mpiexec -n 4 julia --project=benchmark benchmark/halo_exchange.jl --ndims=3 --owned-size=64,64,64 --methods=blocking,split
 ```
 
-`blocking` is the public `halo_exchange!` path. The other method names benchmark
-compatibility wrappers and implementation variants.
+`blocking` is `halo_exchange!` (one `Waitall`); `split` is the
+`start_halo_exchange!` / `finish_halo_exchange!` pair (one `Wait` per face).
 
 Reference (4 ranks, 2×2, 128², 8-core M-series; median): `blocking` ~49 µs,
-`public_split` ~51 µs, `async` ~55 µs, `waitall` ~75 µs. All variants land in
-the ~50–75 µs range; the async/split paths mainly help when overlapped with
-compute, not in this back-to-back microbenchmark.
+`split` ~51 µs. The split path mainly helps when overlapped with compute, not
+in this back-to-back microbenchmark.
 
 ## Reductions
 
@@ -91,8 +90,8 @@ Reference (4 ranks, 128²; median): `mpi_mapreduce` ~68 µs, `threaded` all/any
 
 ## Ideal Hydro
 
-Benchmarks the 2D ideal-hydrodynamics example with `LocalMultiHaloArray`,
-`ThreadedMultiHaloArray`, and MPI `MultiHaloArray`. The output includes full-run
+Benchmarks the 2D ideal-hydrodynamics example with a `MultiHaloArray` of
+local, threaded, and MPI fields. The output includes full-run
 allocation bytes and diagnostics for the package-owned fill, RHS, and
 wave-speed reduction kernels.
 
@@ -168,8 +167,8 @@ julia --project=benchmark benchmark/threaded.jl --owned-size=128,128 --tile-dims
 
 Compares the `ThreadBackend` implementations — `OhMyThreadsBackend` (default),
 `SerialBackend`, and `PolyesterBackend` — on the operations that dispatch through
-the trait (`tile_foreach` / `tile_mapreduce`): `synchronize_halo_threads!`,
-`boundary_condition_threads!`, `fill!`, `mapreduce`, and broadcast. Each case
+the trait (`tile_foreach` / `tile_mapreduce`): `synchronize_halo!(u; threads=true)`,
+`boundary_condition!(u; threads=true)`, `fill!`, `mapreduce`, and broadcast. Each case
 reports timing and per-call allocations. **Start Julia with `-t N`** or the
 backends cannot be distinguished.
 
@@ -257,7 +256,7 @@ JULIA_NUM_THREADS=4 julia --project=benchmark benchmark/threaded_sync_variants.j
 ### Reference results (8 threads, Apple M-series; median, indicative only)
 
 `serial` is the production `synchronize_halo!`; `threads` is
-`synchronize_halo_threads!` (an `OhMyThreads` `tforeach`).
+`synchronize_halo!(u; threads=true)` (an `OhMyThreads` `tforeach`).
 
 | Config | tiles | serial | threads | winner |
 | --- | ---: | ---: | ---: | --- |

@@ -141,7 +141,7 @@ _read(path, dset) = h5open(path, "r") do fid; read(fid[dset]); end
         q2 = similar(q1)
         interior_view(q1) .= [1, 2]; interior_view(q2) .= [3, 4]
         scalar = similar(q1); interior_view(scalar) .= [7, 8]
-        append_haloarray!(path, "t", ThreadedMultiHaloArray((; rho, mom=copy(rho))))
+        append_haloarray!(path, "t", MultiHaloArray((; rho, mom=copy(rho))))
         @test vec(_read(path, "t/rho")[1, :]) == [1, 2, 3, 4]
         append_haloarray!(path, "n", MultiHaloArray((; scalar, q=ArrayOfHaloArray([q1, q2]))))
         @test vec(_read(path, "n/scalar")[1, :]) == [7, 8]

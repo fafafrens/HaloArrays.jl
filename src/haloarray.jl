@@ -172,14 +172,12 @@ end
 
 # ---- global / topology accessors (pure field access, no MPI calls) ----
 
-"""
-    global_size(u) -> dims
-
-Size of the **whole** grid across all ranks / tiles (`interior_size .* topology.dims`).
-For [`LocalHaloArray`](@ref) it equals [`interior_size`](@ref); for [`HaloArray`](@ref)
-(MPI) and [`ThreadedHaloArray`](@ref) it is larger than this rank's/tile's share.
-"""
-function global_size(halo::HaloArray{T,N}) where {T,N}
+#     global_size(u) -> dims
+#
+# Size of the **whole** grid across all ranks / tiles (`interior_size .* topology.dims`).
+# For [`LocalHaloArray`](@ref) it equals [`interior_size`](@ref); for [`HaloArray`](@ref)
+# (MPI) and [`ThreadedHaloArray`](@ref) it is larger than this rank's/tile's share.
+function _global_size(halo::HaloArray{T,N}) where {T,N}
     local_interior = interior_size(halo)
     dims = halo.topology.dims
     ntuple(i -> local_interior[i] * dims[i], Val(N))

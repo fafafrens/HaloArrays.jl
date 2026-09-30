@@ -150,7 +150,7 @@ its topology.
 
 Size of the backing storage **including** ghost padding (`interior + 2*halo` per
 dimension); for [`ThreadedHaloArray`](@ref) this is the per-tile storage.
-Contrast with [`interior_size`](@ref) (ghost-free) and [`global_size`](@ref).
+Contrast with [`interior_size`](@ref) (ghost-free) and `size` (the whole domain).
 """
 @inline storage_size(halo::AbstractSingleHaloArray)         = size(parent(halo))
 @inline storage_size(halo::AbstractSingleHaloArray, i::Int) = size(parent(halo), i)
@@ -293,7 +293,7 @@ end
 # ThreadedHaloArray overrides fill!, copyto!,
 # and Base.foreach with tforeach variants.
 
-@inline Base.size(halo::AbstractSingleHaloArray)         = global_size(halo)
+@inline Base.size(halo::AbstractSingleHaloArray)         = _global_size(halo)
 # `size`/`axes` must return 1 / OneTo(1) for trailing dims `i > ndims` (the
 # AbstractArray contract — e.g. ArrayInterface.zeromatrix does `u .* u'`, which
 # asks for axes(u, 2) on a 1-D array).
@@ -445,7 +445,7 @@ function _fields end
 @inline _spatial_ndims(::AbstractHaloCollection{T,N,S}) where {T,N,S} = S
 @inline _spatial_interior_range(x) = interior_range(_geometry_field(x))
 @inline _spatial_interior_size(x)  = interior_size(_geometry_field(x))
-@inline _spatial_global_size(x)    = global_size(_geometry_field(x))
+@inline _spatial_global_size(x)    = _global_size(_geometry_field(x))
 @inline _spatial_storage_size(x)   = storage_size(_geometry_field(x))
 @inline _spatial_axes(x)           = axes(_geometry_field(x))
 @inline _spatial_interior_axes(x)     = interior_axes(_geometry_field(x))
@@ -457,10 +457,10 @@ function _fields end
 # to the generic interior_size = interior_size alias above.
 @inline n_field(c::AbstractHaloCollection) = length(_fields(c))
 @inline interior_size(c::AbstractHaloCollection) = (field_shape(c)..., _spatial_interior_size(c)...)
-@inline global_size(c::AbstractHaloCollection)   = (field_shape(c)..., _spatial_global_size(c)...)
+@inline _global_size(c::AbstractHaloCollection)  = (field_shape(c)..., _spatial_global_size(c)...)
 @inline storage_size(c::AbstractHaloCollection)  = (field_shape(c)..., _spatial_storage_size(c)...)
 @inline storage_size(c::AbstractHaloCollection, i::Int) = storage_size(c)[i]
-@inline Base.size(c::AbstractHaloCollection)         = global_size(c)
+@inline Base.size(c::AbstractHaloCollection)         = _global_size(c)
 @inline Base.size(c::AbstractHaloCollection, i::Int) = i <= ndims(c) ? size(c)[i] : 1
 @inline Base.length(c::AbstractHaloCollection)       = prod(size(c))
 @inline Base.axes(c::AbstractHaloCollection) = (map(Base.OneTo, field_shape(c))..., _spatial_axes(c)...)
@@ -578,3 +578,26 @@ end
 Base.getindex(halo::AbstractHaloArray, I::CartesianIndex) = getindex(halo, Tuple(I)...)
 Base.setindex!(halo::AbstractHaloArray, value, I::CartesianIndex) =
     setindex!(halo, value, Tuple(I)...)
+
+# `size(u)` is the whole-domain size on every backend; `global_size` remains as
+# a deprecated alias. It keeps its old behaviour of looking through an inactive
+# `MaybeHaloArray` to the wrapped geometry (where `size` is deliberately all
+# zeros), so code kept during the deprecation window sees the same shape on
+# every rank.
+function global_size(u)
+    Base.depwarn("`global_size(u)` is deprecated, use `size(u)`; on an inactive " *
+                 "`MaybeHaloArray` use `size(getdata(u))` for the wrapped geometry.", :global_size)
+    return _global_size(u)
+end
+const _deprecated_global_size = which(global_size, Tuple{Any})
+
+# A downstream AbstractSingleHaloArray that implemented the formerly exported
+# `global_size` keeps working during the deprecation window: `size` reaches its
+# method through this fallback (the built-in backends' `_global_size` methods
+# are more specific). A type with neither method gets a MethodError rather than
+# a recursion through the deprecated generic `global_size`.
+function _global_size(u::AbstractSingleHaloArray)
+    which(global_size, Tuple{typeof(u)}) === _deprecated_global_size &&
+        throw(MethodError(_global_size, (u,)))
+    return global_size(u)
+end

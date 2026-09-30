@@ -287,7 +287,7 @@ end
     CartesianIndex(ntuple(i -> (coord[i] - 1) * ts[i] +
         (i == D ? (S == 1 ? 1 - hw : ts[i] + 1) : 1), Val(N)))
 end
-@inline global_size(halo::ThreadedHaloArray) = interior_size(halo)
+@inline _global_size(halo::ThreadedHaloArray) = interior_size(halo)
 @inline is_root(halo::ThreadedHaloArray; root::Integer=0) = is_root(halo.topology; root=root)
 # is_active, communicator inherited from AbstractSerialHaloArray
 
@@ -335,11 +335,6 @@ end
 
 @inline function interior_view(halo::ThreadedHaloArray, tile_id::Integer)
     ranges = interior_range(halo, tile_id)
-    @views return tile_parent(halo, tile_id)[ranges...]
-end
-
-@inline function full_view(halo::ThreadedHaloArray, tile_id::Integer)
-    ranges = full_range(halo, tile_id)
     @views return tile_parent(halo, tile_id)[ranges...]
 end
 
@@ -404,29 +399,24 @@ end
 @inline _threaded_synchronize_tile!(halo::ThreadedHaloArray{T,N}, tile_id::Integer) where {T,N} =
     _foreach_face(_threaded_synchronize_side!, halo, tile_id, Val(N))
 
-function halo_exchange!(halo::ThreadedHaloArray)
-    @inbounds for tile_id in eachindex(parent(halo))
-        _threaded_exchange_tile!(halo, tile_id)
+# The three tile drivers: `threads=true` runs the per-tile work in parallel
+# through the array's thread_backend; the default serial tile loop is
+# allocation-free and usually faster for small halo surfaces (halo width 1,
+# tiles ≈ threads) — reach for the parallel form only when a benchmark shows it
+# wins (large surfaces, wide halos, many tiles).
+@inline function _each_tile!(f::F, halo::ThreadedHaloArray, threads::Bool) where {F}
+    if threads
+        _foreach_tile(tile_id -> f(halo, tile_id), halo)
+    else
+        @inbounds for tile_id in eachindex(parent(halo))
+            f(halo, tile_id)
+        end
     end
     return halo
 end
 
-"""
-    halo_exchange_threads!(u)
-    boundary_condition_threads!(u)
-    synchronize_halo_threads!(u)
-
-Threaded variants of [`halo_exchange!`](@ref) / [`boundary_condition!`](@ref) /
-[`synchronize_halo!`](@ref) for a [`ThreadedHaloArray`](@ref): the per-tile work
-runs in parallel through the array's [`thread_backend`](@ref). The default
-(non-`_threads!`) versions are a serial tile loop, which is allocation-free and
-usually faster for small halo surfaces — reach for these only when benchmarking
-shows the parallel exchange wins (large surfaces, wide halos, many tiles).
-"""
-function halo_exchange_threads!(halo::ThreadedHaloArray)
-    _foreach_tile(tile_id -> _threaded_exchange_tile!(halo, tile_id), halo)
-    return halo
-end
+halo_exchange!(halo::ThreadedHaloArray; threads::Bool=false) =
+    _each_tile!(_threaded_exchange_tile!, halo, threads)
 
 function boundary_condition!(halo::ThreadedHaloArray, tile_id::Integer, side::Side{S}, dim::Dim{D}) where {S,D}
     _threaded_boundary_side!(halo, tile_id, side, dim)
@@ -448,32 +438,15 @@ boundary_condition!(::ThreadedHaloArray, ::Integer, ::Side, ::Dim, ::Periodic) =
 @inline boundary_condition!(h::ThreadedHaloArray, t::Integer, s::Side, d::Dim, bc::FunctionBC) =
     bc.f(ghost_view(h, s, d, t), edge_view(h, s, d, t), s, d, halo_width(h), ghost_origin(h, s, d, t))
 
-function boundary_condition!(halo::ThreadedHaloArray)
-    @inbounds for tile_id in eachindex(parent(halo))
-        _threaded_boundary_tile!(halo, tile_id)
-    end
-    return halo
-end
+boundary_condition!(halo::ThreadedHaloArray; threads::Bool=false) =
+    _each_tile!(_threaded_boundary_tile!, halo, threads)
 
-function boundary_condition_threads!(halo::ThreadedHaloArray)
-    _foreach_tile(tile_id -> _threaded_boundary_tile!(halo, tile_id), halo)
-    return halo
-end
+synchronize_halo!(halo::ThreadedHaloArray; threads::Bool=false) =
+    _each_tile!(_threaded_synchronize_tile!, halo, threads)
 
-function synchronize_halo!(halo::ThreadedHaloArray)
-    @inbounds for tile_id in eachindex(parent(halo))
-        _threaded_synchronize_tile!(halo, tile_id)
-    end
-    return halo
-end
-
-function synchronize_halo_threads!(halo::ThreadedHaloArray)
-    _foreach_tile(tile_id -> _threaded_synchronize_tile!(halo, tile_id), halo)
-    return halo
-end
-
-@doc (@doc halo_exchange_threads!) boundary_condition_threads!
-@doc (@doc halo_exchange_threads!) synchronize_halo_threads!
+Base.@deprecate halo_exchange_threads!(halo) halo_exchange!(halo; threads=true) false
+Base.@deprecate boundary_condition_threads!(halo) boundary_condition!(halo; threads=true) false
+Base.@deprecate synchronize_halo_threads!(halo) synchronize_halo!(halo; threads=true) false
 
 start_halo_exchange!(halo::ThreadedHaloArray) = halo_exchange!(halo)
 finish_halo_exchange!(halo::ThreadedHaloArray) = halo
@@ -523,14 +496,14 @@ end
 
 function Base.show(io::IO, obj::ThreadedHaloArray)
     print(io, "ThreadedHaloArray{", eltype(obj), ",", ndims(obj), "}(global ",
-          global_size(obj), ", ", tile_count(obj), " tiles of ", tile_size(obj),
+          size(obj), ", ", tile_count(obj), " tiles of ", tile_size(obj),
           ", halo=", halo_width(obj), ")")
 end
 
 function Base.show(io::IO, mime::MIME"text/plain", obj::ThreadedHaloArray)
     nt = tile_count(obj)
     println(io, "ThreadedHaloArray{", eltype(obj), ", ", ndims(obj), "}")
-    println(io, "  global size : ", global_size(obj))
+    println(io, "  global size : ", size(obj))
     println(io, "  tiles       : ", nt, " (layout ", obj.topology.dims,
             "), tile_size=", tile_size(obj))
     println(io, "  storage/tile: ", storage_size(obj), " (halo=", halo_width(obj), ")")

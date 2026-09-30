@@ -31,7 +31,7 @@ using HaloArrays
         @test parent(ha)[3:6] == [10, 20, 30, 40]
         @test parent(ha)[7:8] == [40, 30]
         @test communicator(ha) === nothing
-        @test global_size(ha) == interior_size(ha)
+        @test size(ha) == interior_size(ha)
     end
 
     @testset "periodic boundaries wrap local interior" begin
@@ -94,7 +94,7 @@ using HaloArrays
     end
 end
 
-@testset "LocalMultiHaloArray" begin
+@testset "MultiHaloArray of LocalHaloArray fields" begin
     u = LocalHaloArray(Float64, (3, 2), 1; boundary_condition=:repeating)
     v = LocalHaloArray(Int, (3, 2), 1; boundary_condition=:repeating)
 
@@ -103,7 +103,7 @@ end
         interior_view(v)[i, j] = 10 * i + j
     end
 
-    fields = LocalMultiHaloArray((; u, v))
+    fields = MultiHaloArray((; u, v))
 
     @test fields isa MultiHaloArray
     @test fields.arrays.u isa LocalHaloArray
@@ -133,16 +133,16 @@ end
     @test parent(fields.arrays.u)[1, 2] == interior_view(u)[1, 1]
 
     bad = LocalHaloArray(Float64, (4, 2), 1; boundary_condition=:repeating)
-    @test_throws DimensionMismatch LocalMultiHaloArray((; u, bad))
+    @test_throws DimensionMismatch MultiHaloArray((; u, bad))
 
     # fields + boundary_condition shorthand
-    from_fields = LocalMultiHaloArray(Float64, (3, 2), 1;
+    from_fields = MultiHaloArray(LocalHaloArray, Float64, (3, 2), 1;
         fields=(:rho, :vel, :e), boundary_condition=:repeating)
     @test from_fields isa MultiHaloArray
     @test keys(from_fields.arrays) == (:rho, :vel, :e)
     @test all(f -> f isa LocalHaloArray, values(from_fields.arrays))
 
-    from_fields_default_type = LocalMultiHaloArray((3, 2), 1;
+    from_fields_default_type = MultiHaloArray(LocalHaloArray, (3, 2), 1;
         fields=(:p, :q), boundary_condition=:reflecting)
     @test eltype(from_fields_default_type) === Float64
     @test size(from_fields_default_type) == (2, 3, 2)

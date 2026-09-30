@@ -16,7 +16,7 @@ function stable_heat_dt(alpha, cfl, dx)
 end
 
 function fill_gaussian!(u)
-    nx, ny = global_size(u)
+    nx, ny = size(u)
     cx = (nx + 1) / 2
     cy = (ny + 1) / 2
     width_x = nx / 10

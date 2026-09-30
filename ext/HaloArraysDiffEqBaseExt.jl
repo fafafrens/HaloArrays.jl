@@ -4,13 +4,13 @@ using DiffEqBase
 using HaloArrays
 
 function DiffEqBase.recursive_length(halo::AbstractSingleHaloArray)
-    return prod(global_size(halo))
+    return prod(size(halo))
 end
 
 # One method covers both collection flavors (the per-field sum used previously
-# for MultiHaloArray equals prod(global_size) since all fields share one geometry).
+# for MultiHaloArray equals prod(size) since all fields share one geometry).
 function DiffEqBase.recursive_length(halo::HaloArrays.FieldCollection)
-    return prod(global_size(halo))
+    return prod(size(halo))
 end
 
 function DiffEqBase.recursive_length(halo::MaybeHaloArray)

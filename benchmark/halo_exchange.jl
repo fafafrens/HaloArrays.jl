@@ -6,23 +6,10 @@ end
 
 function exchange_methods()
     return Dict(
-        "exchange" => HaloArrays.halo_exchange_wait!,
         "blocking" => halo_exchange!,
-        "waitall" => HaloArrays.halo_exchange_waitall!,
-        "waitall_unsafe" => HaloArrays.halo_exchange_waitall_unsafe!,
-        "async" => HaloArrays.halo_exchange_async!,
-        "async_unsafe" => HaloArrays.halo_exchange_async_unsafe!,
-        "public_split" => h -> begin
+        "split" => h -> begin
             start_halo_exchange!(h)
             finish_halo_exchange!(h)
-        end,
-        "split_async" => h -> begin
-            HaloArrays.start_halo_exchange_async!(h)
-            HaloArrays.end_halo_exchange_wait!(h)
-        end,
-        "split_async_unsafe" => h -> begin
-            HaloArrays.start_halo_exchange_async_unsafe!(h)
-            HaloArrays.end_halo_exchange_async_wait_unsafe!(h)
         end,
     )
 end
@@ -30,16 +17,7 @@ end
 function selected_methods(options)
     methods = exchange_methods()
     raw = get(options, "methods", "")
-    isempty(raw) && return [
-        "blocking",
-        "waitall",
-        "waitall_unsafe",
-        "async",
-        "async_unsafe",
-        "public_split",
-        "split_async",
-        "split_async_unsafe",
-    ]
+    isempty(raw) && return ["blocking", "split"]
 
     names = String.(split(raw, ","))
     unknown = setdiff(names, collect(keys(methods)))

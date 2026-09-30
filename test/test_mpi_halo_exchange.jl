@@ -5,19 +5,7 @@ using StaticArrays
 
 const EXCHANGE_IMPLEMENTATIONS = (
     blocking=halo_exchange!,
-    waitall=HaloArrays.halo_exchange_waitall!,
-    waitall_unsafe=HaloArrays.halo_exchange_waitall_unsafe!,
-    async=HaloArrays.halo_exchange_async!,
-    async_unsafe=HaloArrays.halo_exchange_async_unsafe!,
-    split_async=(ha -> begin
-        HaloArrays.start_halo_exchange_async!(ha)
-        HaloArrays.end_halo_exchange_wait!(ha)
-    end),
-    split_async_unsafe=(ha -> begin
-        HaloArrays.start_halo_exchange_async_unsafe!(ha)
-        HaloArrays.end_halo_exchange_async_wait_unsafe!(ha)
-    end),
-    public_split=(ha -> begin
+    split=(ha -> begin
         start_halo_exchange!(ha)
         finish_halo_exchange!(ha)
     end),

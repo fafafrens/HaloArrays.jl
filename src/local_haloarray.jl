@@ -71,11 +71,6 @@ end
     @views return halo.data[ranges...]
 end
 
-function full_view(halo::LocalHaloArray)
-    ranges = full_range(halo)
-    @views return halo.data[ranges...]
-end
-
 @inline edge_view(array::LocalHaloArray, s::Side, d::Dim)  = edge_view(parent(array), s, d, halo_width(array))
 @inline ghost_view(array::LocalHaloArray, s::Side, d::Dim) = ghost_view(parent(array), s, d, halo_width(array))
 # versors, Base.similar dispatchers, Base.map!/map inherited from AbstractSingleHaloArray
@@ -110,7 +105,7 @@ interior_to_global_index(::LocalHaloArray, owned_idx::NTuple{N,<:Integer}) where
 end
 global_to_storage_index(halo::LocalHaloArray, global_idx::NTuple{N,<:Integer}) where {N} =
     all(i -> 1 <= global_idx[i] <= interior_size(halo, i), 1:N) ? ntuple(i -> global_idx[i] + halo_width(halo), Val(N)) : nothing
-global_size(halo::LocalHaloArray) = interior_size(halo)
+_global_size(halo::LocalHaloArray) = interior_size(halo)
 
 function Base.getindex(halo::LocalHaloArray, I::Vararg{Integer})
     idx = _check_global_scalar_indices(halo, I)

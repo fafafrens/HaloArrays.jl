@@ -49,7 +49,7 @@ function finite_volume_step!(u_next::HaloArray, u::HaloArray, du::HaloArray, dt,
 end
 
 function fill_burgers_initial_condition!(u::HaloArray)
-    nx = global_size(u)[1]
+    nx = size(u)[1]
 
     fill_from_global_indices!(u) do I
         x = (I[1] - 0.5) / nx
@@ -61,7 +61,7 @@ function fill_burgers_initial_condition!(u::HaloArray)
 end
 
 function solve_burgers!(u::HaloArray; steps=300, cfl=0.4)
-    dx = 1 / global_size(u)[1]
+    dx = 1 / size(u)[1]
     dt = cfl * dx / 1.5
     u_next = similar(u)
     du = similar(u)
@@ -93,7 +93,7 @@ function run_mpi_burgers(; owned_cells=100, steps=300, cfl=0.4)
     u = HaloArray(Float64, (owned_cells,), 1, topology; boundary_condition=:periodic)
 
     fill_burgers_initial_condition!(u)
-    info0 = (; dx=1 / global_size(u)[1])
+    info0 = (; dx=1 / size(u)[1])
     initial_mass = info0.dx * sum(u)
 
     info = solve_burgers!(u; steps, cfl)
@@ -105,7 +105,7 @@ function run_mpi_burgers(; owned_cells=100, steps=300, cfl=0.4)
             "HaloArray MPI",
             MPI.Comm_size(comm),
             owned_cells,
-            global_size(u)[1],
+            size(u)[1],
             info.dt,
             info.time,
             max_value,

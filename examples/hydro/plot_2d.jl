@@ -31,7 +31,7 @@ function density_snapshot(u)
 end
 
 function pressure_snapshot(u; gamma=1.4)
-    nx, ny = global_size(u[:rho])
+    nx, ny = size(u[:rho])
     h = halo_width(u[:rho])
     data = field_storages(u)
     pressure = Matrix{Float64}(undef, nx, ny)
@@ -192,7 +192,7 @@ end
 function main()
     output = isempty(ARGS) ? joinpath(tempdir(), "ideal_hydro_initial_final.svg") : ARGS[1]
     filename, u, info, initial, final = run_ideal_hydro_plot_2d(; output)
-    print_hydro_summary("LocalMultiHaloArray", u, info, initial, final)
+    print_hydro_summary("MultiHaloArray(LocalHaloArray)", u, info, initial, final)
     println("Wrote ", filename)
 end
 

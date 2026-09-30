@@ -8,7 +8,7 @@
 #   2. Boundary conditions
 #   3. Range helpers                  (CellRanges / FaceRanges)
 #   4. Worked example: 1-D heat equation
-#   5. Multiple fields                (LocalMultiHaloArray)
+#   5. Multiple fields                (MultiHaloArray)
 #   6. Threaded arrays                (ThreadedHaloArray)
 #   7. Indexed field collections      (ArrayOfHaloArray)
 # ============================================================
@@ -136,13 +136,13 @@ end
 run_heat_1d()
 
 # ============================================================
-# 5. MULTIPLE FIELDS — LocalMultiHaloArray
+# 5. MULTIPLE FIELDS — MultiHaloArray
 # ============================================================
 # Groups several fields on the same grid into one container. You can access
 # fields by name (state.rho), synchronize all of them in one call, and
 # broadcast across all of them at once.
 
-section("5 — Multi-field arrays (LocalMultiHaloArray)")
+section("5 — Multi-field arrays (MultiHaloArray)")
 
 # Upwind advection of a density and a passive scalar (a > 0, periodic).
 function run_advection_multifield(; nx=64, nt=100, cfl=0.8)
@@ -150,7 +150,7 @@ function run_advection_multifield(; nx=64, nt=100, cfl=0.8)
     a  = 1.0
     dt = cfl * dx / a
 
-    state = LocalMultiHaloArray(Float64, (nx,), 1; boundary_conditions=(
+    state = MultiHaloArray(LocalHaloArray, Float64, (nx,), 1; boundary_conditions=(
         rho = ((Periodic(), Periodic()),),
         phi = ((Periodic(), Periodic()),),
     ))
@@ -184,7 +184,7 @@ end
 run_advection_multifield()
 
 # Broadcast across every field at once:
-state = LocalMultiHaloArray(Float64, (8,), 1; boundary_conditions=(
+state = MultiHaloArray(LocalHaloArray, Float64, (8,), 1; boundary_conditions=(
     a=((Repeating(), Repeating()),), b=((Repeating(), Repeating()),)))
 state.a .= 1.0
 state.b .= 2.0
@@ -254,7 +254,7 @@ run_heat_1d_threaded()
 # ============================================================
 # 7. INDEXED FIELD COLLECTIONS — ArrayOfHaloArray
 # ============================================================
-# Like LocalMultiHaloArray, but fields are accessed by integer / Cartesian
+# Like MultiHaloArray, but fields are accessed by integer / Cartesian
 # index instead of name — handy when the count is decided at runtime or the
 # fields form a matrix (e.g. a 2×2 tensor).  synchronize_halo! and broadcast
 # act on every component; CellRanges/FaceRanges accept the container directly.

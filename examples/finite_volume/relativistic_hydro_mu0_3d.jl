@@ -141,7 +141,7 @@ function run_mu0_blast_3d(; a=1.0, n=64, cfl=0.3, t_end=0.16,
     eos = ConformalGas(a)
     dx = 1.0 / n;  dy = dx;  dz = dx;  dV = dx * dy * dz
 
-    u  = LocalMultiHaloArray(Float64, (n, n, n), 1;
+    u  = MultiHaloArray(LocalHaloArray, Float64, (n, n, n), 1;
         fields=(:Mx, :My, :Mz, :E), boundary_condition=:repeating)
     u1 = similar(u)
     du = similar(u)

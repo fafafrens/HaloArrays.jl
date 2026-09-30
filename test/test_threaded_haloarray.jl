@@ -18,8 +18,8 @@
         @test halo isa AbstractArray{Int,2}
         @test size(halo) == (12, 10)
         @test interior_size(halo) == (12, 10)
-        @test global_size(halo) == (12, 10)
-        @test axes(halo) == map(Base.OneTo, global_size(halo))
+        @test size(halo) == (12, 10)
+        @test axes(halo) == map(Base.OneTo, size(halo))
         @test interior_axes(halo) == map(Base.OneTo, interior_size(halo))
         @test halo_width(halo) == 2
         @test tile_count(halo) == 6
@@ -195,25 +195,25 @@
         default_exchange = make_sync_test_halo()
         threaded_exchange = copy(default_exchange)
         halo_exchange!(default_exchange)
-        @test halo_exchange_threads!(threaded_exchange) === threaded_exchange
+        @test halo_exchange!(threaded_exchange; threads=true) === threaded_exchange
         @test same_storage(threaded_exchange, default_exchange)
 
         default_boundary = make_sync_test_halo()
         threaded_boundary = copy(default_boundary)
         boundary_condition!(default_boundary)
-        @test boundary_condition_threads!(threaded_boundary) === threaded_boundary
+        @test boundary_condition!(threaded_boundary; threads=true) === threaded_boundary
         @test same_storage(threaded_boundary, default_boundary)
 
         default_sync = make_sync_test_halo()
         threaded_sync = copy(default_sync)
         synchronize_halo!(default_sync)
-        @test synchronize_halo_threads!(threaded_sync) === threaded_sync
+        @test synchronize_halo!(threaded_sync; threads=true) === threaded_sync
         @test same_storage(threaded_sync, default_sync)
     end
 
     @testset "threaded multi halo array fieldwise exchange and boundary conditions" begin
-        fields = ThreadedMultiHaloArray(
-            Int,
+        fields = MultiHaloArray(
+            ThreadedHaloArray, Int,
             (3,),
             1;
             dims=(2,),
@@ -319,8 +319,8 @@
     end
 
     @testset "threaded multi halo array broadcast" begin
-        fields = ThreadedMultiHaloArray(
-            Int,
+        fields = MultiHaloArray(
+            ThreadedHaloArray, Int,
             (3,),
             1;
             dims=(2,),
@@ -365,8 +365,8 @@
         @test_throws ArgumentError threaded_dest .= threaded .+ local_halo
         @test_throws ArgumentError local_dest .= local_halo .+ threaded
 
-        threaded_fields = ThreadedMultiHaloArray(
-            Int,
+        threaded_fields = MultiHaloArray(
+            ThreadedHaloArray, Int,
             (3,),
             1;
             dims=(2,),
@@ -375,7 +375,7 @@
                 mom=:repeating,
             ),
         )
-        local_fields = LocalMultiHaloArray((;
+        local_fields = MultiHaloArray((;
             rho=LocalHaloArray(Int, (6,), 1; boundary_condition=:repeating),
             mom=LocalHaloArray(Int, (6,), 1; boundary_condition=:repeating),
         ))
@@ -420,7 +420,7 @@
         end
 
         # The global getindex must see exactly those values.
-        nx, ny = global_size(u)
+        nx, ny = size(u)
         for i in 1:nx, j in 1:ny
             @test u[i, j] == 100 * i + j
         end
@@ -453,18 +453,24 @@
         bad_halo = ThreadedHaloArray(Int, (3,), 2; dims=(2,), boundary_condition=:repeating)
         bad_topology = ThreadedHaloArray(Int, (3,), 1; dims=(3,), boundary_condition=:repeating)
 
-        @test ThreadedMultiHaloArray((; rho)) isa MultiHaloArray
-        @test_throws DimensionMismatch ThreadedMultiHaloArray((; rho, bad_tile_size))
-        @test_throws DimensionMismatch ThreadedMultiHaloArray((; rho, bad_halo))
-        @test_throws DimensionMismatch ThreadedMultiHaloArray((; rho, bad_topology))
-        @test_throws ArgumentError ThreadedMultiHaloArray((; rho, local_halo=LocalHaloArray(Int, (3,), 1)))
+        @test MultiHaloArray((; rho)) isa MultiHaloArray
+        @test_throws DimensionMismatch MultiHaloArray((; rho, bad_tile_size))
+        @test_throws DimensionMismatch MultiHaloArray((; rho, bad_halo))
+        @test_throws DimensionMismatch MultiHaloArray((; rho, bad_topology))
+        @test_throws ArgumentError MultiHaloArray((; rho, local_halo=LocalHaloArray(Int, (6,), 1)))   # same geometry, other backend
+        # Same global size, different tiling: tile-indexed access would address
+        # different global cells per field, so every collection rejects it.
+        other_tiling = ThreadedHaloArray(Int, (2,), 1; dims=(3,), boundary_condition=:repeating)
+        @test size(other_tiling) == size(rho)
+        @test_throws DimensionMismatch MultiHaloArray((; rho, other_tiling))
+        @test_throws DimensionMismatch ArrayOfHaloArray([rho, other_tiling])
     end
 
-    @testset "fields shorthand and default dims for ThreadedMultiHaloArray" begin
+    @testset "fields shorthand and default dims for MultiHaloArray(ThreadedHaloArray, …)" begin
         nthreads = Threads.nthreads()
 
         # fields shorthand with explicit dims
-        mha = ThreadedMultiHaloArray(Float64, (4,), 1;
+        mha = MultiHaloArray(ThreadedHaloArray, Float64, (4,), 1;
             dims=(2,), fields=(:rho, :vel), boundary_condition=:repeating)
         @test mha isa MultiHaloArray
         @test keys(mha.arrays) == (:rho, :vel)
@@ -472,13 +478,13 @@
         @test tile_count(mha) == 2
 
         # fields shorthand with default dims (decomposes last dimension)
-        mha_default = ThreadedMultiHaloArray(Float64, (4,), 1;
+        mha_default = MultiHaloArray(ThreadedHaloArray, Float64, (4,), 1;
             fields=(:a, :b), boundary_condition=:repeating)
         @test tile_count(mha_default) == nthreads
         @test mha_default.arrays.a.topology.dims == (nthreads,)
 
         # Float64 default eltype
-        mha_f64 = ThreadedMultiHaloArray((4,), 1;
+        mha_f64 = MultiHaloArray(ThreadedHaloArray, Float64, (4,), 1;
             fields=(:p, :q), boundary_condition=:repeating)
         @test eltype(mha_f64) === Float64
     end

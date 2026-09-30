@@ -11,7 +11,7 @@ end
 
 function fill_centered_gaussian!(u; baseline=1.0, amplitude=1.0, widths=nothing)
     N = ndims(u)
-    gsize = global_size(u)
+    gsize = size(u)
     center = ntuple(i -> (gsize[i] + 1) / 2, Val(N))
     widths_tuple = widths === nothing ? ntuple(i -> gsize[i] / 10, Val(N)) : Tuple(widths)
 
@@ -25,7 +25,7 @@ end
 
 function fill_centered_gaussian!(u::ThreadedHaloArray; baseline=1.0, amplitude=1.0, widths=nothing)
     N = ndims(u)
-    gsize = global_size(u)
+    gsize = size(u)
     center = ntuple(i -> (gsize[i] + 1) / 2, Val(N))
     widths_tuple = widths === nothing ? ntuple(i -> gsize[i] / 10, Val(N)) : Tuple(widths)
 

@@ -85,7 +85,7 @@ function step!(rhs!, u, u1, du, dx, dy, dt)
 end
 
 function fill_ic!(u)
-    nx, ny = global_size(u.E)
+    nx, ny = size(u.E)
     fill_from_global_indices!(_ -> 0.0, u.Mx)
     fill_from_global_indices!(_ -> 0.0, u.My)
     fill_from_global_indices!(u.E) do I              # at-rest hot spot ⇒ E = 3p = 3aT⁴
@@ -128,18 +128,18 @@ function main(; G=(1024, 1024))
         fill_ic!(u)
         t_mpi = MPI.Allreduce(time_step(rhs_flat!, u, dx, dy, dt; sync=true), max, comm)
         if rank == 0
-            us = LocalMultiHaloArray(Float64, G, 1; boundary_conditions=bcs); fill_ic!(us)
+            us = MultiHaloArray(LocalHaloArray, Float64, G, 1; boundary_conditions=bcs); fill_ic!(us)
             t_ser = time_step(rhs_flat!, us, dx, dy, dt)
             @printf("MPI  ranks=%-2d dims=%-7s  serial=%7.3f ms  MPI=%7.3f ms  speedup=%.2fx  (grid %dx%d)\n",
                 P, string(topo.dims), 1e3 * t_ser, 1e3 * t_mpi, t_ser / t_mpi, G...)
         end
     else
         # ── single process: serial baseline (+ threaded if -t>1) ──
-        us = LocalMultiHaloArray(Float64, G, 1; boundary_conditions=bcs); fill_ic!(us)
+        us = MultiHaloArray(LocalHaloArray, Float64, G, 1; boundary_conditions=bcs); fill_ic!(us)
         t_ser = time_step(rhs_flat!, us, dx, dy, dt)
         if T > 1
             G[2] % T == 0 || error("grid y=$(G[2]) not divisible by threads=$T")
-            ut = ThreadedMultiHaloArray(Float64, (G[1], G[2] ÷ T), 1; dims=(1, T), boundary_conditions=bcs)
+            ut = MultiHaloArray(ThreadedHaloArray, Float64, (G[1], G[2] ÷ T), 1; dims=(1, T), boundary_conditions=bcs)
             fill_ic!(ut)
             t_thr = time_step(rhs_threaded!, ut, dx, dy, dt)
             @printf("THR  threads=%-2d           serial=%7.3f ms  threaded=%7.3f ms  speedup=%.2fx  (grid %dx%d)\n",

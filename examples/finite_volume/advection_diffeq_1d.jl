@@ -8,7 +8,7 @@ advection_rhs!(du, u, p, t) = _fv_rhs_1d!(du, u, upwind_flux, p.dx, p.velocity)
 fill_advection_initial_condition!(u) = _fv_fill_profile_1d!(u, initial_profile)
 
 function solve_advection_diffeq(u0; velocity=1.0, steps=200, cfl=0.4)
-    dx = 1 / global_size(u0)[1]
+    dx = 1 / size(u0)[1]
     dt = cfl * dx / abs(velocity)
     p = (; velocity, dx)
     return _fv_solve_diffeq_1d(advection_rhs!, u0, p; dt, steps, info=p)

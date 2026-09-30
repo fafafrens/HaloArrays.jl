@@ -32,6 +32,38 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `gather_haloarray` accepts a `MaybeHaloArray`: active ranks gather on its
   sub-communicator, inactive ranks return `nothing`, so the gather recipe above
   works for `dims=` reduction results too.
+- `threads=true` keyword on `halo_exchange!`, `boundary_condition!`, and
+  `synchronize_halo!` runs a `ThreadedHaloArray`'s per-tile work in parallel
+  (other backends accept and ignore it).
+- `MultiHaloArray(LocalHaloArray, …)` and `MultiHaloArray(ThreadedHaloArray, …)`
+  accept the `fields=` / `boundary_condition=` shorthand.
+
+### Deprecated
+One name per operation. The old names still work with a deprecation warning and
+will be removed in 0.10:
+
+| Deprecated | Use |
+|---|---|
+| `halo_exchange_threads!(u)`, `boundary_condition_threads!(u)`, `synchronize_halo_threads!(u)` | the same function with `threads=true` |
+| `LocalMultiHaloArray(T, dims, halo; …)` | `MultiHaloArray(LocalHaloArray, T, dims, halo; …)` |
+| `ThreadedMultiHaloArray(T, tile, halo; …)` | `MultiHaloArray(ThreadedHaloArray, T, tile, halo; …)` |
+| `LocalMultiHaloArray(nt)`, `ThreadedMultiHaloArray(nt)` | `MultiHaloArray(nt)` (validates the field geometry) |
+| `mapreduce_haloarray_dims(f, op, u, dims)` | `mapreduce(f, op, u; dims)` (also `sum(u; dims)` etc.) |
+| `global_size(u)` | `size(u)` (on an inactive `MaybeHaloArray`, `size(getdata(u))`: `size` itself is all zeros there, `global_size` looked through). A downstream array type that defines `global_size` keeps working through `size` during the window. |
+
+### Fixed
+- `MultiHaloArray(nt)` and `ArrayOfHaloArray([…])` reject threaded fields that
+  share a global size but not a tiling (tile size or tile grid); before, only
+  the `ThreadedMultiHaloArray` constructor checked this, and a mismatched
+  collection let tile-indexed operations address different global cells in
+  different fields.
+
+### Removed (internal)
+- The second, `MPI.Request`-based halo-exchange implementation and its seven
+  unexported compatibility wrappers (`halo_exchange_wait!`, `halo_exchange_async!`, …);
+  the public `halo_exchange!` / `start_halo_exchange!` / `finish_halo_exchange!`
+  are unchanged. Also the unreferenced `full_view`, `setactive`,
+  `apply_if_active!`, `_dim_slab_range`, and `mapreduce_mhaloarray_dims`.
 
 ## [0.8.1] — 2026-09-30
 
