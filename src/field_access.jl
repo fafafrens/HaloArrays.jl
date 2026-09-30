@@ -1,10 +1,4 @@
 # Local storage access: no halo exchange or intermediate field-container map.
-@inline function _require_flat_fields(state::AbstractHaloCollection)
-    all(field -> field isa AbstractSingleHaloArray, eachfield(state)) ||
-        throw(ArgumentError("field access requires a flat collection of single halo arrays; nested collections are not supported"))
-    return nothing
-end
-
 @inline _cell_storage(field::Union{LocalHaloArray,HaloArray}, ::Nothing) = parent(field)
 @inline _cell_storage(field::ThreadedHaloArray, ::Nothing) =
     throw(ArgumentError("threaded field access requires an explicit tile id"))
@@ -13,109 +7,120 @@ Base.@propagate_inbounds function _cell_storage(field::AbstractSingleHaloArray, 
     return tile_parent(field, tile)
 end
 
-function _check_field_access(values::AbstractVector, state::AbstractHaloCollection{T,N,S},
-        I::CartesianIndex{D}, tile) where {T,N,S,D}
-    D == S || throw(DimensionMismatch("expected a $S-dimensional storage index, got $D"))
-    length(values) == prod(field_shape(state)) ||
-        throw(DimensionMismatch("vector length must equal the number of fields"))
-    # Validate all storage indices before mutating a destination.
-    for field in eachfield(state)
-        checkbounds(_cell_storage(field, tile), I)
-    end
-    return nothing
-end
-
 """
-    gather_fields!(dest, state, I::CartesianIndex[, tile])
+    siteview(state, I::CartesianIndex[, tile])
 
-Copy all fields at local padded-storage index `I` into the preallocated vector
-`dest`. Accepts flat `ArrayOfHaloArray` and `MultiHaloArray` collections whose
-immediate fields are all single halo arrays. Nested collections are rejected
-with `ArgumentError` before any writes. Array field containers use column-major
-order; named collections use declaration order. The vector length must equal
-`prod(field_shape(state))`.
+Return a writable `AbstractVector` of all fields at local padded-storage index
+`I`, without copying component values. A single `LocalHaloArray`, `HaloArray`, or
+`ThreadedHaloArray` gives a one-component vector: `q[1]` reads or writes its cell
+value. Array-valued cell elements are preserved as one component, not flattened.
+Flat `ArrayOfHaloArray` and `MultiHaloArray` collections give one component per
+field, in column-major or declaration order respectively. Their length is
+`prod(field_shape(state))` and is not encoded in the view's type.
 
-`I` uses the storage coordinates returned by `interior_cells(CellRanges(state))`
-and `interior_faces(FaceRanges(state), dim)`, including allocated halo cells.
-The caller must synchronize halos before reading them. No communication is
-performed. Threaded collections require an explicit `tile` id; Local/MPI
-collections use their local storage (and optionally accept tile id `1`).
+`I` uses the storage coordinates of `interior_cells(CellRanges(state))`, including
+allocated halo cells. Threaded arrays and collections require an explicit tile id;
+Local/MPI collections access local storage and optionally accept tile id `1`.
+No communication occurs. Synchronize halos before reading ghost cells and
+refresh them after modifying interior values when subsequent stencils need them.
+These scalar accessors are intended for CPU storage, not GPU kernel launches.
 
-Returns `dest`. No intermediate field container or vector is allocated. These
-scalar accessors are intended for CPU storage; they do not launch GPU kernels.
-The destination must not alias the state storage.
+Writes immediately modify the underlying fields. Use `copy(q)` for an independent
+snapshot; `similar(q)` creates an ordinary uninitialized vector. Copying and
+broadcasting use Julia's standard implementations and checks: `copyto!` checks
+destination capacity, and broadcast checks compatible shapes with singleton
+expansion. No additional component-length or shape checks are defined here.
+Operations requiring an automatic alias-protection copy of a site view throw
+`ArgumentError`; copy the source explicitly, e.g. `q .= copy(view(q, 4:-1:1))`.
+Alias detection is conservative: separate views sharing field storage may require
+an explicit copy even at distinct sites. Direct self-broadcast such as `q .*= 2`
+and operations with independent buffers are supported.
+Scalar reads convert to the view's element type: the state's element type,
+promoted for collections, so `q[k] isa eltype(q)` holds for mixed field types.
+Read a field directly for its native type. Allocated outputs such as `copy(q)` and
+`similar(q)` use the same element type. Writes convert to the individual
+destination field's element type. The view is not contiguous storage.
+Do not resize or replace the collection's fields while using a view. Concurrent
+writes must target disjoint storage or be externally synchronized.
 
-Validation follows Julia's bounds-checking convention: calling with `@inbounds`
-skips the flat-collection, vector-length, index-dimension, and storage/tile
-checks. The caller must ensure these hold. Ordinary calls validate before
-writing.
-
-Passing a nested collection under `@inbounds` is therefore undefined: the loop
-reaches a field with no storage accessor and raises `MethodError` instead of the
-`ArgumentError`, and `scatter_fields!`/`add_fields!` may already have written the
-flat fields preceding it. Only the checked path guarantees no partial writes.
+Construction performs no validation. The caller must supply a single array or flat collection,
+a storage index of the correct dimension and within bounds, and a valid tile
+(explicit for threaded storage). Ordinary scalar indexing remains bounds-checked;
+`@inbounds` may elide those checks. Alias detection remains enabled.
 
 ```julia
-u = ArrayOfHaloArray(LocalHaloArray, Float64, (3,), (16,), 1;
-                     boundary_condition=:periodic)
-v = zeros(3)
-I = first(interior_cells(CellRanges(u)))
-gather_fields!(v, u, I)
+q = siteview(state, I)          # pass a final tile id for threaded storage
+copyto!(buffer, q)             # gather
+copyto!(q, buffer)             # scatter
+q .+= 0.5 .* buffer            # accumulate into initialized fields
 ```
 """
-Base.@propagate_inbounds function gather_fields!(dest::AbstractVector, state::AbstractHaloCollection,
-        I::CartesianIndex, tile::Union{Nothing,Integer}=nothing)
-    @boundscheck begin
-        _require_flat_fields(state)
-        _check_field_access(dest, state, I, tile)
-    end
-    @inbounds for (j, field) in zip(eachindex(dest), eachfield(state))
-        dest[j] = _cell_storage(field, tile)[I]
-    end
-    return dest
+@inline function siteview(state::Union{AbstractSingleHaloArray{T},AbstractHaloCollection{T}},
+        I::CartesianIndex, tile::Union{Nothing,Integer}=nothing) where {T}
+    return SiteView{T,typeof(state),typeof(I),typeof(tile)}(state, I, tile)
 end
 
-"""
-    scatter_fields!(state, I::CartesianIndex, values[, tile])
-
-Overwrite all fields at local padded-storage index `I` from `values` and return
-`state`. Uses the field ordering, tile selection, and index conventions of
-[`gather_fields!`](@ref). No communication or halo synchronization is performed;
-refresh halos before subsequent stencil reads. `values` must not alias state
-storage. Element conversion follows ordinary array assignment.
-"""
-Base.@propagate_inbounds function scatter_fields!(state::AbstractHaloCollection, I::CartesianIndex,
-        values::AbstractVector, tile::Union{Nothing,Integer}=nothing)
-    @boundscheck begin
-        _require_flat_fields(state)
-        _check_field_access(values, state, I, tile)
-    end
-    @inbounds for (j, field) in zip(eachindex(values), eachfield(state))
-        _cell_storage(field, tile)[I] = values[j]
-    end
-    return state
+struct SiteView{T,C,I,K} <: AbstractVector{T}
+    state::C
+    index::I
+    tile::K
 end
 
-"""
-    add_fields!(state, I::CartesianIndex, values, scale[, tile])
+# A single field uses a one-element tuple, without constructing a collection.
+@inline _site_fields(state::AbstractSingleHaloArray) = (state,)
+@inline _site_fields(state::AbstractHaloCollection) = eachfield(state)
 
-Accumulate `scale * values` into all fields at local padded-storage index `I`
-and return `state`. The target entries must already be initialized. Uses the
-ordering, tile selection, and non-aliasing contract of [`gather_fields!`](@ref).
-No communication or halo synchronization is performed.
+Base.parent(q::SiteView) = q.state
+Base.size(q::SiteView) = (length(_site_fields(q.state)),)
+Base.IndexStyle(::Type{<:SiteView}) = IndexLinear()
 
-For a finite-volume face flux `F`, use `add_fields!(du, IL, F, -invdx)` and
-`add_fields!(du, IR, F, invdx)` on initialized storage.
-"""
-Base.@propagate_inbounds function add_fields!(state::AbstractHaloCollection, I::CartesianIndex,
-        values::AbstractVector, scale, tile::Union{Nothing,Integer}=nothing)
-    @boundscheck begin
-        _require_flat_fields(state)
-        _check_field_access(values, state, I, tile)
-    end
-    @inbounds for (j, field) in zip(eachindex(values), eachfield(state))
-        storage = _cell_storage(field, tile)
-        storage[I] += scale * values[j]
-    end
-    return state
+# Ordinary arrays use column-major linear indexing directly. The general path
+# also handles containers with nonstandard axes.
+@inline _site_field(fields::Tuple, k::Int) = fields[k]
+@inline _site_field(fields::Array, k::Int) = fields[k]
+@inline function _site_field(fields::AbstractArray, k::Int)
+    ordinal = CartesianIndices(size(fields))[k]
+    index = CartesianIndex(ntuple(d -> ordinal[d] + first(axes(fields, d)) - 1,
+        Val(ndims(fields))))
+    return fields[index]
+end
+
+Base.@propagate_inbounds function Base.getindex(q::SiteView{T}, k::Int) where {T}
+    @boundscheck checkbounds(q, k)
+    field = _site_field(_site_fields(q.state), k)
+    return convert(T, _cell_storage(field, q.tile)[q.index])
+end
+
+Base.@propagate_inbounds function Base.setindex!(q::SiteView, value, k::Int)
+    @boundscheck checkbounds(q, k)
+    field = _site_field(_site_fields(q.state), k)
+    _cell_storage(field, q.tile)[q.index] = value
+    return q
+end
+
+Base.similar(::SiteView, ::Type{T}, dims::Dims) where {T} = Array{T}(undef, dims)
+Base.copy(q::SiteView) = copyto!(Vector{eltype(q)}(undef, length(q)), q)
+Base.unaliascopy(::SiteView) = throw(ArgumentError(
+    "overlapping site-view operations require an explicit copy of the source; use copy(source)"))
+
+# Expose backing storage identity to Julia's alias handling, including SubArrays
+# of site views and collections that share fields in different orders.
+Base.dataids(q::SiteView) = _site_dataids(_site_fields(q.state), q.tile)
+
+# Tuple fields (single arrays, MultiHaloArray) give a statically sized id tuple.
+@inline _site_dataids(::Tuple{}, _) = ()
+@inline _site_dataids(fields::Tuple, tile) =
+    (Base.dataids(_cell_storage(first(fields), tile))..., _site_dataids(Base.tail(fields), tile)...)
+# Array field containers have a runtime field count, so their id tuple allocates.
+_site_dataids(fields, tile) = Tuple(id for field in fields
+    for id in Base.dataids(_cell_storage(field, tile)))
+
+# Avoid allocating a runtime-sized tuple of storage ids on ordinary copies and
+# broadcasts. dataids remains the fallback for wrappers such as SubArray.
+function Base.mightalias(q::SiteView, a::AbstractArray)
+    return any(field -> Base.mightalias(_cell_storage(field, q.tile), a), _site_fields(q.state))
+end
+Base.mightalias(a::AbstractArray, q::SiteView) = Base.mightalias(q, a)
+function Base.mightalias(q::SiteView, r::SiteView)
+    return any(field -> Base.mightalias(_cell_storage(field, q.tile), r), _site_fields(q.state))
 end

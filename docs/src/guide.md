@@ -94,28 +94,71 @@ and broadcast with local operands.
 
 ### Reading and writing all fields at one cell
 
-Use `gather_fields!`, `scatter_fields!`, and `add_fields!` with preallocated
-vectors to access a complete cell state without building a container of backing
-arrays. These CPU operations use **local padded-storage indices**, including
-ghost cells, and perform no communication:
+Use `siteview(u, I[, tile])` to access all components as a writable vector,
+without copying values or building a container of backing arrays. These CPU
+operations use **local padded-storage indices**, including ghost cells, and
+perform no communication:
 
 ```julia
 u = ArrayOfHaloArray(LocalHaloArray, Float64, (3,), (32,32), 1;
                      boundary_condition=:periodic)
 U = zeros(3)
 I = first(interior_cells(CellRanges(u)))
-gather_fields!(U, u, I)       # fields -> vector
-scatter_fields!(u, I, U)     # overwrite fields
-add_fields!(u, I, U, 0.5)    # accumulate 0.5*U
+q = siteview(u, I)
+copyto!(U, q)                # fields -> vector
+copyto!(q, U)                # overwrite fields
+q .+= 0.5 .* U               # accumulate into initialized fields
+snapshot = copy(q)           # independent Vector
 ```
 
-Only flat collections of single halo arrays are supported; nested collections
-throw `ArgumentError` before writing, including when called with `@inbounds`.
-Multidimensional array field containers use column-major order; named collections
-use declaration order. Vector length must equal `prod(field_shape(u))`.
-Threaded collections require a final tile ID argument.
-Synchronize halos before reading ghost values and initialize accumulation
-targets before calling `add_fields!`. Inputs and outputs must not alias.
+Single halo arrays are also supported, yielding a one-component vector:
+
+```julia
+u = LocalHaloArray(Float64, (32,32), 1; boundary_condition=:periodic)
+I = first(interior_cells(CellRanges(u)))
+q = siteview(u, I)
+q[1] = 2.0                  # writes the cell directly
+q .*= 3                     # the cell now contains 6.0
+```
+
+A vector- or matrix-valued cell is one component; its contents are not flattened.
+Collections must be flat. Multidimensional array field containers use column-major
+order; named collections use declaration order. Threaded arrays and collections
+require a final tile ID argument. The number of
+components is runtime-sized; the view is not contiguous memory.
+
+Writes take effect immediately. Take a snapshot if a calculation needs the
+original state throughout an update. Site views have no internal snapshot buffer.
+Operations requiring Julia to make an automatic alias-protection copy of a site
+view throw `ArgumentError`; explicitly copy the source instead:
+
+```julia
+q .= copy(view(q, length(q):-1:1))
+```
+
+Alias detection is conservative, so separate views sharing field storage may
+require a copy even at distinct sites. Direct self-broadcast (`q .*= 2`) and
+operations with independent buffers remain supported.
+
+Synchronize halos before reading ghost
+values and refresh them before subsequent stencil reads. Do not resize or
+replace fields while a view is in use. Parallel writes must access disjoint
+storage or be synchronized.
+
+Construction performs no validation: callers must supply a single array or flat fields, a valid
+storage index of the correct dimension, and a valid tile (explicit for threaded
+storage). Ordinary scalar indexing still checks bounds; `@inbounds` can skip it.
+
+Copying and broadcasting use Julia's standard implementations and validation.
+`copyto!` checks destination capacity (a larger destination is allowed), while
+broadcasting checks compatible shapes and supports singleton expansion. There
+are no additional component-length or shape checks in the site-view code.
+Alias detection remains enabled.
+
+Scalar reads convert to the state's element type (promoted for collections), so
+`q[k] isa eltype(q)` holds even for mixed field types; read a field directly for its
+native type. `copy(q)` and `similar(q)` allocate ordinary arrays of the same element
+type. Writes convert to the destination field's type.
 
 The public exchange API is intentionally small:
 
