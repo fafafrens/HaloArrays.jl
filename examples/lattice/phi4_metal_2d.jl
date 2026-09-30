@@ -170,11 +170,8 @@ function phi4_sweep!(kernel!, backend, phi, params, buffers::RandomBuffers)
         )
     end
 
-    # One sync per sweep: the sweep returns with device work complete, so
-    # callers may read observables on the host.
-    synchronize_halo!(phi)
-    KA.synchronize(backend)
-
+    # No sync at the end of the sweep: the next sweep refreshes halos itself, and
+    # host reads such as `Array(...)` wait for the queued device work.
     return phi
 end
 
@@ -244,6 +241,7 @@ function run_phi4_metal_haloarray_2d(;
         end
     end
 
+    synchronize_halo!(phi)   # sweeps leave ghost cells stale; return a synced field
     return phi
 end
 
