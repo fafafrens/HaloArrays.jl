@@ -115,6 +115,7 @@ export interior_view,
 # Cell geometry (grid.jl)
 export CoordinateSystem,
     Cartesian,
+    Polar,
     Cylindrical,
     Spherical,
     coordinate_names,

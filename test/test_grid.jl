@@ -20,6 +20,8 @@ _noncorner(data, hw) = (I for I in CartesianIndices(data)
         @test_throws ArgumentError EdgeAxis([1.0])
         @test coordinate_names(Cartesian(), Val(2)) == (:x, :y)
         @test coordinate_names(Cylindrical(), Val(3)) == (:r, :θ, :z)
+        @test coordinate_names(Polar(), Val(2)) == (:r, :θ)
+        @test_throws ArgumentError coordinate_names(Polar(), Val(3))
         @test coordinate_names(Spherical(), Val(2)) == (:r, :θ)
         @test_throws ArgumentError coordinate_names(Spherical(), Val(4))
     end
@@ -127,6 +129,23 @@ _noncorner(data, hw) = (I for I in CartesianIndices(data)
         c1 = LocalHaloArray(Float64, (10,), 1)
         g1 = cell_geometry(c1, EdgeAxis(cell_edges((0, 1, 2), (4, 6))); system=Cylindrical())
         @test sum(cell_volume(sys, g1, I) for I in _interior(c1)) ≈ 2^2 / 2
+    end
+
+    @testset "polar metric is exact" begin
+        d = LocalHaloArray(Float64, (10, 8), 1)
+        g = cell_geometry(d, (EdgeAxis(cell_edges((0, 0.5, 2), (3, 7))), UniformAxis(0, 2π)); system=Polar())
+        @test propertynames(g) == (:r, :θ, :hr, :hθ)
+        sys = Polar()
+        @test sum(cell_volume(sys, g, I) for I in _interior(d)) ≈ π * 2^2            # disk
+        @test sum(face_area(sys, g, Dim(1), I) for I in _interior(d) if I[1] == 11) ≈ 2π * 2   # circumference
+        @test all(face_area(sys, g, Dim(1), CartesianIndex(1, j)) ≈ 0 for j in 2:9)         # centre
+        @test sum(face_area(sys, g, Dim(2), I) for I in _interior(d) if I[2] == 3) ≈ 2       # a radius
+        I = CartesianIndex(5, 4)
+        @test face_center(sys, g, Dim(1), I)[1] ≈ cell_center(sys, g, I)[1] + cell_width(sys, g, I)[1] / 2
+        @test face_normal(sys, g, Dim(2), I) == SVector(0.0, 1.0)
+        f(g, I) = cell_volume(sys, g, I) + face_area(sys, g, Dim(1), I) + face_area(sys, g, Dim(2), I)
+        f(g, I)
+        @test @allocated(f(g, I)) == 0
     end
 
     @testset "spherical metric is exact" begin

@@ -16,7 +16,7 @@ using StaticArrays
 """
     CoordinateSystem
 
-Supertype of the coordinate-system tags ([`Cartesian`](@ref),
+Supertype of the coordinate-system tags ([`Cartesian`](@ref), [`Polar`](@ref),
 [`Cylindrical`](@ref), [`Spherical`](@ref)) that select the field names and the
 metric terms of a [`cell_geometry`](@ref). The geometry stores one coordinate
 field and one width field per spatial dimension, in this order; the tag decides
@@ -26,6 +26,8 @@ abstract type CoordinateSystem end
 
 "Cartesian coordinates `x, y, z` (widths `hx, hy, hz`); the metric is the product of widths."
 struct Cartesian <: CoordinateSystem end
+"Polar coordinates `r, θ` (2D); volumes and face areas carry the factor `r`."
+struct Polar <: CoordinateSystem end
 """
 Cylindrical coordinates with the radius first: `r` (1D), `r, z` (2D,
 axisymmetric), `r, θ, z` (3D). Volumes and face areas carry the factor `r`.
@@ -46,6 +48,7 @@ The coordinate field names of an `N`-dimensional [`cell_geometry`](@ref) in the
 given coordinate system. The width fields are the same names prefixed by `h`.
 """
 coordinate_names(::Cartesian,   ::Val{N}) where {N} = ntuple(d -> (:x, :y, :z)[d], Val(N))
+coordinate_names(::Polar,       ::Val{2}) = (:r, :θ)
 coordinate_names(::Cylindrical, ::Val{1}) = (:r,)
 coordinate_names(::Cylindrical, ::Val{2}) = (:r, :z)
 coordinate_names(::Cylindrical, ::Val{3}) = (:r, :θ, :z)
@@ -281,12 +284,12 @@ end
     cell_volume(system, g, I[, tile]) -> Real
 
 Volume of the cell at padded-storage index `I`: the exact integral of the
-metric over the cell (`∏ h` in Cartesian; `r hr ∏ h` in cylindrical;
+metric over the cell (`∏ h` in Cartesian; `r hr ∏ h` in polar and cylindrical;
 `∫r²dr ∫sinθdθ hφ` in spherical). Missing dimensions count as unit extent.
 """
 @inline cell_volume(::Cartesian, g::AbstractHaloCollection, I, tile=nothing) =
     _prod_widths(_site(g, I, tile), Val(_geo_ndims(g)))
-@inline function cell_volume(::Cylindrical, g::AbstractHaloCollection, I, tile=nothing)
+@inline function cell_volume(::Union{Polar,Cylindrical}, g::AbstractHaloCollection, I, tile=nothing)
     q = _site(g, I, tile)
     return _coord(q, 1) * _prod_widths(q, Val(_geo_ndims(g)))
 end
@@ -334,6 +337,11 @@ unit extent.
 """
 @inline face_area(::Cartesian, g::AbstractHaloCollection, ::Dim{D}, I, tile=nothing) where {D} =
     _prod_widths_except(_site(g, I, tile), Val(_geo_ndims(g)), Val(D))
+@inline function face_area(::Polar, g::AbstractHaloCollection, ::Dim{D}, I, tile=nothing) where {D}
+    q = _site(g, I, tile)
+    # radial face: an arc r₊ hθ; θ face: a radial segment hr
+    return D == 1 ? (_coord(q, 1) + _width(q, 1) / 2) * _width(q, 2) : _width(q, 1)
+end
 @inline function face_area(::Cylindrical, g::AbstractHaloCollection, ::Dim{D}, I, tile=nothing) where {D}
     q = _site(g, I, tile)
     N = _geo_ndims(g)
