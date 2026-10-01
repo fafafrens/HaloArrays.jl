@@ -2,9 +2,11 @@ using Test
 using MPI
 using HaloArrays
 
-# Cell geometry on a distributed HaloArray: every rank fills its own block,
-# ghosts included, from the global index — so the local storages must equal
-# the corresponding window of the serial geometry, with no exchange involved.
+# Cell geometry on a distributed HaloArray: every rank fills its interior from
+# the global index and one synchronize completes the ghosts (exchange across
+# ranks and periodic edges, FunctionBC on physical edges) — so the local
+# storages must equal the corresponding window of the serial geometry built
+# with the same periodicity.
 
 @testset "MPI cell geometry" begin
     comm = MPI.COMM_WORLD
@@ -24,11 +26,14 @@ using HaloArrays
         @test propertynames(g) == (:r, :z, :hr, :hz)
         @test g.r isa HaloArray
 
-        ref = cell_geometry(LocalHaloArray(Float64, (GX, GY), 1), axes2; system=Cylindrical())
+        ref = cell_geometry(LocalHaloArray(Float64, (GX, GY), 1; boundary_condition=bc), axes2;
+                            system=Cylindrical())
         rs  = field_storages(ref)
         gs  = field_storages(g)
         origin = interior_to_global_index(u, (1, 1))
-        for I in CartesianIndices(gs.r)
+        noncorner = (I for I in CartesianIndices(gs.r)
+            if count(d -> !(1 < I[d] <= size(gs.r, d) - 1), 1:2) <= 1)   # corners are never filled
+        for I in noncorner
             J = CartesianIndex(origin .+ Tuple(I) .- 1)   # ref storage index (same halo width)
             @test gs.r[I] == rs.r[J]
             @test gs.z[I] == rs.z[J]
@@ -39,7 +44,10 @@ using HaloArrays
         V = sum(cell_volume(Cylindrical(), gs, I) for I in CartesianIndices(interior_range(u)))
         @test MPI.Allreduce(V, +, comm) ≈ 2^2 / 2 * 2
         # the geometry's boundary condition mirrors the topology's periodicity
-        @test g.r.boundary_condition[1] == (periodic ? (Periodic(), Periodic()) :
-                                                        (NoBoundaryCondition(), NoBoundaryCondition()))
+        if periodic
+            @test g.r.boundary_condition[1] == (Periodic(), Periodic())
+        else
+            @test g.r.boundary_condition[1][1] isa FunctionBC
+        end
     end
 end

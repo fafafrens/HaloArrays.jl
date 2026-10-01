@@ -6,6 +6,9 @@ using StaticArrays
 # backend (ghosts included), and the metric helpers against exact integrals.
 
 _interior(u) = CartesianIndices(interior_range(u))
+# storage indices that are not corner ghosts (ghost in at most one direction)
+_noncorner(data, hw) = (I for I in CartesianIndices(data)
+    if count(d -> !(hw < I[d] <= size(data, d) - hw), 1:ndims(data)) <= 1)
 
 @testset "cell geometry" begin
     @testset "axes" begin
@@ -22,32 +25,38 @@ _interior(u) = CartesianIndices(interior_range(u))
     end
 
     @testset "construction and ghost cells (LocalHaloArray)" begin
-        u = LocalHaloArray(Float64, (8, 4), 2; boundary_condition=:periodic)
+        u = LocalHaloArray(Float64, (8, 4), 2; boundary_condition=:reflecting)
         g = cell_geometry(u, (UniformAxis(0, 1), EdgeAxis(cell_edges((0, 0.1, 1), (1, 3)))))
         @test g isa MultiHaloArray
         @test propertynames(g) == (:x, :y, :hx, :hy)
         @test interior_size(g.x) == (8, 4) && halo_width(g.x) == 2
         gs = field_storages(g)
-        # uniform axis: centres at (i - 1/2) h, continued through the ghosts
+        # uniform axis: centres at (i - 1/2) h, continued through the ghosts on
+        # physical edges by the geometry's own FunctionBC
         @test gs.x[:, 3] ≈ [(i - 0.5) / 8 for i in -1:10]
-        @test all(gs.hx .≈ 1 / 8)
+        @test all(gs.hx[I] ≈ 1 / 8 for I in _noncorner(gs.hx, 2))
         # edge axis: interior centres/widths from the edges, ghosts continue
-        # with the edge cell's width (never wrapped, even though u is periodic)
+        # with the edge cell's width
         @test gs.y[3, 3:6] ≈ [0.05, 0.25, 0.55, 0.85]
         @test gs.hy[3, 3:6] ≈ [0.1, 0.3, 0.3, 0.3]
         @test gs.y[3, 1:2] ≈ [-0.15, -0.05]
         @test gs.y[3, 7:8] ≈ [1.15, 1.45]
-        # the geometry's own boundary condition mirrors u's periodicity and
-        # leaves physical edges alone
-        @test g.x.boundary_condition == ((Periodic(), Periodic()), (Periodic(), Periodic()))
-        v = LocalHaloArray(Float64, (8, 4), 1; boundary_condition=:reflecting)
-        gv = cell_geometry(v, UniformAxis(0, 1), UniformAxis(0, 1))
-        @test gv.x.boundary_condition ==
-            ((NoBoundaryCondition(), NoBoundaryCondition()), (NoBoundaryCondition(), NoBoundaryCondition()))
+        # corner ghosts are not filled (library convention) but deterministic
+        @test gs.x[1, 1] == 0 && gs.hy[12, 8] == 0
+        @test g.x.boundary_condition[1][1] isa FunctionBC
+        # synchronizing again changes nothing
+        before = copy(gs.x); synchronize_halo!(g)
+        @test field_storages(g).x == before
+        # periodic directions wrap like any other field
+        p = LocalHaloArray(Float64, (8, 4), 2; boundary_condition=:periodic)
+        gp = cell_geometry(p, UniformAxis(0, 1), UniformAxis(0, 1))
+        ps = field_storages(gp)
+        @test ps.x[1:2, 3] ≈ [6.5 / 8, 7.5 / 8] && ps.x[11:12, 3] ≈ [0.5 / 8, 1.5 / 8]
+        @test gp.x.boundary_condition == ((Periodic(), Periodic()), (Periodic(), Periodic()))
         # vararg and tuple forms agree; Float32 storage on request
-        g32 = cell_geometry(v, UniformAxis(0, 1), UniformAxis(0, 1); T=Float32)
+        g32 = cell_geometry(u, UniformAxis(0, 1), EdgeAxis(cell_edges((0, 0.1, 1), (1, 3))); T=Float32)
         @test eltype(g32.x) == Float32
-        @test field_storages(g32).x ≈ field_storages(gv).x
+        @test all(field_storages(g32).x[I] ≈ gs.x[I] for I in _noncorner(gs.x, 2))
         # errors
         @test_throws DimensionMismatch cell_geometry(u, (UniformAxis(0, 1),))
         @test_throws DimensionMismatch cell_geometry(u, (UniformAxis(0, 1), EdgeAxis([0.0, 1.0])))
@@ -68,7 +77,7 @@ _interior(u) = CartesianIndices(interior_range(u))
         ls = field_storages(gl)
         for tid in 1:tile_count(t)
             ts = tile_parent(gt, tid)
-            for I in CartesianIndices(ts.x)
+            for I in _noncorner(ts.x, 1)          # tile corners are never exchanged
                 G = interior_to_global_index(t, tid, ntuple(d -> 1, 2)) .+ (Tuple(I) .- 1 .- 1)
                 J = CartesianIndex(G .+ 1)             # storage index in the single block
                 @test ts.x[I] ≈ ls.x[J]
