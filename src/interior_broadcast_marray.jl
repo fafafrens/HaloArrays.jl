@@ -41,7 +41,7 @@ end
 
 @inline Base.copyto!(dest::FieldCollection, bc::Broadcasted{<:MultiHaloArrayStyle}) =
     _each_field!(copyto!, dest, bc)
-@inline Base.copy(bc::Broadcasted{<:MultiHaloArrayStyle}) = _each_field!(copyto!, _broadcast_dest(bc), bc)
+@inline Base.copy(bc::Broadcasted{<:MultiHaloArrayStyle}) = _each_field!(copyto!, similar(bc, Broadcast.combine_eltypes(bc.f, bc.args)), bc)
 Broadcast.materialize!(dest::FieldCollection, bc::Broadcasted) =
     _each_field!(Broadcast.materialize!, dest, bc)
 
