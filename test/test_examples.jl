@@ -66,6 +66,16 @@ const LINEARSOLVE_EXAMPLES = [
     "schrodinger/crank_nicolson_2d.jl",
 ]
 
+# CI runs the smoke tests on several runners at once: HALOARRAYS_EXAMPLE_SHARD="k/n"
+# keeps every n-th script of each list starting at the k-th (round robin, so the
+# slow scripts spread over the shards). Unset, every script runs.
+function _shard(list)
+    spec = get(ENV, "HALOARRAYS_EXAMPLE_SHARD", "")
+    isempty(spec) && return list
+    k, n = parse.(Int, split(spec, "/"))
+    return [rel for (i, rel) in enumerate(list) if (i - 1) % n == k - 1]
+end
+
 function _smoke_run(rel)
     path = joinpath(EXAMPLES_DIR, rel)
     # A module created with `module … end` syntax gets its own `include`/`eval`,
@@ -91,14 +101,14 @@ function _smoke_run(rel)
 end
 
 @testset "Example scripts (smoke)" begin
-    for rel in SMOKE_EXAMPLES
+    for rel in _shard(SMOKE_EXAMPLES)
         @testset "$rel" begin
             @test _smoke_run(rel)
         end
     end
 
     if Base.find_package("DiffEqBase") !== nothing
-        for rel in DIFFEQ_EXAMPLES
+        for rel in _shard(DIFFEQ_EXAMPLES)
             @testset "$rel" begin
                 @test _smoke_run(rel)
             end
@@ -108,7 +118,7 @@ end
     end
 
     if all(pkg -> Base.find_package(pkg) !== nothing, ("LinearSolve", "Krylov"))
-        for rel in LINEARSOLVE_EXAMPLES
+        for rel in _shard(LINEARSOLVE_EXAMPLES)
             @testset "$rel" begin
                 @test _smoke_run(rel)
             end
