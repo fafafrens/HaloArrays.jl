@@ -1,51 +1,39 @@
 using Base.Broadcast: Broadcasted, broadcastable, BroadcastStyle, AbstractArrayStyle, DefaultArrayStyle
 
 # ------------------------------------------------------------------------------
-# Broadcast style marker for HaloArray
+# The halo broadcast styles
+#
+# One style per container kind. The precedence rules are shared by all of
+# them: a scalar keeps the halo style; a plain array turns the broadcast into
+# plain-array semantics (DefaultArrayStyle); any other AbstractArrayStyle
+# wins; two of the same kind keep the larger dimensionality. Cross-kind pairs
+# are ruled on individually (below, and in the collection / Maybe files).
 # ------------------------------------------------------------------------------
 
-struct HaloArrayStyle{N} <: AbstractArrayStyle{N} end
-HaloArrayStyle(::Val{N}) where {N} = HaloArrayStyle{N}()
-HaloArrayStyle{N}(::Val{N}) where {N} = HaloArrayStyle{N}()
+struct HaloArrayStyle{N}         <: AbstractArrayStyle{N} end   # HaloArray, LocalHaloArray
+struct ThreadedHaloArrayStyle{N} <: AbstractArrayStyle{N} end   # ThreadedHaloArray
+struct MultiHaloArrayStyle{N}    <: AbstractArrayStyle{N} end   # MultiHaloArray, ArrayOfHaloArray
+struct MaybeHaloArrayStyle{N}    <: AbstractArrayStyle{N} end   # MaybeHaloArray
 
-struct ThreadedHaloArrayStyle{N} <: AbstractArrayStyle{N} end
-ThreadedHaloArrayStyle(::Val{N}) where {N} = ThreadedHaloArrayStyle{N}()
-ThreadedHaloArrayStyle{N}(::Val{N}) where {N} = ThreadedHaloArrayStyle{N}()
+const _HaloStyle{N} = Union{HaloArrayStyle{N},ThreadedHaloArrayStyle{N},
+                            MultiHaloArrayStyle{N},MaybeHaloArrayStyle{N}}
 
-# This lets DefaultArrayStyle broadcast correctly with HaloArray
-Broadcast.BroadcastStyle(a::HaloArrayStyle, ::Base.Broadcast.DefaultArrayStyle{0}) = a
-Broadcast.BroadcastStyle(a::ThreadedHaloArrayStyle, ::Base.Broadcast.DefaultArrayStyle{0}) = a
+for S in (:HaloArrayStyle, :ThreadedHaloArrayStyle, :MultiHaloArrayStyle, :MaybeHaloArrayStyle)
+    @eval begin
+        $S(::Val{N}) where {N} = $S{N}()
+        $S{M}(::Val{N}) where {M,N} = $S{N}()   # Base's convention: Style{M}(Val(N)) is Style{N}
+        Broadcast.BroadcastStyle(::$S{N}, ::$S{M}) where {N,M} = $S(Val(max(N, M)))
+    end
+end
+Broadcast.BroadcastStyle(s::_HaloStyle, ::DefaultArrayStyle{0}) = s
+Broadcast.BroadcastStyle(::_HaloStyle{N}, ::DefaultArrayStyle{M}) where {N,M} =
+    DefaultArrayStyle(Val(max(M, N)))
+Broadcast.BroadcastStyle(::_HaloStyle{N}, a::AbstractArrayStyle{M}) where {N,M} =
+    typeof(a)(Val(max(M, N)))
 
-# BroadcastStyle inference for HaloArray types
 Broadcast.BroadcastStyle(::Type{<:HaloArray{T,N}}) where {T,N} = HaloArrayStyle{N}()
 Broadcast.BroadcastStyle(::Type{<:LocalHaloArray{T,N}}) where {T,N} = HaloArrayStyle{N}()
 Broadcast.BroadcastStyle(::Type{<:ThreadedHaloArray{T,N}}) where {T,N} = ThreadedHaloArrayStyle{N}()
-
-function Broadcast.BroadcastStyle(::HaloArrayStyle{N}, a::Base.Broadcast.DefaultArrayStyle{M}) where {N,M}
-    Base.Broadcast.DefaultArrayStyle(Val(max(M, N)))
-end
-
-function Broadcast.BroadcastStyle(::HaloArrayStyle{N},
-        a::Base.Broadcast.AbstractArrayStyle{M}) where {M, N}
-    typeof(a)(Val(max(M, N)))
-end
-
-function Broadcast.BroadcastStyle(::HaloArrayStyle{N}, ::HaloArrayStyle{M}) where {N,M}
-    HaloArrayStyle(Val(max(N,M)))
-end
-
-function Broadcast.BroadcastStyle(::ThreadedHaloArrayStyle{N}, a::Base.Broadcast.DefaultArrayStyle{M}) where {N,M}
-    Base.Broadcast.DefaultArrayStyle(Val(max(M, N)))
-end
-
-function Broadcast.BroadcastStyle(::ThreadedHaloArrayStyle{N},
-        a::Base.Broadcast.AbstractArrayStyle{M}) where {M,N}
-    typeof(a)(Val(max(M, N)))
-end
-
-function Broadcast.BroadcastStyle(::ThreadedHaloArrayStyle{N}, ::ThreadedHaloArrayStyle{M}) where {N,M}
-    ThreadedHaloArrayStyle(Val(max(N,M)))
-end
 
 _mixed_halo_backend_broadcast_error() =
     throw(ArgumentError("broadcast between threaded and non-threaded halo containers is not supported"))
@@ -65,36 +53,32 @@ Broadcast.broadcastable(x::HaloArray) = x
 Broadcast.broadcastable(x::LocalHaloArray) = x
 Broadcast.broadcastable(x::ThreadedHaloArray) = x
 
-# Find first HaloArray in a broadcast expression
-find_ha(bc::Broadcasted) = find_ha(bc.args)
-find_ha(args::Tuple) = find_ha(find_ha(args[1]), Base.tail(args))
-find_ha(x::HaloArray, rest) = x
-find_ha(x::LocalHaloArray, rest) = x
-find_ha(x, rest) = find_ha(rest)
-find_ha(x) = x
+# ---- Shared tree walkers -----------------------------------------------------
+# First operand of type `T` in a broadcast tree: the prototype `similar` builds
+# the destination from.
+_find_operand(::Type{T}, bc::Broadcasted) where {T} = _find_operand(T, bc.args)
+_find_operand(::Type{T}, args::Tuple) where {T} =
+    _find_operand(T, _find_operand(T, args[1]), Base.tail(args))
+_find_operand(::Type{T}, x) where {T} = x
+_find_operand(::Type{T}, x::T, rest) where {T} = x
+_find_operand(::Type{T}, x, rest) where {T} = _find_operand(T, rest)
 
-find_threaded_ha(bc::Broadcasted) = find_threaded_ha(bc.args)
-find_threaded_ha(args::Tuple) = find_threaded_ha(find_threaded_ha(args[1]), Base.tail(args))
-find_threaded_ha(x::ThreadedHaloArray, rest) = x
-find_threaded_ha(x, rest) = find_threaded_ha(rest)
-find_threaded_ha(x) = x
+# Rebuild a broadcast tree with `leaf` applied to every operand. Nodes whose
+# style is a `Drop` lose it (it is recomputed from the unpacked operands);
+# other nodes keep theirs.
+@inline _map_operands(leaf::F, bc::Broadcasted{S}, ::Type{Drop}) where {F,S,Drop} =
+    Broadcasted{S}(bc.f, _map_args(leaf, bc.args, Drop))
+@inline _map_operands(leaf::F, bc::Broadcasted{<:Drop}, ::Type{Drop}) where {F,Drop} =
+    Broadcasted(bc.f, _map_args(leaf, bc.args, Drop))
+@inline _map_operands(leaf::F, x, ::Type{Drop}) where {F,Drop} = leaf(x)
+@inline _map_args(leaf::F, args::Tuple, ::Type{Drop}) where {F,Drop} =
+    (_map_operands(leaf, args[1], Drop), _map_args(leaf, Base.tail(args), Drop)...)
+_map_args(::F, ::Tuple{}, ::Type{Drop}) where {F,Drop} = ()
 
-# Unpack broadcast args per field
-unpack_ha(x::AbstractSingleHaloArray) = interior_view(x)
-unpack_ha(x) = x
-@inline function unpack_ha(bc::Broadcasted{Style}) where {Style}
-    Broadcasted{Style}(bc.f, unpack_args_ha(bc.args))
-end
-
-@inline function unpack_ha(bc::Broadcasted{<:HaloArrayStyle}) 
-    Broadcasted(bc.f, unpack_args_ha(bc.args))
-end
-
-
-@inline function unpack_args_ha( args::Tuple)
-    (unpack_ha(args[1]), unpack_args_ha( Base.tail(args))...)
-end
-unpack_args_ha( args::Tuple{Any}) = (unpack_ha(args[1]),)
+# Single-block arrays broadcast over their interior views.
+_interior_leaf(x::AbstractSingleHaloArray) = interior_view(x)
+_interior_leaf(x) = x
+@inline unpack_ha(bc::Broadcasted) = _map_operands(_interior_leaf, bc, HaloArrayStyle)
 
 # A plain array (or a single-block halo array's interior) in a THREADED
 # broadcast is indexed by GLOBAL interior coordinates, so each tile must see
@@ -219,21 +203,17 @@ end
 # ------------------------------------------------------------------------------
 
 function Base.similar(bc::Broadcasted{<:HaloArrayStyle}, ::Type{T}) where {T}
-    ha = find_ha(bc)
-    return similar(ha, T)
+    return similar(_find_operand(Union{HaloArray,LocalHaloArray}, bc), T)
 end
 
 function Base.similar(bc::Broadcasted{<:HaloArrayStyle})
-    ha = find_ha(bc)
-    return similar(ha)
+    return similar(_find_operand(Union{HaloArray,LocalHaloArray}, bc))
 end
 
 function Base.similar(bc::Broadcasted{<:ThreadedHaloArrayStyle}, ::Type{T}) where {T}
-    ha = find_threaded_ha(bc)
-    return similar(ha, T)
+    return similar(_find_operand(ThreadedHaloArray, bc), T)
 end
 
 function Base.similar(bc::Broadcasted{<:ThreadedHaloArrayStyle})
-    ha = find_threaded_ha(bc)
-    return similar(ha)
+    return similar(_find_operand(ThreadedHaloArray, bc))
 end
