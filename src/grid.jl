@@ -242,8 +242,6 @@ _geometry_field_source(c::AbstractHaloCollection)   = _first_field(c)
 @inline _geo_ndims(gs::NamedTuple) = length(gs) ÷ 2
 @inline _coord(gs, d, I) = @inbounds gs[d][I]
 @inline _width(gs, d, I) = @inbounds gs[_geo_ndims(gs) + d][I]
-@inline _unit(::Val{N}, ::Val{D}, ::Type{T}) where {N,D,T} =
-    SVector(ntuple(j -> j == D ? one(T) : zero(T), Val(N)))
 
 """
     cell_center(system, gs, I) -> SVector
@@ -296,7 +294,7 @@ with `I + e_d`); the minus face of `I` is the plus face of `I - e_d`.
 """
 @inline function face_center(sys::CoordinateSystem, gs::NamedTuple, ::Dim{D}, I) where {D}
     c = cell_center(sys, gs, I)
-    return c + _unit(Val(length(c)), Val(D), eltype(c)) * (_width(gs, D, I) / 2)
+    return c + SVector{length(c),eltype(c)}(versors(Val(length(c)))[D]) * (_width(gs, D, I) / 2)
 end
 
 """
@@ -353,4 +351,4 @@ independent of `I`; the argument form is kept so kernels need not change for
 grids whose normals vary per face.
 """
 @inline face_normal(::CoordinateSystem, gs::NamedTuple, ::Dim{D}, I) where {D} =
-    _unit(Val(_geo_ndims(gs)), Val(D), eltype(gs[1]))
+    SVector{_geo_ndims(gs),eltype(gs[1])}(versors(Val(_geo_ndims(gs)))[D])
