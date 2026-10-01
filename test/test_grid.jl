@@ -6,6 +6,16 @@ using StaticArrays
 # backend (ghosts included), and the metric helpers against exact integrals.
 
 _interior(u) = CartesianIndices(interior_range(u))
+# Allocation must not grow with the call count: `@allocated` of a Float64
+# result reports a 16 B box on Julia 1.10 even inside a function, so compare
+# one call against a thousand instead of asserting zero. The arguments travel
+# as a tuple (a splatted Vararg would not specialise and would allocate).
+_calls(f::F, n, args::Tuple) where {F} = (s = 0.0; for _ in 1:n; s += f(args...); end; s)
+function _allocation_free(f::F, args...) where {F}
+    a = args
+    _calls(f, 1, a)
+    return @allocated(_calls(f, 1, a)) == @allocated(_calls(f, 1000, a))
+end
 # storage indices that are not corner ghosts (ghost in at most one direction)
 _noncorner(data, hw) = (I for I in CartesianIndices(data)
     if count(d -> !(hw < I[d] <= size(data, d) - hw), 1:ndims(data)) <= 1)
@@ -144,8 +154,7 @@ _noncorner(data, hw) = (I for I in CartesianIndices(data)
         @test face_center(sys, g, Dim(1), I)[1] ≈ cell_center(sys, g, I)[1] + cell_width(sys, g, I)[1] / 2
         @test face_normal(sys, g, Dim(2), I) == SVector(0.0, 1.0)
         f(g, I) = cell_volume(sys, g, I) + face_area(sys, g, Dim(1), I) + face_area(sys, g, Dim(2), I)
-        f(g, I)
-        @test @allocated(f(g, I)) == 0
+        @test _allocation_free(f, g, I)
     end
 
     @testset "spherical metric is exact" begin
@@ -178,9 +187,8 @@ _noncorner(data, hw) = (I for I in CartesianIndices(data)
             g  = cell_geometry(u, axes3; system=sys)
             gt = cell_geometry(t, axes3; system=sys)
             I = CartesianIndex(3, 3, 3)
-            f(g, I, nothing); f(gt, I, 2)
-            @test @allocated(f(g, I, nothing)) == 0
-            @test @allocated(f(gt, I, 2)) == 0
+            @test _allocation_free(f, g, I, nothing)
+            @test _allocation_free(f, gt, I, 2)
             @test f(gt, I, 2) ≈ f(g, CartesianIndex(3, 3, 5), nothing)   # tile 2 starts at global z = 3
         end
     end
