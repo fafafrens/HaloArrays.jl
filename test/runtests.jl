@@ -52,6 +52,7 @@ include_test(name) = include(joinpath(@__DIR__, name))
         include_test("test_svector_eltype.jl")
         include_test("test_gather_local.jl")
         include_test("test_hdf5_local_threaded.jl")
+        include_test("test_grid.jl")
         # Adapt integration: JLArrays (GPUArrays' CPU backend) is a test extra —
         # available under Pkg.test, skipped on a bare --project=. run.
         if Base.find_package("JLArrays") !== nothing
@@ -82,6 +83,7 @@ include_test(name) = include(joinpath(@__DIR__, name))
             include_test("test_saving_hdf5.jl")
             include_test("test_mpi_reduce_save.jl")
             include_test("test_mpi_reduction_plan.jl")
+            include_test("test_mpi_grid.jl")
             # Distributed implicit solve (HaloKrylov) — available under Pkg.test.
             if all(p -> Base.find_package(p) !== nothing, ("LinearSolve", "Krylov", "OrdinaryDiffEq"))
                 include_test("test_mpi_implicit.jl")

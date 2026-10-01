@@ -32,6 +32,7 @@ include("reduction.jl")
 include("vector_space.jl")
 include("linearsolve.jl")
 include("mpi_support.jl")
+include("grid.jl")
 include("adapt.jl")
 include("hdf5_api.jl")   # HDF5 I/O stubs; methods in ext/HaloArraysHDF5Ext.jl (weakdep)
 
@@ -110,6 +111,26 @@ export interior_view,
     unit_vector,
     interior_to_global_index,
     fill_from_global_indices!
+
+# Cell geometry (grid.jl)
+export CoordinateSystem,
+    Cartesian,
+    Polar,
+    Cylindrical,
+    Spherical,
+    coordinate_names,
+    AbstractAxis,
+    UniformAxis,
+    EdgeAxis,
+    cell_edges,
+    cell_geometry,
+    cell_center,
+    cell_width,
+    cell_volume,
+    face_center,
+    face_distance,
+    face_area,
+    face_normal
 
 # Boundary conditions
 export boundary_condition!,
