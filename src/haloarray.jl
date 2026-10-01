@@ -172,7 +172,7 @@ end
 
 # ---- global / topology accessors (pure field access, no MPI calls) ----
 
-#     global_size(u) -> dims
+#     size(u) -> dims   (the per-backend primitive behind Base.size)
 #
 # Size of the **whole** grid across all ranks / tiles (`interior_size .* topology.dims`).
 # For [`LocalHaloArray`](@ref) it equals [`interior_size`](@ref); for [`HaloArray`](@ref)

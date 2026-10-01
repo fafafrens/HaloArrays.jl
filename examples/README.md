@@ -83,7 +83,7 @@ mpiexec -n 4 julia --project=examples examples/heat/multigpu_mpi_2d.jl    # CPU 
 To save a gathered MPI snapshot to HDF5:
 
 ```bash
-mpiexec -n 4 julia --project=. -e 'include("examples/heat/mpi.jl"); run_mpi_heat_2d(save_hdf5=true)'
+mpiexec -n 4 julia --project=examples -e 'include("examples/heat/mpi.jl"); run_mpi_heat_2d(save_hdf5=true)'
 ```
 
 ## Finite volume (`finite_volume/`)

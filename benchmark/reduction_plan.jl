@@ -1,7 +1,7 @@
 include("common.jl")
 
 # Dimensional reduction, one-shot vs planned:
-#   oneshot — mapreduce_haloarray_dims (== sum(u; dims=…)): builds a transient
+#   oneshot — sum(u; dims=…) (mapreduce with dims=): builds a transient
 #             DimReductionPlan per call (2× MPI.Cart_sub) and hands the result
 #             its sub-communicator (freed here each sample via free!)
 #   plan    — DimReductionPlan built once, then one MPI.Reduce per reduce!
@@ -39,7 +39,7 @@ function main()
     fill_benchmark_data!(u)
 
     if rank == 0
-        println("Dimensional-reduction benchmark: mapreduce_haloarray_dims vs DimReductionPlan")
+        println("Dimensional-reduction benchmark: sum(u; dims=…) vs DimReductionPlan")
         println("  ranks:       ", nproc)
         println("  topology:    ", topology.dims)
         println("  ndims:       ", ndims_)
