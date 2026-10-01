@@ -31,8 +31,10 @@ Broadcast.BroadcastStyle(::_HaloStyle{N}, ::DefaultArrayStyle{M}) where {N,M} =
 Broadcast.BroadcastStyle(::_HaloStyle{N}, a::AbstractArrayStyle{M}) where {N,M} =
     typeof(a)(Val(max(M, N)))
 
-Broadcast.BroadcastStyle(::Type{<:HaloArray{T,N}}) where {T,N} = HaloArrayStyle{N}()
-Broadcast.BroadcastStyle(::Type{<:LocalHaloArray{T,N}}) where {T,N} = HaloArrayStyle{N}()
+# HaloArray and LocalHaloArray hold one storage block per process and share
+# every broadcast method below; ThreadedHaloArray works tile by tile.
+const _SingleBlock{T,N} = Union{HaloArray{T,N},LocalHaloArray{T,N}}
+Broadcast.BroadcastStyle(::Type{<:_SingleBlock{T,N}}) where {T,N} = HaloArrayStyle{N}()
 Broadcast.BroadcastStyle(::Type{<:ThreadedHaloArray{T,N}}) where {T,N} = ThreadedHaloArrayStyle{N}()
 
 _mixed_halo_backend_broadcast_error() =
@@ -46,12 +48,10 @@ Broadcast.BroadcastStyle(::HaloArrayStyle, ::ThreadedHaloArrayStyle) =
 
 
 # ------------------------------------------------------------------------------
-# Broadcast setup for HaloArray
+# Broadcast setup
 # ------------------------------------------------------------------------------
 
-Broadcast.broadcastable(x::HaloArray) = x
-Broadcast.broadcastable(x::LocalHaloArray) = x
-Broadcast.broadcastable(x::ThreadedHaloArray) = x
+Broadcast.broadcastable(x::AbstractSingleHaloArray) = x   # used as is, never collected
 
 # ---- Shared tree walkers -----------------------------------------------------
 # First operand of type `T` in a broadcast tree: the prototype `similar` builds
@@ -118,101 +118,63 @@ unpack_ha_tile(x::AbstractArray, tile_id, ref) = _tile_global_view(x, ref, tile_
 unpack_ha_tile(x::AbstractArray{<:Any,0}, tile_id, ref) = x   # 0-d wrapper: scalar-like
 unpack_ha_tile(x, tile_id, ref) = x                            # scalars, Ref, types, …
 
-@inline function unpack_ha_tile(bc::Broadcasted{Style}, tile_id, ref) where {Style}
-    Broadcasted{Style}(bc.f, unpack_args_ha_tile(tile_id, ref, bc.args))
-end
-
-@inline function unpack_ha_tile(
-        bc::Broadcasted{<:Union{HaloArrayStyle,ThreadedHaloArrayStyle}}, tile_id, ref)
-    Broadcasted(bc.f, unpack_args_ha_tile(tile_id, ref, bc.args))
-end
-
-@inline function unpack_args_ha_tile(tile_id, ref, args::Tuple)
-    (unpack_ha_tile(args[1], tile_id, ref), unpack_args_ha_tile(tile_id, ref, Base.tail(args))...)
-end
-unpack_args_ha_tile(tile_id, ref, args::Tuple{Any}) = (unpack_ha_tile(args[1], tile_id, ref),)
-unpack_args_ha_tile(tile_id, ref, args::Tuple{}) = ()
+# The whole tree for one tile: every operand rewritten to this tile's window
+# (the leaves above); halo-style nodes lose their tag, others keep it.
+@inline unpack_ha_tile(bc::Broadcasted, tile_id, ref) =
+    _map_operands(x -> unpack_ha_tile(x, tile_id, ref), bc, Union{HaloArrayStyle,ThreadedHaloArrayStyle})
 
 
 # ------------------------------------------------------------------------------
 # Broadcast execution
 # ------------------------------------------------------------------------------
+# In place: a single-block destination runs the rewritten tree on its interior
+# view; a threaded one runs it tile by tile. `copyto!` arrives with our style,
+# `materialize!` with whatever style the operands combined to (the destination
+# decides how to run it).
 
-@inline function Base.copyto!(dest::HaloArray, bc::Broadcasted{<:HaloArrayStyle})
-    bc_flat = Broadcast.flatten(bc)
-    copyto!(interior_view(dest), unpack_ha(bc_flat))
+@inline function Base.copyto!(dest::_SingleBlock, bc::Broadcasted{<:HaloArrayStyle})
+    copyto!(interior_view(dest), unpack_ha(Broadcast.flatten(bc)))
+    return dest
+end
+function Broadcast.materialize!(dest::_SingleBlock, bc::Broadcasted)
+    Broadcast.materialize!(interior_view(dest), unpack_ha(Broadcast.flatten(bc)))
     return dest
 end
 
-@inline function Base.copyto!(dest::LocalHaloArray, bc::Broadcasted{<:HaloArrayStyle})
-    bc_flat = Broadcast.flatten(bc)
-    copyto!(interior_view(dest), unpack_ha(bc_flat))
-    return dest
-end
-
+# Tile by tile. The operation is written out in each closure rather than
+# passed in: a closure that also captures the operation costs one more
+# allocation per call on the task path.
 @inline function Base.copyto!(dest::ThreadedHaloArray, bc::Broadcasted{<:ThreadedHaloArrayStyle})
     bc_flat = Broadcast.flatten(bc)
-    _foreach_tile(tile_id -> _copyto_threaded_broadcast_tile!(dest, bc_flat, tile_id), dest)
+    _foreach_tile(tile_id -> (copyto!(interior_view(dest, tile_id), unpack_ha_tile(bc_flat, tile_id, dest)); nothing), dest)
     return dest
 end
-
-# Out of place, the destination has the result element type combined from `f`
-# and the operands, as in Base (`Float32.(u)`, `u .> v`, `u .+ 1im` give
-# Float32, Bool, ComplexF64 arrays). A function whose result type inference
-# cannot pin down gives the inferred union or `Any`, as a comprehension would.
-# The same expression builds the destination for every container kind.
-@inline function Base.copy(bc::Broadcast.Broadcasted{<:HaloArrayStyle})
-    bc_flat = Broadcast.flatten(bc)
-    dest = similar(bc, Broadcast.combine_eltypes(bc.f, bc.args))
-    copyto!(interior_view(dest), unpack_ha(bc_flat))
-    return dest
-end
-
-@inline function Base.copy(bc::Broadcast.Broadcasted{<:ThreadedHaloArrayStyle})
-    bc_flat = Broadcast.flatten(bc)
-    dest = similar(bc, Broadcast.combine_eltypes(bc.f, bc.args))
-    copyto!(dest, bc_flat)
-    return dest
-end
-
-function Broadcast.materialize!(dest::HaloArray, bc::Broadcasted)
-    bc_flat = Broadcast.flatten(bc)
-    Broadcast.materialize!(interior_view(dest),unpack_ha(bc_flat))
-    return dest
-end
-
-function Broadcast.materialize!(dest::LocalHaloArray, bc::Broadcasted)
-    bc_flat = Broadcast.flatten(bc)
-    Broadcast.materialize!(interior_view(dest), unpack_ha(bc_flat))
-    return dest
-end
-
 function Broadcast.materialize!(dest::ThreadedHaloArray, bc::Broadcasted)
     bc_flat = Broadcast.flatten(bc)
-    _foreach_tile(tile_id -> _materialize_threaded_broadcast_tile!(dest, bc_flat, tile_id), dest)
+    _foreach_tile(tile_id -> (Broadcast.materialize!(interior_view(dest, tile_id), unpack_ha_tile(bc_flat, tile_id, dest)); nothing), dest)
     return dest
 end
 
-@inline function _copyto_threaded_broadcast_tile!(dest::ThreadedHaloArray, bc_flat, tile_id)
-    copyto!(interior_view(dest, tile_id), unpack_ha_tile(bc_flat, tile_id, dest))
-    return nothing
-end
-
-@inline function _materialize_threaded_broadcast_tile!(dest::ThreadedHaloArray, bc_flat, tile_id)
-    Broadcast.materialize!(interior_view(dest, tile_id), unpack_ha_tile(bc_flat, tile_id, dest))
-    return nothing
-end
+# Out of place: allocate, then run in place. The destination has the result
+# element type combined from `f` and the operands, as in Base (`Float32.(u)`,
+# `u .> v`, `u .+ 1im` give Float32, Bool, ComplexF64 arrays); a function whose
+# result type inference cannot pin down gives the inferred union or `Any`, as
+# a comprehension would. The same expression serves every container kind.
+@inline Base.copy(bc::Broadcasted{<:HaloArrayStyle}) =
+    copyto!(similar(bc, Broadcast.combine_eltypes(bc.f, bc.args)), bc)
+@inline Base.copy(bc::Broadcasted{<:ThreadedHaloArrayStyle}) =
+    copyto!(similar(bc, Broadcast.combine_eltypes(bc.f, bc.args)), bc)
 
 # ------------------------------------------------------------------------------
 # Allocation
 # ------------------------------------------------------------------------------
 
 function Base.similar(bc::Broadcasted{<:HaloArrayStyle}, ::Type{T}) where {T}
-    return similar(_find_operand(Union{HaloArray,LocalHaloArray}, bc), T)
+    return similar(_find_operand(_SingleBlock, bc), T)
 end
 
 function Base.similar(bc::Broadcasted{<:HaloArrayStyle})
-    return similar(_find_operand(Union{HaloArray,LocalHaloArray}, bc))
+    return similar(_find_operand(_SingleBlock, bc))
 end
 
 function Base.similar(bc::Broadcasted{<:ThreadedHaloArrayStyle}, ::Type{T}) where {T}

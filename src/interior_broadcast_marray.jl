@@ -17,7 +17,7 @@ Broadcast.BroadcastStyle(::ThreadedHaloArrayStyle{M}, ::MultiHaloArrayStyle{Ndim
 Broadcast.broadcastable(x::FieldCollection) = x
 
 _field_leaf(x::FieldCollection, i) = _fields(x)[i]
-_field_leaf(x::Union{HaloArray,LocalHaloArray}, i) = interior_view(x)
+_field_leaf(x::_SingleBlock, i) = interior_view(x)
 _field_leaf(x, i) = x
 
 # Every collection operand must have the destination's number of fields.
