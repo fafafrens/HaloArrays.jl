@@ -130,7 +130,7 @@ mpiexec -n 4 julia --project=benchmark benchmark/gather_hdf5.jl --owned-size=64,
 ```
 
 Reference (4 ranks, 64²; median): `gather_haloarray` ~285 µs,
-`gather_and_save` ~1.0 ms, `append_haloarray_to_file` ~4.8 ms — the HDF5 file
+`gather_haloarray+h5write` ~1.0 ms, `append_haloarray!` ~4.8 ms — the HDF5 file
 write dominates by an order of magnitude.
 
 The `--output` option is a path prefix. The script writes files with suffixes

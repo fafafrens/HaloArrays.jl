@@ -7,7 +7,7 @@ using HDF5   # activates the HDF5 I/O extension (collective write)
 #   gather_reduce_save : gather the WHOLE global array to root, reduce there,
 #                        root writes the profile. Comm ∝ prod(global_size),
 #                        serial write on root.
-#   reduce_gather_save : mapreduce_haloarray_dims reduces in place across MPI
+#   reduce_gather_save : sum(u; dims=…) reduces in place across MPI
 #                        sub-communicators (Cart_sub + one MPI.Reduce), then the
 #                        (small) reduced array is gathered to root and written.
 #   reduce_save        : reduce in place, then write the distributed reduced
