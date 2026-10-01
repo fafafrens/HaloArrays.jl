@@ -66,7 +66,32 @@ const LINEARSOLVE_EXAMPLES = [
     "schrodinger/crank_nicolson_2d.jl",
 ]
 
+# CI runs the smoke tests on several runners at once: HALOARRAYS_EXAMPLE_SHARD="k/n"
+# keeps every n-th script of each list starting at the k-th (round robin, so the
+# slow scripts spread over the shards). Unset, every script runs.
+function _shard(list)
+    spec = get(ENV, "HALOARRAYS_EXAMPLE_SHARD", "")
+    isempty(spec) && return list
+    k, n = parse.(Int, split(spec, "/"))
+    return [rel for (i, rel) in enumerate(list) if (i - 1) % n == k - 1]
+end
+
+# Each script's wall time goes to the log (the nested testset rows do not: the
+# top-level testset in runtests.jl is not verbose), so a slow CI shard can be
+# traced to a script.
 function _smoke_run(rel)
+    t = @elapsed ok = _smoke_run_quiet(rel)
+    @info "example $rel: $(round(t; digits=1)) s"
+    return ok
+end
+
+# Keyword arguments for a script's `main` when its defaults are benchmark
+# sized: the smoke test checks that the script runs, not its timings.
+const SMOKE_ARGS = Dict(
+    "poisson/cg_fused.jl" => (n = 128, maxiter = 50),   # default 1024², 200 iterations x 3 reps: minutes on a CI runner
+)
+
+function _smoke_run_quiet(rel)
     path = joinpath(EXAMPLES_DIR, rel)
     # A module created with `module … end` syntax gets its own `include`/`eval`,
     # which a bare `Module()` does not — scripts that `include("common.jl")` need
@@ -81,7 +106,8 @@ function _smoke_run(rel)
             # it on include; the rest auto-run a `run_*()` at top level. Evaluate
             # the `main` call inside the sandbox (in the post-include world) so the
             # simulation runs either way, without a world-age binding warning.
-            Core.eval(sandbox, :(isdefined(@__MODULE__, :main) && main()))
+            kw = get(SMOKE_ARGS, rel, (;))
+            Core.eval(sandbox, :(isdefined(@__MODULE__, :main) && main(; $kw...)))
             true
         catch err
             @error "example script failed" example = rel exception = (err, catch_backtrace())
@@ -91,14 +117,14 @@ function _smoke_run(rel)
 end
 
 @testset "Example scripts (smoke)" begin
-    for rel in SMOKE_EXAMPLES
+    for rel in _shard(SMOKE_EXAMPLES)
         @testset "$rel" begin
             @test _smoke_run(rel)
         end
     end
 
     if Base.find_package("DiffEqBase") !== nothing
-        for rel in DIFFEQ_EXAMPLES
+        for rel in _shard(DIFFEQ_EXAMPLES)
             @testset "$rel" begin
                 @test _smoke_run(rel)
             end
@@ -108,7 +134,7 @@ end
     end
 
     if all(pkg -> Base.find_package(pkg) !== nothing, ("LinearSolve", "Krylov"))
-        for rel in LINEARSOLVE_EXAMPLES
+        for rel in _shard(LINEARSOLVE_EXAMPLES)
             @testset "$rel" begin
                 @test _smoke_run(rel)
             end

@@ -7,6 +7,14 @@ on:
   pull_request:
     branches: [ main ]
 
+# julia-actions/cache deletes the cache it supersedes (same job, same ref)
+# only with this permission. Without it every run left its caches behind, the
+# repository hit GitHub's 10 GB limit, and evictions cold-started whole runs
+# (~8-10 min of precompile per job).
+permissions:
+  actions: write
+  contents: read
+
 jobs:
   test:
     name: Julia ${{ matrix.julia-version }} - unit tests
@@ -50,8 +58,14 @@ jobs:
           HALOARRAYS_RUN_MPI_TESTS: "false"
 
   exampletests:
-    name: Example smoke tests
+    name: Example smoke tests (${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
+    # The scripts are mostly JIT-bound (28 scripts, ~10 min serially on a
+    # runner), so the list is split round-robin over three runners.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v5
       - uses: julia-actions/setup-julia@v3
@@ -68,6 +82,7 @@ jobs:
           HALOARRAYS_RUN_UNIT_TESTS: "false"
           HALOARRAYS_RUN_MPI_TESTS: "false"
           HALOARRAYS_RUN_EXAMPLE_TESTS: "true"
+          HALOARRAYS_EXAMPLE_SHARD: "${{ matrix.shard }}/3"
 
   mpitests:
     name: MPI tests (${{ matrix.np }} ranks)
