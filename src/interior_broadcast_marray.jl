@@ -24,6 +24,10 @@ _field_leaf(x, i) = x
 @inline function _each_field!(op!::F, dest::FieldCollection, bc::Broadcasted) where {F}
     bc_flat = Broadcast.flatten(bc)
     out = _fields(dest)
+    for x in bc_flat.args
+        x isa FieldCollection && length(_fields(x)) != length(out) && throw(DimensionMismatch(
+            "collection broadcast: operand has $(length(_fields(x))) fields, destination has $(length(out))"))
+    end
     for i in eachindex(out)
         op!(out[i], _map_operands(x -> _field_leaf(x, i), bc_flat, MultiHaloArrayStyle))
     end
@@ -32,7 +36,7 @@ end
 
 @inline Base.copyto!(dest::FieldCollection, bc::Broadcasted{<:MultiHaloArrayStyle}) =
     _each_field!(copyto!, dest, bc)
-@inline Base.copy(bc::Broadcasted{<:MultiHaloArrayStyle}) = _each_field!(copyto!, similar(bc), bc)
+@inline Base.copy(bc::Broadcasted{<:MultiHaloArrayStyle}) = _each_field!(copyto!, _broadcast_dest(bc), bc)
 Broadcast.materialize!(dest::FieldCollection, bc::Broadcasted) =
     _each_field!(Broadcast.materialize!, dest, bc)
 

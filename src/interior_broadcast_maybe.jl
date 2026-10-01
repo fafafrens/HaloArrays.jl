@@ -29,7 +29,7 @@ unpack_maybe(bc::Broadcasted) = _map_operands(_maybe_leaf, bc, Any)
 end
 
 @inline function Base.copy(bc::Broadcasted{<:MaybeHaloArrayStyle})
-    dest = similar(bc)
+    dest = _broadcast_dest(bc)
     is_active(dest) || return dest
     copyto!(dest.data, unpack_maybe(Broadcast.flatten(bc)))
     return dest

@@ -1,6 +1,34 @@
 using Test
 using HaloArrays
 
+@testset "out-of-place broadcasts promote the element type" begin
+    # copy(bc) built the result with the operand's eltype instead of Base's
+    # combine_eltypes: Float32.(u) came back Float64, u .> v held 0.0/1.0, and
+    # u .+ 1im threw an InexactError. On every container kind.
+    u = LocalHaloArray(Float64, (6, 4), 1; boundary_condition=:periodic); fill!(u, 1.5)
+    v = similar(u); fill!(v, 2.0)
+    t = ThreadedHaloArray(Float64, (3, 4), 1; dims=(2, 1), boundary_condition=:periodic); fill!(t, 1.5)
+    tv = similar(t); fill!(tv, 2.0)
+    m = MultiHaloArray((; a=u, b=v))
+    mb = MaybeHaloArray(u); mbv = MaybeHaloArray(v)
+    for (x, y) in ((u, v), (t, tv), (m, m), (mb, mbv))
+        f32 = Float32.(x)
+        @test eltype(f32) === Float32 && typeof(f32).name === typeof(x).name
+        @test all(==(1.5f0), gather_haloarray(HaloArrays.getdata(f32)) |> g -> g isa NamedTuple ? g.a : g)
+        lt = x .< y
+        @test eltype(lt) === Bool
+        cx = x .+ 1im
+        @test eltype(cx) === ComplexF64
+        @test first(gather_haloarray(HaloArrays.getdata(cx)) |> g -> g isa NamedTuple ? g.a : g) == 1.5 + 1im
+    end
+    @test all(gather_haloarray(u .< v))
+    @test !any(gather_haloarray(m .< m).a)
+    @test eltype(u .+ v) === Float64            # unchanged when nothing promotes
+    # a collection operand with the wrong number of fields is a DimensionMismatch
+    w = similar(m)
+    @test_throws DimensionMismatch w .= m .+ MultiHaloArray((; a=u, b=v, c=u))
+end
+
 @testset "LocalHaloArray" begin
     @testset "1D boundary conditions" begin
         ha = LocalHaloArray(Int, (4,), 2; boundary_condition=((Repeating(), Reflecting()),))

@@ -75,6 +75,15 @@ _find_operand(::Type{T}, x, rest) where {T} = _find_operand(T, rest)
     (_map_operands(leaf, args[1], Drop), _map_args(leaf, Base.tail(args), Drop)...)
 _map_args(::F, ::Tuple{}, ::Type{Drop}) where {F,Drop} = ()
 
+# The destination of an out-of-place broadcast: Base's rule, the result
+# element type combined from `f` and the operands (so `Float32.(u)`, `u .> v`
+# or `u .+ 1im` give Float32, Bool, ComplexF64 arrays), falling back to the
+# prototype's element type when inference gives nothing concrete.
+@inline function _broadcast_dest(bc::Broadcasted)
+    ElType = Broadcast.combine_eltypes(bc.f, bc.args)
+    return isconcretetype(ElType) ? similar(bc, ElType) : similar(bc)
+end
+
 # Single-block arrays broadcast over their interior views.
 _interior_leaf(x::AbstractSingleHaloArray) = interior_view(x)
 _interior_leaf(x) = x
@@ -158,14 +167,14 @@ end
 
 @inline function Base.copy(bc::Broadcast.Broadcasted{<:HaloArrayStyle})
     bc_flat = Broadcast.flatten(bc)
-    dest = similar(bc)
+    dest = _broadcast_dest(bc)
     copyto!(interior_view(dest), unpack_ha(bc_flat))
     return dest
 end
 
 @inline function Base.copy(bc::Broadcast.Broadcasted{<:ThreadedHaloArrayStyle})
     bc_flat = Broadcast.flatten(bc)
-    dest = similar(bc)
+    dest = _broadcast_dest(bc)
     copyto!(dest, bc_flat)
     return dest
 end
