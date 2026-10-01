@@ -10,7 +10,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Out-of-place broadcasts promote the element type like Base: `Float32.(u)`,
   `u .> v` and `u .+ 1im` give `Float32`, `Bool` and `ComplexF64` arrays on
   every container kind. Before, the result kept the operand's element type
-  (`u .> v` held `0.0`/`1.0`, and `u .+ 1im` threw an `InexactError`).
+  (`u .> v` held `0.0`/`1.0`, and `u .+ 1im` threw an `InexactError`). A
+  function whose result type cannot be inferred gives the inferred union or
+  `Any` element type, as a comprehension would.
 - A collection broadcast whose operand has a different number of fields than
   the destination throws `DimensionMismatch` instead of a `BoundsError`.
 - Broadcast styles follow Base's `Style{M}(Val(N))` constructor convention, so
