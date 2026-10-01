@@ -201,9 +201,8 @@ with [`cell_center`](@ref), [`cell_volume`](@ref), [`face_area`](@ref),
 ```julia
 u = LocalHaloArray(Float64, (64, 32), 1)
 g = cell_geometry(u, (UniformAxis(0, 1), EdgeAxis(cell_edges((0, 0.1, 1), (8, 24)))))
-gs = field_storages(g)                      # NamedTuple of storages (x, y, hx, hy)
-for I in CartesianIndices(interior_range(u))
-    V = cell_volume(Cartesian(), gs, I)
+for I in CartesianIndices(interior_range(u))      # padded-storage indices
+    V = cell_volume(Cartesian(), g, I)
 end
 ```
 """
@@ -234,121 +233,139 @@ _geometry_field_source(u::AbstractSingleHaloArray) = u
 _geometry_field_source(c::AbstractHaloCollection)   = _first_field(c)
 
 # ---- metric helpers ----------------------------------------------------------
-# `gs` is the NamedTuple of storages of a geometry — `field_storages(g)` on a
-# Local/MPI array, `tile_parent(g, t)` on a threaded one — and `I` a storage index into
-# it (CartesianIndex or integers). Fields are positional: coordinate `d` is
-# `gs[d]`, width `d` is `gs[N + d]`, so the helpers never touch names.
+# Every helper takes the geometry collection `g`, a padded-storage index `I`
+# (CartesianIndex) and, for a threaded geometry, the tile id — the same
+# arguments as `siteview`, which they use to read the fields at the site. The
+# fields are positional in the site vector: coordinate `d` is `q[d]`, width `d`
+# is `q[N + d]`, so names never enter the hot path. The spatial dimension `N`
+# is a type parameter of the collection, so every `ntuple` below unrolls.
 
-@inline _geo_ndims(gs::NamedTuple) = length(gs) ÷ 2
-@inline _coord(gs, d, I) = @inbounds gs[d][I]
-@inline _width(gs, d, I) = @inbounds gs[_geo_ndims(gs) + d][I]
-
-"""
-    cell_center(system, gs, I) -> SVector
-
-Coordinates of the cell at storage index `I` of the geometry storages `gs`
-(see [`cell_geometry`](@ref)).
-"""
-@inline cell_center(::CoordinateSystem, gs::NamedTuple, I) =
-    SVector(ntuple(d -> _coord(gs, d, I), Val(_geo_ndims(gs))))
+@inline _geo_ndims(::AbstractHaloCollection{T,D,S}) where {T,D,S} = S
+@inline _site(g::AbstractHaloCollection, I, tile) = siteview(g, I, tile)
+# `length(q)` is the field count (2N), known from the collection type.
+@inline _coord(q, d) = @inbounds q[d]
+@inline _width(q, d) = @inbounds q[length(q) ÷ 2 + d]
 
 """
-    cell_width(system, gs, I) -> SVector
+    cell_center(system, g, I[, tile]) -> SVector
 
-Extent of the cell at storage index `I` along every axis.
+Coordinates of the cell at padded-storage index `I` of the geometry `g`
+(see [`cell_geometry`](@ref)); `tile` selects the tile of a threaded geometry,
+as for [`siteview`](@ref).
 """
-@inline cell_width(::CoordinateSystem, gs::NamedTuple, I) =
-    SVector(ntuple(d -> _width(gs, d, I), Val(_geo_ndims(gs))))
+@inline function cell_center(::CoordinateSystem, g::AbstractHaloCollection, I, tile=nothing)
+    q = _site(g, I, tile)
+    return SVector(ntuple(d -> _coord(q, d), Val(_geo_ndims(g))))
+end
 
-@inline _prod_widths(gs, I, ::Val{N}) where {N} = prod(ntuple(d -> _width(gs, d, I), Val(N)))
-@inline _prod_widths_except(gs, I, ::Val{N}, ::Val{D}) where {N,D} =
-    prod(ntuple(d -> d == D ? one(eltype(gs[1])) : _width(gs, d, I), Val(N)))
+"""
+    cell_width(system, g, I[, tile]) -> SVector
+
+Extent of the cell at padded-storage index `I` along every axis.
+"""
+@inline function cell_width(::CoordinateSystem, g::AbstractHaloCollection, I, tile=nothing)
+    q = _site(g, I, tile)
+    N = Val(_geo_ndims(g))
+    return SVector(ntuple(d -> _width(q, d), N))
+end
+
+@inline _prod_widths(q, ::Val{N}) where {N} = prod(ntuple(d -> _width(q, d), Val(N)))
+@inline _prod_widths_except(q, ::Val{N}, ::Val{D}) where {N,D} =
+    prod(ntuple(d -> d == D ? one(eltype(q)) : _width(q, d), Val(N)))
 
 # Exact angular integrals of the spherical metric over the cell.
 @inline _sin_integral(θ, hθ) = cos(θ - hθ / 2) - cos(θ + hθ / 2)          # ∫ sin θ dθ
 @inline _r2_integral(r, hr)  = (r * r + hr * hr / 12) * hr                # ∫ r² dr
 
 """
-    cell_volume(system, gs, I) -> Real
+    cell_volume(system, g, I[, tile]) -> Real
 
-Volume of the cell at storage index `I`: the exact integral of the metric over
-the cell (`∏ h` in Cartesian; `r hr ∏ h` in cylindrical; `∫r²dr ∫sinθdθ hφ` in
-spherical). Missing dimensions count as unit extent.
+Volume of the cell at padded-storage index `I`: the exact integral of the
+metric over the cell (`∏ h` in Cartesian; `r hr ∏ h` in cylindrical;
+`∫r²dr ∫sinθdθ hφ` in spherical). Missing dimensions count as unit extent.
 """
-@inline cell_volume(::Cartesian, gs::NamedTuple, I) = _prod_widths(gs, I, Val(_geo_ndims(gs)))
-@inline cell_volume(::Cylindrical, gs::NamedTuple, I) =
-    _coord(gs, 1, I) * _prod_widths(gs, I, Val(_geo_ndims(gs)))
-@inline function cell_volume(::Spherical, gs::NamedTuple, I)
-    N = _geo_ndims(gs)
-    v = _r2_integral(_coord(gs, 1, I), _width(gs, 1, I))
-    N >= 2 && (v *= _sin_integral(_coord(gs, 2, I), _width(gs, 2, I)))
-    N >= 3 && (v *= _width(gs, 3, I))
+@inline cell_volume(::Cartesian, g::AbstractHaloCollection, I, tile=nothing) =
+    _prod_widths(_site(g, I, tile), Val(_geo_ndims(g)))
+@inline function cell_volume(::Cylindrical, g::AbstractHaloCollection, I, tile=nothing)
+    q = _site(g, I, tile)
+    return _coord(q, 1) * _prod_widths(q, Val(_geo_ndims(g)))
+end
+@inline function cell_volume(::Spherical, g::AbstractHaloCollection, I, tile=nothing)
+    q = _site(g, I, tile)
+    N = _geo_ndims(g)
+    v = _r2_integral(_coord(q, 1), _width(q, 1))
+    N >= 2 && (v *= _sin_integral(_coord(q, 2), _width(q, 2)))
+    N >= 3 && (v *= _width(q, 3))
     return v
 end
 
 """
-    face_center(system, gs, Dim(d), I) -> SVector
+    face_center(system, g, Dim(d), I[, tile]) -> SVector
 
 Coordinates of the **plus** face of cell `I` along axis `d` (the face shared
 with `I + e_d`); the minus face of `I` is the plus face of `I - e_d`.
 """
-@inline function face_center(sys::CoordinateSystem, gs::NamedTuple, ::Dim{D}, I) where {D}
-    c = cell_center(sys, gs, I)
-    return c + SVector{length(c),eltype(c)}(versors(Val(length(c)))[D]) * (_width(gs, D, I) / 2)
+@inline function face_center(sys::CoordinateSystem, g::AbstractHaloCollection, ::Dim{D}, I, tile=nothing) where {D}
+    q = _site(g, I, tile)
+    N = _geo_ndims(g)
+    c = SVector(ntuple(d -> _coord(q, d), Val(N)))
+    return c + SVector{N,eltype(c)}(versors(Val(N))[D]) * (_width(q, D) / 2)
 end
 
 """
-    face_distance(gs, Dim(d), I) -> Real
+    face_distance(g, Dim(d), I[, tile]) -> Real
 
 Distance between the centres of cell `I` and its neighbour `I + e_d` across the
 plus face along axis `d`: what a face gradient divides by.
 """
-@inline function face_distance(gs::NamedTuple, ::Dim{D}, I::CartesianIndex{N}) where {D,N}
+@inline function face_distance(g::AbstractHaloCollection, ::Dim{D}, I::CartesianIndex, tile=nothing) where {D}
+    N = _geo_ndims(g)
     J = I + unit_vector(Val(N), D)
-    return (_width(gs, D, I) + _width(gs, D, J)) / 2
+    return (_width(_site(g, I, tile), D) + _width(_site(g, J, tile), D)) / 2
 end
-@inline face_distance(gs::NamedTuple, d::Dim, I::Vararg{Integer}) = face_distance(gs, d, CartesianIndex(I))
 
 """
-    face_area(system, gs, Dim(d), I) -> Real
+    face_area(system, g, Dim(d), I[, tile]) -> Real
 
 Area of the plus face of cell `I` along axis `d`, exact for the metric
 (`∏_{j≠d} h_j` in Cartesian, with the radius evaluated on the face for radial
 faces in cylindrical and spherical coordinates). Missing dimensions count as
 unit extent.
 """
-@inline face_area(::Cartesian, gs::NamedTuple, ::Dim{D}, I) where {D} =
-    _prod_widths_except(gs, I, Val(_geo_ndims(gs)), Val(D))
-@inline function face_area(::Cylindrical, gs::NamedTuple, ::Dim{D}, I) where {D}
-    N = _geo_ndims(gs)
-    r = D == 1 ? _coord(gs, 1, I) + _width(gs, 1, I) / 2 : _coord(gs, 1, I)
-    return r * _prod_widths_except(gs, I, Val(N), Val(D))
+@inline face_area(::Cartesian, g::AbstractHaloCollection, ::Dim{D}, I, tile=nothing) where {D} =
+    _prod_widths_except(_site(g, I, tile), Val(_geo_ndims(g)), Val(D))
+@inline function face_area(::Cylindrical, g::AbstractHaloCollection, ::Dim{D}, I, tile=nothing) where {D}
+    q = _site(g, I, tile)
+    N = _geo_ndims(g)
+    r = D == 1 ? _coord(q, 1) + _width(q, 1) / 2 : _coord(q, 1)
+    return r * _prod_widths_except(q, Val(N), Val(D))
 end
-@inline function face_area(::Spherical, gs::NamedTuple, ::Dim{D}, I) where {D}
-    N  = _geo_ndims(gs)
-    r, hr = _coord(gs, 1, I), _width(gs, 1, I)
+@inline function face_area(::Spherical, g::AbstractHaloCollection, ::Dim{D}, I, tile=nothing) where {D}
+    q = _site(g, I, tile)
+    N = _geo_ndims(g)
+    r, hr = _coord(q, 1), _width(q, 1)
     if D == 1
         rp = r + hr / 2
         a  = rp * rp
-        N >= 2 && (a *= _sin_integral(_coord(gs, 2, I), _width(gs, 2, I)))
-        N >= 3 && (a *= _width(gs, 3, I))
+        N >= 2 && (a *= _sin_integral(_coord(q, 2), _width(q, 2)))
+        N >= 3 && (a *= _width(q, 3))
         return a
     elseif D == 2
-        a = r * hr * sin(_coord(gs, 2, I) + _width(gs, 2, I) / 2)
-        N >= 3 && (a *= _width(gs, 3, I))
+        a = r * hr * sin(_coord(q, 2) + _width(q, 2) / 2)
+        N >= 3 && (a *= _width(q, 3))
         return a
     else
-        return r * hr * _width(gs, 2, I)
+        return r * hr * _width(q, 2)
     end
 end
 
 """
-    face_normal(system, gs, Dim(d), I) -> SVector
+    face_normal(system, g, Dim(d), I[, tile]) -> SVector
 
 Outward unit normal of the plus face of cell `I` along axis `d`, in the local
 coordinate basis. On a tensor-product grid this is the `d`-th basis vector,
 independent of `I`; the argument form is kept so kernels need not change for
 grids whose normals vary per face.
 """
-@inline face_normal(::CoordinateSystem, gs::NamedTuple, ::Dim{D}, I) where {D} =
-    SVector{_geo_ndims(gs),eltype(gs[1])}(versors(Val(_geo_ndims(gs)))[D])
+@inline face_normal(::CoordinateSystem, g::AbstractHaloCollection{T}, ::Dim{D}, I, tile=nothing) where {T,D} =
+    SVector{_geo_ndims(g),T}(versors(Val(_geo_ndims(g)))[D])

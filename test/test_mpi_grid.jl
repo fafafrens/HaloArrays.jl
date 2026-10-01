@@ -41,7 +41,7 @@ using HaloArrays
             @test gs.hz[I] == rs.hz[J]
         end
         # the global volume is the sum of the ranks' interior volumes
-        V = sum(cell_volume(Cylindrical(), gs, I) for I in CartesianIndices(interior_range(u)))
+        V = sum(cell_volume(Cylindrical(), g, I) for I in CartesianIndices(interior_range(u)))
         @test MPI.Allreduce(V, +, comm) ≈ 2^2 / 2 * 2
         # the geometry's boundary condition mirrors the topology's periodicity
         if periodic
