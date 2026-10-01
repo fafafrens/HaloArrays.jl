@@ -7,6 +7,13 @@ on:
   pull_request:
     branches: [ main ]
 
+# The cache action deletes the caches it supersedes (same prefix on the same
+# ref) only with this permission; without it the repository cache fills up and
+# GitHub evicts entries, which cold-starts every job (~8-10 min of precompile).
+permissions:
+  actions: write
+  contents: read
+
 jobs:
   test:
     name: Julia ${{ matrix.julia-version }} - unit tests
@@ -21,6 +28,9 @@ jobs:
         with:
           version: ${{ matrix.julia-version }}
       - uses: julia-actions/cache@v3
+        with:   # same key as the threaded and example jobs for Julia 1 (same test env)
+          cache-name: julia-cache;workflow=CI;env=test;julia=${{ matrix.julia-version }}
+          include-matrix: 'false'
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
         env:
@@ -40,6 +50,9 @@ jobs:
         with:
           version: '1'
       - uses: julia-actions/cache@v3
+        with:   # shared with the other Julia-1 jobs on the test env
+          cache-name: julia-cache;workflow=CI;env=test;julia=1
+          include-matrix: 'false'
       - uses: julia-actions/julia-buildpkg@v1
       # Runs the unit suite multithreaded so the ThreadBackend trait, the
       # threaded reductions, and the Polyester extension are exercised in CI.
@@ -64,6 +77,9 @@ jobs:
         with:
           version: '1'
       - uses: julia-actions/cache@v3
+        with:   # shared with the other Julia-1 jobs on the test env
+          cache-name: julia-cache;workflow=CI;env=test;julia=1
+          include-matrix: 'false'
       - uses: julia-actions/julia-buildpkg@v1
       # Runs every CPU example's full driver in a throwaway module so a runtime
       # regression in an example fails CI instead of rotting silently. Threaded
@@ -89,6 +105,9 @@ jobs:
         with:
           version: '1'
       - uses: julia-actions/cache@v3
+        with:   # shared between the rank counts (same MPI build)
+          cache-name: julia-cache;workflow=CI;env=mpi
+          include-matrix: 'false'
       - name: Configure MPI provider
         shell: julia --color=yes --project=. {0}
         run: |
