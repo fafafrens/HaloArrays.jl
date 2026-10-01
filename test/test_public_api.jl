@@ -33,6 +33,21 @@ struct NoSizeHalo <: HaloArrays.AbstractSingleHaloArray{Float64,2} end
     @test synchronize_halo!(new; threads=true) === new
 end
 
+@testset "show for every array kind" begin
+    # The pretty printers were never exercised; a stale field or accessor in
+    # them only surfaced in a REPL. Check they run and name the essentials.
+    u = LocalHaloArray(Float64, (4, 3), 1; boundary_condition=:periodic)
+    t = ThreadedHaloArray(Int, (2, 3), 1; dims=(6, 1), boundary_condition=:repeating)   # more tiles than are shown
+    h = HaloArray(Float64, (4, 3), 1, CartesianTopology(MPI.COMM_SELF, (1, 1); periodic=(true, true)); boundary_condition=:periodic)
+    m = MultiHaloArray((; rho=u, p=copy(u)))
+    plain(x) = repr(MIME("text/plain"), x)
+    @test occursin("storage size: (6, 5), halo width: 1", plain(u))
+    @test occursin("global size : (12, 3)", plain(t)) && occursin("6 (layout (6, 1))", plain(t)) && occursin("more tile", plain(t))
+    @test occursin("storage: (6, 5), halo=1", plain(h)) && occursin("topology", plain(h))
+    @test occursin("MultiHaloArray", plain(m))
+    @test occursin("global size (4, 3)", repr(u)) && occursin("6 tiles of (2, 3)", repr(t)) && occursin("global size (4, 3)", repr(h))
+end
+
 @testset "public API exports" begin
     ha = HaloArray(Float64, (5,), 2; boundary_condition=:repeating)
 
