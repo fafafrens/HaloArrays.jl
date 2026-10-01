@@ -6,9 +6,13 @@ using Base.Broadcast: Broadcasted, broadcastable, BroadcastStyle, AbstractArrayS
 # i-th field and single-block arrays by their interior views.
 
 Broadcast.BroadcastStyle(::Type{<:FieldCollection{T,D}}) where {T,D} = MultiHaloArrayStyle{D}()
-# A single halo array mixed with a collection broadcasts field by field.
+# A single halo array mixed with a collection: the single-array style wins
+# (both argument orders, or Base reports conflicting rules) and the broadcast
+# runs field by field with the array applied to every field.
 Broadcast.BroadcastStyle(::HaloArrayStyle{M}, ::MultiHaloArrayStyle{Ndim}) where {Ndim,M} =
     HaloArrayStyle(Val(max(M, Ndim)))
+Broadcast.BroadcastStyle(::ThreadedHaloArrayStyle{M}, ::MultiHaloArrayStyle{Ndim}) where {Ndim,M} =
+    ThreadedHaloArrayStyle(Val(max(M, Ndim)))
 
 Broadcast.broadcastable(x::FieldCollection) = x
 

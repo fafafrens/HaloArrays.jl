@@ -29,7 +29,20 @@ end
     @test all(==(3.0), interior_view(w.a)) && all(==(3.0), interior_view(w.b))
     w .= u .* m .- 1
     @test all(==(1.0), interior_view(w.b))
-    @test_throws DimensionMismatch m .+ u   # out of place has no collection prototype
+    # Out of place, Base's instantiate rejects the 3-D/2-D operand axes before
+    # any HaloArrays code runs: only the in-place form is supported.
+    @test_throws DimensionMismatch m .+ u
+    # The same on the threaded backend (its style needs its own rule against collections).
+    t = ThreadedHaloArray(Float64, (2, 3), 1; dims=(2, 1), boundary_condition=:periodic)
+    fill!(t, 2.0)
+    tm = MultiHaloArray(ThreadedHaloArray, Float64, (2, 3), 1; dims=(2, 1), fields=(:a, :b), boundary_condition=:periodic)
+    fill!(tm, 1.0)
+    tw = similar(tm)
+    tw .= tm .+ t
+    @test all(==(3.0), gather_haloarray(tw.a)) && all(==(3.0), gather_haloarray(tw.b))
+    tw .= t .* tm .- 1
+    @test all(==(1.0), gather_haloarray(tw.b))
+    @test_throws DimensionMismatch tm .+ t
 end
 
 @testset "MultiHaloArray" begin
