@@ -76,7 +76,22 @@ function _shard(list)
     return [rel for (i, rel) in enumerate(list) if (i - 1) % n == k - 1]
 end
 
+# Each script's wall time goes to the log (the nested testset rows do not: the
+# top-level testset in runtests.jl is not verbose), so a slow CI shard can be
+# traced to a script.
 function _smoke_run(rel)
+    t = @elapsed ok = _smoke_run_quiet(rel)
+    @info "example $rel: $(round(t; digits=1)) s"
+    return ok
+end
+
+# Keyword arguments for a script's `main` when its defaults are benchmark
+# sized: the smoke test checks that the script runs, not its timings.
+const SMOKE_ARGS = Dict(
+    "poisson/cg_fused.jl" => (n = 128, maxiter = 50),   # default 1024², 200 iterations x 3 reps: minutes on a CI runner
+)
+
+function _smoke_run_quiet(rel)
     path = joinpath(EXAMPLES_DIR, rel)
     # A module created with `module … end` syntax gets its own `include`/`eval`,
     # which a bare `Module()` does not — scripts that `include("common.jl")` need
@@ -91,7 +106,8 @@ function _smoke_run(rel)
             # it on include; the rest auto-run a `run_*()` at top level. Evaluate
             # the `main` call inside the sandbox (in the post-include world) so the
             # simulation runs either way, without a world-age binding warning.
-            Core.eval(sandbox, :(isdefined(@__MODULE__, :main) && main()))
+            kw = get(SMOKE_ARGS, rel, (;))
+            Core.eval(sandbox, :(isdefined(@__MODULE__, :main) && main(; $kw...)))
             true
         catch err
             @error "example script failed" example = rel exception = (err, catch_backtrace())
@@ -100,7 +116,7 @@ function _smoke_run(rel)
     end
 end
 
-@testset verbose=true "Example scripts (smoke)" begin   # per-script times in the CI log
+@testset "Example scripts (smoke)" begin
     for rel in _shard(SMOKE_EXAMPLES)
         @testset "$rel" begin
             @test _smoke_run(rel)
