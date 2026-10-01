@@ -100,7 +100,7 @@ function _smoke_run(rel)
     end
 end
 
-@testset "Example scripts (smoke)" begin
+@testset verbose=true "Example scripts (smoke)" begin   # per-script times in the CI log
     for rel in _shard(SMOKE_EXAMPLES)
         @testset "$rel" begin
             @test _smoke_run(rel)
