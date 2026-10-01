@@ -20,14 +20,19 @@ _field_leaf(x::FieldCollection, i) = _fields(x)[i]
 _field_leaf(x::Union{HaloArray,LocalHaloArray}, i) = interior_view(x)
 _field_leaf(x, i) = x
 
+# Every collection operand must have the destination's number of fields.
+function _check_field_count(x::FieldCollection, n)
+    nf = length(_fields(x))
+    nf == n || throw(DimensionMismatch("collection broadcast: operand has $nf fields, destination has $n"))
+    return nothing
+end
+_check_field_count(x, n) = nothing
+
 # Run `op!(field, broadcast_for_that_field)` for every field of `dest`.
 @inline function _each_field!(op!::F, dest::FieldCollection, bc::Broadcasted) where {F}
     bc_flat = Broadcast.flatten(bc)
     out = _fields(dest)
-    for x in bc_flat.args
-        x isa FieldCollection && length(_fields(x)) != length(out) && throw(DimensionMismatch(
-            "collection broadcast: operand has $(length(_fields(x))) fields, destination has $(length(out))"))
-    end
+    foreach(x -> _check_field_count(x, length(out)), bc_flat.args)
     for i in eachindex(out)
         op!(out[i], _map_operands(x -> _field_leaf(x, i), bc_flat, MultiHaloArrayStyle))
     end
