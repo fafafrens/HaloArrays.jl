@@ -10,6 +10,41 @@ function _test_topology(dims::NTuple{N,Int}) where {N}
     return CartesianTopology(MPI.COMM_SELF, dims; periodic=ntuple(_ -> false, Val(N)))
 end
 
+@testset "broadcast styles follow Base's constructor convention" begin
+    # Style{M}(Val(N)) must build Style{N}: Base's result_style re-dimensions a
+    # style that way when it wins over another one. Before, only N == M was
+    # defined, so a collection (D = spatial + 1) mixed with a single array died
+    # in a MethodError.
+    for S in (HaloArrays.HaloArrayStyle, HaloArrays.ThreadedHaloArrayStyle,
+              HaloArrays.MultiHaloArrayStyle, HaloArrays.MaybeHaloArrayStyle)
+        @test S{2}(Val(3)) === S{3}()
+        @test S(Val(2)) === S{2}()
+    end
+    u = LocalHaloArray(Float64, (4, 3), 1; boundary_condition=:periodic)
+    fill!(u, 2.0)
+    m = MultiHaloArray(LocalHaloArray, Float64, (4, 3), 1; fields=(:a, :b), boundary_condition=:periodic)
+    fill!(m, 1.0)
+    w = similar(m)
+    w .= m .+ u                       # the single array applies to every field
+    @test all(==(3.0), interior_view(w.a)) && all(==(3.0), interior_view(w.b))
+    w .= u .* m .- 1
+    @test all(==(1.0), interior_view(w.b))
+    # Out of place, Base's instantiate rejects the 3-D/2-D operand axes before
+    # any HaloArrays code runs: only the in-place form is supported.
+    @test_throws DimensionMismatch m .+ u
+    # The same on the threaded backend (its style needs its own rule against collections).
+    t = ThreadedHaloArray(Float64, (2, 3), 1; dims=(2, 1), boundary_condition=:periodic)
+    fill!(t, 2.0)
+    tm = MultiHaloArray(ThreadedHaloArray, Float64, (2, 3), 1; dims=(2, 1), fields=(:a, :b), boundary_condition=:periodic)
+    fill!(tm, 1.0)
+    tw = similar(tm)
+    tw .= tm .+ t
+    @test all(==(3.0), gather_haloarray(tw.a)) && all(==(3.0), gather_haloarray(tw.b))
+    tw .= t .* tm .- 1
+    @test all(==(1.0), gather_haloarray(tw.b))
+    @test_throws DimensionMismatch tm .+ t
+end
+
 @testset "MultiHaloArray" begin
     topology = _test_topology((1, 1))
     u = HaloArray(Float64, (3, 2), 1, topology; boundary_condition=:repeating)

@@ -371,7 +371,7 @@ end
         side::Side{S}, dim::Dim{D}) where {D,S}
     if neighbor_tile_id(halo, tile_id, D, S) == 0
         mode = halo.boundary_condition[D][S]
-        boundary_condition!(halo, tile_id, side, dim, mode)
+        boundary_condition!(halo, side, dim, mode, tile_id)   # shared mode methods, boundary.jl
     end
     return halo
 end
@@ -383,7 +383,7 @@ end
         _threaded_copy_side!(halo, tile_id, neighbor_id, side, dim)
     else
         mode = halo.boundary_condition[D][S]
-        boundary_condition!(halo, tile_id, side, dim, mode)
+        boundary_condition!(halo, side, dim, mode, tile_id)   # shared mode methods, boundary.jl
     end
     return halo
 end
@@ -422,21 +422,6 @@ function boundary_condition!(halo::ThreadedHaloArray, tile_id::Integer, side::Si
     _threaded_boundary_side!(halo, tile_id, side, dim)
     return halo
 end
-
-# Per-tile BC: delegate to the shared ghost-fill kernels (boundary.jl) with the
-# tile-aware views — the same code the single-array backends use, only the views
-# differ. Periodic is a no-op (the inter-tile exchange already wraps the edges).
-@inline boundary_condition!(h::ThreadedHaloArray, t::Integer, s::Side, d::Dim, ::Reflecting) =
-    _reflect_into!(ghost_view(h, s, d, t), edge_view(h, s, d, t), d, 1)
-@inline boundary_condition!(h::ThreadedHaloArray, t::Integer, s::Side, d::Dim, ::Antireflecting) =
-    _reflect_into!(ghost_view(h, s, d, t), edge_view(h, s, d, t), d, -1)
-@inline boundary_condition!(h::ThreadedHaloArray, t::Integer, s::Side, d::Dim, ::Repeating) =
-    _repeating_into!(ghost_view(h, s, d, t), edge_view(h, s, d, t), s, d)
-boundary_condition!(::ThreadedHaloArray, ::Integer, ::Side, ::Dim, ::Periodic) = nothing
-# FunctionBC: tile-local views + per-tile global origin, same closure as the single
-# backends (see haloarray.jl `FunctionBC`).
-@inline boundary_condition!(h::ThreadedHaloArray, t::Integer, s::Side, d::Dim, bc::FunctionBC) =
-    bc.f(ghost_view(h, s, d, t), edge_view(h, s, d, t), s, d, halo_width(h), ghost_origin(h, s, d, t))
 
 boundary_condition!(halo::ThreadedHaloArray; threads::Bool=false) =
     _each_tile!(_threaded_boundary_tile!, halo, threads)

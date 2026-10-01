@@ -95,45 +95,45 @@ function boundary_condition!(halo::LocalHaloArray, s::Side{side}, dim::Dim{d}) w
 end
 
 # ============================================================
-# Shared mode implementations on AbstractSingleHaloArray
+# Mode implementations, shared by every backend
 #
-# ThreadedHaloArray dispatches all take tile_id as the second
-# argument and will win over these fallbacks — no conflict.
-# HaloArray and LocalHaloArray both have a 3-arg ghost_view
-# dispatch, so the body is identical for both types.
+# One method per mode: `boundary_condition!(halo, side, dim, mode[, tile])`.
+# The trailing `tile` selects the storage the views address — a tile id on a
+# ThreadedHaloArray, `nothing` (the default) on the single-block backends,
+# where the 4-argument view forms fall back to the 3-argument ones
+# (haloarray.jl). The threaded per-tile driver passes its tile id; nothing
+# else differs between backends.
 # ============================================================
 
 # ---- Reflecting / Antireflecting / Repeating ------------------
 # Delegate to the shared kernels with this face's ghost/edge views. `S`/`scale`
 # are compile-time, so these inline to the same code as a hand-written per-side
 # method.
-@inline boundary_condition!(halo::AbstractSingleHaloArray, s::Side, d::Dim, ::Reflecting) =
-    _reflect_into!(ghost_view(halo, s, d), edge_view(halo, s, d), d, 1)
-@inline boundary_condition!(halo::AbstractSingleHaloArray, s::Side, d::Dim, ::Antireflecting) =
-    _reflect_into!(ghost_view(halo, s, d), edge_view(halo, s, d), d, -1)
-@inline boundary_condition!(halo::AbstractSingleHaloArray, s::Side, d::Dim, ::Repeating) =
-    _repeating_into!(ghost_view(halo, s, d), edge_view(halo, s, d), s, d)
+@inline boundary_condition!(h::AbstractSingleHaloArray, s::Side, d::Dim, ::Reflecting, tile=nothing) =
+    _reflect_into!(ghost_view(h, s, d, tile), edge_view(h, s, d, tile), d, 1)
+@inline boundary_condition!(h::AbstractSingleHaloArray, s::Side, d::Dim, ::Antireflecting, tile=nothing) =
+    _reflect_into!(ghost_view(h, s, d, tile), edge_view(h, s, d, tile), d, -1)
+@inline boundary_condition!(h::AbstractSingleHaloArray, s::Side, d::Dim, ::Repeating, tile=nothing) =
+    _repeating_into!(ghost_view(h, s, d, tile), edge_view(h, s, d, tile), s, d)
 
 # ---- Periodic -------------------------------------------------
-# HaloArray: MPI exchange fills halos → no-op here.
-# LocalHaloArray: must physically wrap the interior data (both sides in one method).
-boundary_condition!(::HaloArray, ::Side, ::Dim, ::Periodic) = nothing
-@inline boundary_condition!(halo::LocalHaloArray, ::Side{S}, d::Dim, ::Periodic) where {S} =
+# HaloArray (MPI exchange) and ThreadedHaloArray (inter-tile exchange) already
+# wrap the edges → no-op. LocalHaloArray must physically wrap the interior data.
+boundary_condition!(::Union{HaloArray,ThreadedHaloArray}, ::Side, ::Dim, ::Periodic, tile=nothing) = nothing
+@inline boundary_condition!(halo::LocalHaloArray, ::Side{S}, d::Dim, ::Periodic, tile=nothing) where {S} =
     (ghost_view(halo, Side(S), d) .= edge_view(halo, Side(3 - S), d); nothing)
 
 # ---- NoBoundaryCondition ----------------------------------------
 # Ghost cells are left unchanged; the user fills them via a custom function.
-
-boundary_condition!(::AbstractSingleHaloArray, ::Side, ::Dim, ::NoBoundaryCondition) = nothing
-boundary_condition!(::ThreadedHaloArray, ::Integer, ::Side, ::Dim, ::NoBoundaryCondition) = nothing
+boundary_condition!(::AbstractSingleHaloArray, ::Side, ::Dim, ::NoBoundaryCondition, tile=nothing) = nothing
 
 # ---- FunctionBC (custom per-field) ------------------------------
 # Hand the user's closure the resolved ghost/edge views, the face, the halo width,
 # and the global origin of the ghost slab (for position-dependent / GPU-safe BCs).
-# Backend-uniform: the threaded method (threaded_haloarray.jl) passes tile-local
-# views and the per-tile origin, so one closure runs on every backend.
-@inline boundary_condition!(h::AbstractSingleHaloArray, s::Side, d::Dim, bc::FunctionBC) =
-    bc.f(ghost_view(h, s, d), edge_view(h, s, d), s, d, halo_width(h), ghost_origin(h, s, d))
+# On a tile these are the tile-local views and the per-tile origin, so one
+# closure runs on every backend.
+@inline boundary_condition!(h::AbstractSingleHaloArray, s::Side, d::Dim, bc::FunctionBC, tile=nothing) =
+    bc.f(ghost_view(h, s, d, tile), edge_view(h, s, d, tile), s, d, halo_width(h), ghost_origin(h, s, d, tile))
 
 # ============================================================
 # Collection delegators

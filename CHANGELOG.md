@@ -4,6 +4,29 @@ All notable changes to HaloArrays.jl are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Out-of-place broadcasts promote the element type like Base: `Float32.(u)`,
+  `u .> v` and `u .+ 1im` give `Float32`, `Bool` and `ComplexF64` arrays on
+  every container kind. Before, the result kept the operand's element type
+  (`u .> v` held `0.0`/`1.0`, and `u .+ 1im` threw an `InexactError`). A
+  function whose result type cannot be inferred gives the inferred union or
+  `Any` element type, as a comprehension would.
+- A collection broadcast whose operand has a different number of fields than
+  the destination throws `DimensionMismatch` instead of a `BoundsError`.
+- Broadcast styles follow Base's `Style{M}(Val(N))` constructor convention, so
+  an in-place broadcast mixing a collection with a single halo array of the
+  fields' shape (`w .= state .+ u`) applies the array to every field instead of
+  throwing a `MethodError`; the out-of-place form has no collection prototype
+  and throws `DimensionMismatch`.
+
+### Changed (internal)
+- The four broadcast styles share one set of precedence rules and tree walkers
+  (`_find_operand`, `_map_operands`); the collection and `MaybeHaloArray` files
+  keep only their own semantics (−160 lines). One set of boundary-condition
+  mode methods serves every backend, with a trailing tile argument.
+
 ## [0.9.0] — 2026-09-30
 
 This release also ships the 0.8.1 changes below, which were tagged in git but
