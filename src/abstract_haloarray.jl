@@ -214,11 +214,16 @@ Set each interior cell from `f(I)`, where `I` is the **global** grid index tuple
 the same `f` produces a consistent global field across MPI ranks and threads —
 the idiomatic way to set an initial condition. Returns `u`.
 
+For a collection, `f(I)` gives the values of all fields at the site: a scalar
+(the same for every field) or a tuple / `SVector` / array with one entry per
+leaf field in column-major [`field_shape`](@ref) order.
+
 # Example
 ```julia
 fill_from_global_indices!(u) do I
     exp(-((I[1] - nx/2)^2 + (I[2] - ny/2)^2) / 50)
 end
+fill_from_global_indices!(I -> (1.0, 0.0, 2.5), state)   # ρ, ρu, E of a (3,) collection
 ```
 """
 function fill_from_global_indices!(f, halo::AbstractSingleHaloArray{T,N}) where {T,N}
@@ -231,6 +236,28 @@ function fill_from_global_indices!(f, halo::AbstractSingleHaloArray{T,N}) where 
         end
     end
     return halo
+end
+
+# A collection: `f(I)` gives every field's value at the site — a scalar for all
+# fields alike, or anything indexable by the linear field index (a tuple,
+# SVector or array in column-major `field_shape` order, e.g. `(ρ, ρu, E)` for a
+# `(3,)` collection). Each leaf field is filled in turn, so `f` runs once per
+# field per cell — fine for an initial condition, not a kernel.
+function fill_from_global_indices!(f, c::AbstractHaloCollection)
+    for k in 1:n_field(c)
+        fill_from_global_indices!(I -> _field_value(f(I), k), _leaf_field(c, k))
+    end
+    return c
+end
+@inline _field_value(v::Number, k) = v
+@inline _field_value(v, k) = v[k]
+
+# Leaf `k` of a (possibly nested) collection, in column-major order of
+# `field_shape`: the outer container index varies fastest.
+@inline _leaf_field(a::AbstractSingleHaloArray, k) = a
+@inline function _leaf_field(c::AbstractHaloCollection, k)
+    n = prod(_container_shape(c))
+    return _leaf_field(_fields(c)[(k - 1) % n + 1], (k - 1) ÷ n + 1)
 end
 function global_to_storage_index end
 function is_root end
@@ -438,7 +465,7 @@ function _fields end
 # accessors forward to it. Collections read their spatial dimension straight
 # from the type parameter (AbstractHaloCollection{T,N,S}).
 @inline _geometry_field(a::AbstractSingleHaloArray) = a
-@inline _geometry_field(c::AbstractHaloCollection) = _first_field(c)
+@inline _geometry_field(c::AbstractHaloCollection) = _geometry_field(_first_field(c))   # down to a leaf
 @inline _geometry_field(arr::AbstractArray{<:AbstractSingleHaloArray}) = first(arr)
 
 @inline _spatial_ndims(x) = ndims(_geometry_field(x))
@@ -455,7 +482,7 @@ function _fields end
 # (n_field,) for named collections, the container Shape for indexed ones)
 # followed by the shared spatial geometry of the fields. interior_size falls back
 # to the generic interior_size = interior_size alias above.
-@inline n_field(c::AbstractHaloCollection) = length(_fields(c))
+@inline n_field(c::AbstractHaloCollection) = prod(field_shape(c))
 @inline interior_size(c::AbstractHaloCollection) = (field_shape(c)..., _spatial_interior_size(c)...)
 @inline _global_size(c::AbstractHaloCollection)  = (field_shape(c)..., _spatial_global_size(c)...)
 @inline storage_size(c::AbstractHaloCollection)  = (field_shape(c)..., _spatial_storage_size(c)...)

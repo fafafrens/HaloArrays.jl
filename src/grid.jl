@@ -233,7 +233,7 @@ end
 cell_geometry(u::AbstractHaloArray, axes::AbstractAxis...; kwargs...) = cell_geometry(u, axes; kwargs...)
 
 _geometry_field_source(u::AbstractSingleHaloArray) = u
-_geometry_field_source(c::AbstractHaloCollection)   = _first_field(c)
+_geometry_field_source(c::AbstractHaloCollection)   = _geometry_field(c)   # the first leaf
 
 # ---- metric helpers ----------------------------------------------------------
 # Every helper takes the geometry collection `g`, a padded-storage index `I`

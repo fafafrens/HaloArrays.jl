@@ -100,16 +100,23 @@ Base.IndexStyle(::Type{<:SiteView}) = IndexLinear()
     return fields[index]
 end
 
+# Leaf `k` (column-major over `field_shape`, outer container index fastest):
+# a nested collection recurses one level per container.
+@inline _site_leaf(state::AbstractSingleHaloArray, k::Int) = state
+@inline function _site_leaf(state::AbstractHaloCollection, k::Int)
+    fields = _site_fields(state)
+    n = length(fields)
+    return _site_leaf(_site_field(fields, (k - 1) % n + 1), (k - 1) ÷ n + 1)
+end
+
 Base.@propagate_inbounds function Base.getindex(q::SiteView{T}, k::Int) where {T}
     @boundscheck checkbounds(q, k)
-    field = _site_field(_site_fields(q.state), k)
-    return convert(T, _cell_storage(field, q.tile)[q.index])
+    return convert(T, _cell_storage(_site_leaf(q.state, k), q.tile)[q.index])
 end
 
 Base.@propagate_inbounds function Base.setindex!(q::SiteView, value, k::Int)
     @boundscheck checkbounds(q, k)
-    field = _site_field(_site_fields(q.state), k)
-    _cell_storage(field, q.tile)[q.index] = value
+    _cell_storage(_site_leaf(q.state, k), q.tile)[q.index] = value
     return q
 end
 
@@ -122,13 +129,16 @@ Base.unaliascopy(::SiteView) = throw(ArgumentError(
 # of site views and collections that share fields in different orders.
 Base.dataids(q::SiteView) = _site_dataids(_site_fields(q.state), q.tile)
 
-# Tuple fields (single arrays, MultiHaloArray) give a statically sized id tuple.
+# Tuple fields (single arrays, MultiHaloArray) give a statically sized id tuple;
+# a nested field contributes the ids of its own fields.
+@inline _storage_dataids(a::AbstractSingleHaloArray, tile) = Base.dataids(_cell_storage(a, tile))
+@inline _storage_dataids(c::AbstractHaloCollection, tile) = _site_dataids(_site_fields(c), tile)
 @inline _site_dataids(::Tuple{}, _) = ()
 @inline _site_dataids(fields::Tuple, tile) =
-    (Base.dataids(_cell_storage(first(fields), tile))..., _site_dataids(Base.tail(fields), tile)...)
+    (_storage_dataids(first(fields), tile)..., _site_dataids(Base.tail(fields), tile)...)
 # Array field containers have a runtime field count, so their id tuple allocates.
 _site_dataids(fields, tile) = Tuple(id for field in fields
-    for id in Base.dataids(_cell_storage(field, tile)))
+    for id in _storage_dataids(field, tile))
 
 # Avoid allocating a runtime-sized tuple of storage ids on ordinary copies and
 # broadcasts. dataids remains the fallback for wrappers such as SubArray.

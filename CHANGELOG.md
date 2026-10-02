@@ -4,6 +4,26 @@ All notable changes to HaloArrays.jl are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] — 2026-10-02
+
+### Fixed
+- **Nested collections** (a `MultiHaloArray` or `ArrayOfHaloArray` whose fields
+  are themselves collections) are now one consistent array. Before, `ndims`
+  counted only the outer field axis while `size` listed the inner one too, so
+  `size(c, 4)` returned 1, `c[o, i, x, y]` threw `BoundsError`, `siteview`,
+  `gather_haloarray` and `cell_geometry` failed, a spatial `dims=` reduction
+  folded the inner field axis instead, and ragged nestings (inner collections
+  with different field counts, or a leaf next to a collection) were accepted
+  with a size that did not match their element count. Now `ndims`, `size`,
+  `length`, `axes`, `field_shape` (outer container shape followed by the inner
+  one) and `n_field` agree; indexing, `siteview` (a matrix over the full field
+  shape, outer index fastest), `gather_haloarray`, `cell_geometry` and spatial
+  `dims=` reductions work; ragged nestings throw `DimensionMismatch`; reducing
+  over a field axis of a nested collection throws `ArgumentError`.
+- `fill_from_global_indices!` accepts a collection: `f(I)` returns a scalar for
+  every field, or one value per leaf field (tuple, `SVector` or array in
+  column-major `field_shape` order).
+
 ## [0.10.0] — 2026-10-02
 
 ### Added

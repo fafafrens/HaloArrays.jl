@@ -97,7 +97,7 @@ function ArrayOfHaloArray(::Type{ThreadedHaloArray},
 end
 
 # eltype/ndims come from AbstractArray{T,D} via FieldCollection{T,D,S,C}.
-@inline field_shape(mha::ArrayOfHaloArray) = size(getfield(mha, :arrays))
+@inline _container_shape(mha::ArrayOfHaloArray) = size(getfield(mha, :arrays))
 # parent (the field array) and field_storages (the array of storages) are
 # container-generic in field_collection.jl.
 
