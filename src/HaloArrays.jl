@@ -130,7 +130,8 @@ export CoordinateSystem,
     face_center,
     face_distance,
     face_area,
-    face_normal
+    face_normal,
+    map_dims
 
 # Boundary conditions
 export boundary_condition!,

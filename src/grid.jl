@@ -391,3 +391,26 @@ grids whose normals vary per face.
 """
 @inline face_normal(::CoordinateSystem, g::AbstractHaloCollection{T}, ::Dim{D}, I, tile=nothing) where {T,D} =
     SVector{_geo_ndims(g),T}(versors(Val(_geo_ndims(g)))[D])
+
+# ---- direction iteration -------------------------------------------------------
+
+"""
+    map_dims(f, Val(N)) -> NTuple{N}
+
+`(f(Dim(1)), f(Dim(2)), …, f(Dim(N)))`, unrolled at compile time. Each call
+sees its direction as a static [`Dim`](@ref)`{D}`, so [`face_area`](@ref),
+[`face_distance`](@ref), [`unit_vector`](@ref) and every other `Dim`-dispatched
+helper resolve statically, and `f` is inlined at the call — a do-block costs
+the same as a hand-written recursion over the directions (an `ntuple(d -> …)`
+closure would see an `Int` and dispatch dynamically on every face). Sum or
+multiply the result for a reduction over directions:
+
+```julia
+flux = sum(map_dims(Val(N)) do D
+    e = unit_vector(Val(N), D)
+    face_area(sys, g, D, I, tile) * (u[I + e] - u[I]) / face_distance(sys, g, D, I, tile)
+end)
+```
+"""
+@inline map_dims(f::F, ::Val{0}) where {F} = ()
+@inline map_dims(f::F, ::Val{N}) where {F,N} = (map_dims(f, Val(N - 1))..., @inline(f(Dim(N))))
