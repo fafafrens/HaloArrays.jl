@@ -100,11 +100,15 @@ Base.IndexStyle(::Type{<:SiteView}) = IndexLinear()
     return fields[index]
 end
 
-# Leaf `k` (column-major over `field_shape`, outer container index fastest):
-# a nested collection recurses one level per container.
+# Leaf `k` (column-major over `field_shape`, outer container index fastest).
+# A flat container (every field a single array) is one direct lookup — the
+# same path as before nesting was supported, which Julia 1.10 keeps
+# allocation-free; a nested one recurses one level per container.
 @inline _site_leaf(state::AbstractSingleHaloArray, k::Int) = state
-@inline function _site_leaf(state::AbstractHaloCollection, k::Int)
-    fields = _site_fields(state)
+@inline _site_leaf(state::AbstractHaloCollection, k::Int) = _site_leaf(_site_fields(state), k)
+@inline _site_leaf(fields::Tuple{Vararg{AbstractSingleHaloArray}}, k::Int) = _site_field(fields, k)
+@inline _site_leaf(fields::AbstractArray{<:AbstractSingleHaloArray}, k::Int) = _site_field(fields, k)
+@inline function _site_leaf(fields, k::Int)
     n = length(fields)
     return _site_leaf(_site_field(fields, (k - 1) % n + 1), (k - 1) ÷ n + 1)
 end
