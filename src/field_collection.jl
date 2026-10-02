@@ -280,20 +280,21 @@ Base.setindex!(c::FieldCollection, value, I::CartesianIndex) =
     throw(DimensionMismatch("cannot change the field count of a named collection (MultiHaloArray) via similar"))
 
 function Base.similar(c::FieldCollection{AA,D,S}, ::Type{T}, dims::Dims{M}) where {AA,D,S,T,M}
-    field_ndims = D - S
     M == D ||
         throw(DimensionMismatch("collection similar dims must have $D dimensions"))
+    # The container's own axes come first; the rest (inner field axes of a
+    # nested field, then spatial) are the dims of each field.
+    cn = _container_ndims(c)
+    new_container_shape = ntuple(d -> Int(dims[d]), cn)
+    field_dims = ntuple(d -> Int(dims[cn + d]), D - cn)
 
-    new_field_shape = ntuple(d -> Int(dims[d]), Val(field_ndims))
-    spatial_dims = ntuple(d -> Int(dims[field_ndims + d]), Val(S))
-
-    if new_field_shape == field_shape(c)
-        return _map_fields(a -> similar(a, T, spatial_dims), c)
+    if new_container_shape == _container_shape(c)
+        return _map_fields(a -> similar(a, T, field_dims), c)
     else
         ref = _first_field(c)
-        prototype = similar(ref, T, spatial_dims)
-        arrs = _reshape_field_container(getfield(c, :arrays), new_field_shape,
-            prototype, () -> similar(ref, T, spatial_dims))
+        prototype = similar(ref, T, field_dims)
+        arrs = _reshape_field_container(getfield(c, :arrays), new_container_shape,
+            prototype, () -> similar(ref, T, field_dims))
         return _rebuild_collection(arrs)
     end
 end

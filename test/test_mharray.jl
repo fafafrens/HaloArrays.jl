@@ -303,6 +303,12 @@ end
     @test ga[1, 2, 3, 1] == q[2][3, 1] && ga[2, 1, 1, 2] == p[1][1, 2]
     @test size(siteview(aa, CartesianIndex(2, 2))) == (2, 2)
     @test size(HaloArrays.getdata(sum(aa; dims=3))) == (2, 2, 2)      # spatial axis, not the inner field axis
+    # similar with explicit dims: container axes first, then the field's own dims
+    @test size(similar(nested_fields, Float32, (2, 2, 3, 2))) == (2, 2, 3, 2)
+    @test size(similar(nested_fields, (2, 2, 6, 4))) == (2, 2, 6, 4)
+    @test_throws DimensionMismatch similar(nested_fields, (3, 2, 3, 2))   # named outer cannot grow
+    @test size(similar(aa, Float64, (3, 2, 3, 2))) == (3, 2, 3, 2)      # array outer can
+    @test size(similar(aa, (2, 3, 3, 2))) == (2, 3, 3, 2)               # and so can the inner array containers
     # raw storages: nested containers down to the leaves; the flat refill takes
     # one leaf per entry in column-major field order
     fs = field_storages(nested_fields)
