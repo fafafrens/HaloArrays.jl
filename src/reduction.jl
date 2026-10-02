@@ -651,7 +651,7 @@ _rewrap_reduced(src::AbstractHaloCollection, reduced) =
 _rebuild_like(c::MultiHaloArray, fields) =
     MultiHaloArray(NamedTuple{keys(getfield(c, :arrays))}(Tuple(fields)))
 _rebuild_like(c::ArrayOfHaloArray, fields) =
-    ArrayOfHaloArray(reshape(collect(fields), field_shape(c)))
+    ArrayOfHaloArray(reshape(collect(fields), _container_shape(c)))   # one reduced field per outer field
 
 free!(plan::CollectionDimReductionPlan) = (foreach(free!, plan.spatial_plans); plan)
 _release_transient!(plan::CollectionDimReductionPlan) =

@@ -86,11 +86,13 @@ function gather_haloarray(halo::ArrayOfHaloArray; root::Int=0)
     data = nothing
     # Gather every field on every rank (each is a collective on MPI); assemble
     # whatever comes back, which is `nothing` only on non-root MPI ranks.
+    # One outer field at a time: a nested field's gathered data already carries
+    # the inner field axes, so only the container's own shape is prepended.
     for I in CartesianIndices(fields)
         field_data = gather_haloarray(fields[I]; root=root)
         field_data === nothing && continue
         data === nothing &&
-            (data = Array{eltype(halo)}(undef, (field_shape(halo)..., size(field_data)...)))
+            (data = Array{eltype(halo)}(undef, (_container_shape(halo)..., size(field_data)...)))
         data[Tuple(I)..., ntuple(_ -> Colon(), ndims(field_data))...] .= field_data
     end
     return data

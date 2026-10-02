@@ -18,7 +18,7 @@ using MPI
 import HaloArrays:
     AbstractHaloArray, AbstractSingleHaloArray, AbstractSerialHaloArray,
     AbstractHaloCollection, HaloArray, MultiHaloArray, ArrayOfHaloArray,
-    MaybeHaloArray, field_shape, interior_size, interior_view,
+    MaybeHaloArray, field_shape, _container_shape, interior_size, interior_view,
     communicator, _first_field, gather_haloarray, is_active, getdata,
     append_haloarray!
 
@@ -26,14 +26,19 @@ const _Parent = Union{HDF5.File,HDF5.Group}
 
 # ---- geometry helpers ---------------------------------------------------------
 
+# An ArrayOfHaloArray is one dataset with the field axes first; a nested one
+# recurses (the inner field axes follow the outer container's). A
+# MultiHaloArray inside it has named fields and cannot be one dataset.
 @inline _dataset_dims(halo::AbstractSingleHaloArray) = size(halo)
 @inline _dataset_dims(halo::ArrayOfHaloArray) =
-    (field_shape(halo)..., _dataset_dims(first(parent(halo)))...)
+    (_container_shape(halo)..., _dataset_dims(first(parent(halo)))...)
+_dataset_dims(::MultiHaloArray) = throw(ArgumentError(
+    "a MultiHaloArray nested in an ArrayOfHaloArray cannot be written as one dataset; nest the other way round"))
 
 @inline _chunk_dims(halo::HaloArray) = interior_size(halo)
 @inline _chunk_dims(halo::AbstractSerialHaloArray) = _dataset_dims(halo)
 @inline _chunk_dims(halo::ArrayOfHaloArray) =
-    (field_shape(halo)..., _chunk_dims(first(parent(halo)))...)
+    (_container_shape(halo)..., _chunk_dims(first(parent(halo)))...)
 
 @inline _comm(halo::HaloArray) = communicator(halo)
 @inline _comm(::AbstractSerialHaloArray) = nothing
@@ -94,14 +99,18 @@ function _write_step!(dset, halo::AbstractSingleHaloArray, step::Int)
     return nothing
 end
 
-function _write_step!(dset, halo::ArrayOfHaloArray, step::Int)
-    fields = parent(halo)
+# Each leaf writes its own block under its field-index prefix; a nested
+# ArrayOfHaloArray extends the prefix with its container index.
+_write_field!(dset, step::Int, prefix::Tuple, field::AbstractSingleHaloArray) =
+    (dset[step, prefix..., _block_slices(field)...] = _block(field); nothing)
+function _write_field!(dset, step::Int, prefix::Tuple, c::ArrayOfHaloArray)
+    fields = parent(c)
     for I in CartesianIndices(fields)
-        field = fields[I]
-        dset[step, Tuple(I)..., _block_slices(field)...] = _block(field)
+        _write_field!(dset, step, (prefix..., Tuple(I)...), fields[I])
     end
     return nothing
 end
+_write_step!(dset, halo::ArrayOfHaloArray, step::Int) = _write_field!(dset, step, (), halo)
 
 function _append!(parent::_Parent, name::String, halo::Union{AbstractSingleHaloArray,ArrayOfHaloArray})
     dset = _dataset(parent, name, halo)

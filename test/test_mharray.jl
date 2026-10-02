@@ -295,6 +295,20 @@ end
     @test any(x -> x == 23, nested_fields)
     g = gather_haloarray(nested_fields)
     @test keys(g) == (:q, :p) && size(g.q) == (2, 3, 2)
+    # an ArrayOfHaloArray of ArrayOfHaloArrays gathers to one array, outer axis first
+    aa = ArrayOfHaloArray([q, p])
+    @test ndims(aa) == 4 && HaloArrays._spatial_ndims(aa) == 2 && field_shape(aa) == (2, 2)
+    ga = gather_haloarray(aa)
+    @test size(ga) == (2, 2, 3, 2)
+    @test ga[1, 2, 3, 1] == q[2][3, 1] && ga[2, 1, 1, 2] == p[1][1, 2]
+    @test size(siteview(aa, CartesianIndex(2, 2))) == (2, 2)
+    @test size(HaloArrays.getdata(sum(aa; dims=3))) == (2, 2, 2)      # spatial axis, not the inner field axis
+    # alias checks descend to the leaves: self-aliased site operations are detected
+    sq = siteview(nested_fields, CartesianIndex(2, 2))
+    @test Base.mightalias(sq, parent(q[1])) && !Base.mightalias(sq, zeros(2))
+    @test Base.mightalias(sq, siteview(nested_fields, CartesianIndex(3, 2)))
+    sq .= sq .+ 1                               # broadcast with alias preprocessing
+    @test sq[1, 1] == q[1][1, 1]
     geo = cell_geometry(nested_fields, UniformAxis(0, 1), UniformAxis(0, 1))
     @test size(geo) == (4, 3, 2)
 

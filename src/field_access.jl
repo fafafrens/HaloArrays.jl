@@ -142,10 +142,10 @@ _site_dataids(fields, tile) = Tuple(id for field in fields
 
 # Avoid allocating a runtime-sized tuple of storage ids on ordinary copies and
 # broadcasts. dataids remains the fallback for wrappers such as SubArray.
-function Base.mightalias(q::SiteView, a::AbstractArray)
-    return any(field -> Base.mightalias(_cell_storage(field, q.tile), a), _site_fields(q.state))
-end
+# The checks descend to the leaves, like `_storage_dataids`.
+_storage_mightalias(f::AbstractSingleHaloArray, tile, a) = Base.mightalias(_cell_storage(f, tile), a)
+_storage_mightalias(c::AbstractHaloCollection, tile, a) =
+    any(field -> _storage_mightalias(field, tile, a), _site_fields(c))
+Base.mightalias(q::SiteView, a::AbstractArray) = _storage_mightalias(q.state, q.tile, a)
 Base.mightalias(a::AbstractArray, q::SiteView) = Base.mightalias(q, a)
-function Base.mightalias(q::SiteView, r::SiteView)
-    return any(field -> Base.mightalias(_cell_storage(field, q.tile), r), _site_fields(q.state))
-end
+Base.mightalias(q::SiteView, r::SiteView) = _storage_mightalias(q.state, q.tile, r)

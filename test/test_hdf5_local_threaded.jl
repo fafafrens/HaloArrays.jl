@@ -155,6 +155,15 @@ _read(path, dset) = h5open(path, "r") do fid; read(fid[dset]); end
         @test size(q) == (1, 2, 2)
         @test vec(q[1, 1, :]) == [1, 2]
         @test vec(q[1, 2, :]) == [3, 4]
+        # an ArrayOfHaloArray of ArrayOfHaloArrays is one dataset, outer axis first
+        aa = ArrayOfHaloArray([p, ArrayOfHaloArray([q1, q2])])
+        append_haloarray!(path, "aa", aa)
+        d = _read(path, "aa")
+        @test size(d) == (1, 2, 2, 2)
+        @test vec(d[1, 1, 2, :]) == [7, 8] && vec(d[1, 2, 2, :]) == [3, 4]
+        # a MultiHaloArray inside an ArrayOfHaloArray has no single-dataset layout
+        @test_throws ArgumentError append_haloarray!(path, "bad",
+            ArrayOfHaloArray([MultiHaloArray((; a=q1, b=q2)), MultiHaloArray((; a=q1, b=q2))]))
         rm(path; force=true)
     end
 end

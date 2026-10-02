@@ -177,7 +177,7 @@ function ArrayOfHaloArray(arrays::AbstractArray)
     _check_arrayofhaloarray_compatible(arrays)
 
     T = promote_type(map(eltype, arrays)...)
-    S = ndims(first(arrays))
+    S = _spatial_ndims(first(arrays))
     return FieldCollection{T, ndims(first(arrays)) + ndims(arrays), S, typeof(arrays)}(arrays)
 end
 
