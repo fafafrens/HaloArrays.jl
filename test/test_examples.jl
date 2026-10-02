@@ -39,6 +39,7 @@ const SMOKE_EXAMPLES = [
     "finite_volume/relativistic_hydro_cylindrical_threaded_1d.jl",
     "heat/local.jl",
     "heat/geometry.jl",      # self-checking: FV on a cell geometry vs the FD stencil, heat content on a polar disk
+    "dg/on_model_riemann.jl", # self-checking: nodal DG shock position vs the analytic Rankine-Hugoniot solution
     "hydro/local_2d.jl",
     "hydro/threaded_2d.jl",
     "lattice/scalar_local_threaded_2d.jl",
