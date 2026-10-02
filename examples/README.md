@@ -6,6 +6,7 @@ grouped by topic:
 ```
 tutorials/      progressive, self-contained walkthroughs (start here)
 heat/           heat diffusion — the simplest stencil
+dg/             nodal discontinuous Galerkin (one element per site)
 finite_volume/  conservative finite volume (Burgers, advection)
 hydro/          2-D ideal hydrodynamics
 lattice/        lattice field theory Monte Carlo (scalar φ⁴, SU(2) Wilson)
@@ -41,6 +42,23 @@ julia --project=. -t 4 examples/tutorials/broadcast.jl
 mpiexec -n 4 julia --project=. examples/tutorials/mpi.jl
 julia --project=examples -t 4 examples/tutorials/gpu.jl       # needs Metal.jl (macOS)
 julia --project=examples examples/tutorials/diffeq.jl
+```
+
+## Discontinuous Galerkin (`dg/`)
+
+`dg/common.jl` is a one-dimensional nodal DG reference element (Legendre-Gauss-
+Lobatto nodes, mass/differentiation/stiffness matrices as static arrays), the
+local Lax-Friedrichs flux, the strong-form right-hand side on a halo array whose
+element type is the `SVector` of nodal values (one element per site, the
+neighbours in the one-element halo), and an SSP-RK3 step.
+
+`dg/on_model_riemann.jl` solves the large-N O(N) flow equation of
+[arXiv:1903.09503](https://arxiv.org/abs/1903.09503) as a conservation law for
+the Riemann initial condition and checks the numerical shock position against
+the analytic Rankine-Hugoniot solution, equation (29) of the paper:
+
+```bash
+julia --project=. examples/dg/on_model_riemann.jl
 ```
 
 ## Heat diffusion (`heat/`)
