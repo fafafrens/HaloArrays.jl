@@ -191,6 +191,37 @@ _noncorner(data, hw) = (I for I in CartesianIndices(data)
         @test sum(cell_volume(sys, g1, I) for I in _interior(s1)) ≈ 2^3 / 3
     end
 
+    @testset "map_dims: static directions, inlined do-block" begin
+        @test map_dims(D -> D, Val(3)) === (Dim(1), Dim(2), Dim(3))
+        @test map_dims(identity, Val(0)) === ()
+        @test map_dims(D -> unit_vector(Val(2), D), Val(2)) === unit_vector(Val(2))
+        bc = ((Reflecting(), Reflecting()), (Periodic(), Periodic()))
+        u  = LocalHaloArray(Float64, (12, 8), 1; boundary_condition=bc)
+        t  = ThreadedHaloArray(Float64, (12, 4), 1; dims=(1, 2), boundary_condition=bc)
+        ax = (EdgeAxis(cell_edges((0, 0.3, 1), (4, 8))), UniformAxis(0, 2π))
+        g, gt = cell_geometry(u, ax; system=Polar()), cell_geometry(t, ax; system=Polar())
+        sys = Polar()
+        # the flux sum written with the do-block …
+        flux_do(g, I, tile) = sum(map_dims(Val(2)) do D
+            Im = I - unit_vector(Val(2), D)
+            face_area(sys, g, D, I, tile) / face_distance(sys, g, D, I, tile) +
+            face_area(sys, g, D, Im, tile) / face_distance(sys, g, D, Im, tile)
+        end)
+        # … equals the hand-written static recursion bit for bit
+        rec(g, I, tile, ::Val{0}) = 0.0
+        rec(g, I, tile, ::Val{D}) where {D} = (Im = I - unit_vector(Val(2), D);
+            face_area(sys, g, Dim(D), I, tile) / face_distance(sys, g, Dim(D), I, tile) +
+            face_area(sys, g, Dim(D), Im, tile) / face_distance(sys, g, Dim(D), Im, tile) +
+            rec(g, I, tile, Val(D - 1)))
+        for I in (CartesianIndex(2, 2), CartesianIndex(7, 5), CartesianIndex(13, 5))   # inside both the block and a tile
+            @test flux_do(g, I, nothing) == rec(g, I, nothing, Val(2))
+            @test flux_do(gt, I, 2) == rec(gt, I, 2, Val(2))
+        end
+        # and stays allocation-free on a single block and on a tile
+        @test _allocation_free(flux_do, g, CartesianIndex(7, 5), nothing)
+        @test _allocation_free(flux_do, gt, CartesianIndex(7, 5), 2)
+    end
+
     @testset "helpers are allocation-free (single block and tile)" begin
         u = LocalHaloArray(Float64, (6, 5, 4), 1)
         t = ThreadedHaloArray(Float64, (6, 5, 2), 1; dims=(1, 1, 2))

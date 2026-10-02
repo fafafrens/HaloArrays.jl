@@ -21,26 +21,22 @@ include("common.jl")
 
 # ---- kernel -----------------------------------------------------------------
 
-# Net diffusive flux into cell I through its 2N faces, summed by recursing on
-# the direction as a static parameter, so `Dim(D)` is a compile-time constant
-# (an `ntuple(d -> …, Val(N))` closure would not fold it and would dispatch
-# dynamically on every face).
-@inline _face_fluxes(old, g, sys, I::CartesianIndex, tile, ::Val{0}) = zero(eltype(old))
-@inline function _face_fluxes(old, g, sys, I::CartesianIndex{N}, tile, ::Val{D}) where {N,D}
-    e = unit_vector(Val(N), D)
-    Ip, Im = I + e, I - e
-    f = @inbounds (face_area(sys, g, Dim(D), I, tile) * (old[Ip] - old[I]) / face_distance(sys, g, Dim(D), I, tile) -
-                   face_area(sys, g, Dim(D), Im, tile) * (old[I] - old[Im]) / face_distance(sys, g, Dim(D), Im, tile))
-    return f + _face_fluxes(old, g, sys, I, tile, Val(D - 1))
+# Net diffusive flux into cell I through its 2N faces, per unit volume.
+# `map_dims` hands the do-block a static `Dim`, so every helper call resolves
+# at compile time and the kernel is allocation-free.
+@inline function fv_laplacian(old, g, sys, I::CartesianIndex{N}, tile) where {N}
+    flux = sum(map_dims(Val(N)) do D
+        e = unit_vector(Val(N), D)
+        Ip, Im = I + e, I - e
+        @inbounds (face_area(sys, g, D, I, tile) * (old[Ip] - old[I]) / face_distance(sys, g, D, I, tile) -
+                   face_area(sys, g, D, Im, tile) * (old[I] - old[Im]) / face_distance(sys, g, D, Im, tile))
+    end)
+    return flux / cell_volume(sys, g, I, tile)
 end
 
-# Net diffusive flux into cell I per unit volume.
-@inline fv_laplacian(old, g, sys, I, tile, ::Val{N}) where {N} =
-    _face_fluxes(old, g, sys, I, tile, Val(N)) / cell_volume(sys, g, I, tile)
-
-function _fv_heat_tile!(next, old, g, sys, alpha, dt, rng, tile, ::Val{N}) where {N}
+function _fv_heat_tile!(next, old, g, sys, alpha, dt, rng, tile)
     @inbounds for I in CartesianIndices(rng)
-        next[I] = old[I] + alpha * dt * fv_laplacian(old, g, sys, I, tile, Val(N))
+        next[I] = old[I] + alpha * dt * fv_laplacian(old, g, sys, I, tile)
     end
     return next
 end
@@ -51,32 +47,28 @@ _geometry_tile(::ThreadedHaloArray, t) = t
 _geometry_tile(u, t) = nothing
 
 function fv_heat_step!(u_next, u_old, g, sys, alpha, dt)
-    N   = ndims(u_old)
     rng = interior_range(u_old)
     @tasks for t in 1:tile_count(u_old)
         _fv_heat_tile!(tile_parent(u_next, t), tile_parent(u_old, t), g, sys, alpha, dt,
-            rng, _geometry_tile(u_old, t), Val(N))
+            rng, _geometry_tile(u_old, t))
     end
     return u_next
 end
 
-# Σ_faces A_f / d_f of cell I (same recursion as the fluxes).
-@inline _face_weights(g, sys, I::CartesianIndex, tile, ::Val{0}) = 0.0
-@inline function _face_weights(g, sys, I::CartesianIndex{N}, tile, ::Val{D}) where {N,D}
+# Σ_faces A_f / d_f of cell I.
+@inline face_weights(g, sys, I::CartesianIndex{N}, tile) where {N} = sum(map_dims(Val(N)) do D
     Im = I - unit_vector(Val(N), D)
-    w = face_area(sys, g, Dim(D), I, tile) / face_distance(sys, g, Dim(D), I, tile) +
-        face_area(sys, g, Dim(D), Im, tile) / face_distance(sys, g, Dim(D), Im, tile)
-    return w + _face_weights(g, sys, I, tile, Val(D - 1))
-end
+    face_area(sys, g, D, I, tile) / face_distance(sys, g, D, I, tile) +
+    face_area(sys, g, D, Im, tile) / face_distance(sys, g, D, Im, tile)
+end)
 
 # Explicit Euler is stable while α dt Σ_faces A_f / (d_f V_I) ≤ 1 in every cell.
 function fv_stable_dt(u, g, sys, alpha; cfl=0.8)
-    N = ndims(u)
     worst = 0.0
     for t in 1:tile_count(u)
         tile = _geometry_tile(u, t)
         for I in CartesianIndices(interior_range(u))
-            worst = max(worst, _face_weights(g, sys, I, tile, Val(N)) / cell_volume(sys, g, I, tile))
+            worst = max(worst, face_weights(g, sys, I, tile) / cell_volume(sys, g, I, tile))
         end
     end
     return cfl / (alpha * worst)
@@ -160,8 +152,7 @@ function harmonic_residual(u, g, sys)
         c = cell_center(sys, g, I)
         data[I] = c[1]^2 * cos(2c[2])
     end
-    N = ndims(u)
-    return maximum(abs(fv_laplacian(data, g, sys, I, nothing, Val(N))) for I in CartesianIndices(interior_range(u)))
+    return maximum(abs(fv_laplacian(data, g, sys, I, nothing)) for I in CartesianIndices(interior_range(u)))
 end
 
 function disk_run(u; nt=200, alpha=0.05)
