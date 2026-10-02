@@ -143,12 +143,27 @@ _read(path, dset) = h5open(path, "r") do fid; read(fid[dset]); end
         scalar = similar(q1); interior_view(scalar) .= [7, 8]
         append_haloarray!(path, "t", MultiHaloArray((; rho, mom=copy(rho))))
         @test vec(_read(path, "t/rho")[1, :]) == [1, 2, 3, 4]
-        append_haloarray!(path, "n", MultiHaloArray((; scalar, q=ArrayOfHaloArray([q1, q2]))))
-        @test vec(_read(path, "n/scalar")[1, :]) == [7, 8]
+        # a leaf beside a collection is not a rectangular array: rejected
+        @test_throws DimensionMismatch MultiHaloArray((; scalar, q=ArrayOfHaloArray([q1, q2])))
+        # a rectangular nesting is a group of one dataset per inner collection
+        p = ArrayOfHaloArray([scalar, copy(scalar)])
+        append_haloarray!(path, "n", MultiHaloArray((; p, q=ArrayOfHaloArray([q1, q2]))))
+        pd = _read(path, "n/p")
+        @test size(pd) == (1, 2, 2)
+        @test vec(pd[1, 1, :]) == [7, 8] && vec(pd[1, 2, :]) == [7, 8]
         q = _read(path, "n/q")
         @test size(q) == (1, 2, 2)
         @test vec(q[1, 1, :]) == [1, 2]
         @test vec(q[1, 2, :]) == [3, 4]
+        # an ArrayOfHaloArray of ArrayOfHaloArrays is one dataset, outer axis first
+        aa = ArrayOfHaloArray([p, ArrayOfHaloArray([q1, q2])])
+        append_haloarray!(path, "aa", aa)
+        d = _read(path, "aa")
+        @test size(d) == (1, 2, 2, 2)
+        @test vec(d[1, 1, 2, :]) == [7, 8] && vec(d[1, 2, 2, :]) == [3, 4]
+        # a MultiHaloArray inside an ArrayOfHaloArray has no single-dataset layout
+        @test_throws ArgumentError append_haloarray!(path, "bad",
+            ArrayOfHaloArray([MultiHaloArray((; a=q1, b=q2)), MultiHaloArray((; a=q1, b=q2))]))
         rm(path; force=true)
     end
 end

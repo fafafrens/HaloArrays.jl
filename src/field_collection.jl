@@ -47,6 +47,11 @@ Use this when a solver evolves several fields on one grid (e.g. `rho`, `u`, `v`,
 [`ArrayOfHaloArray`](@ref). Both are aliases of one underlying type
 (`FieldCollection`), so they share all generic behaviour.
 
+Fields may themselves be collections (`MultiHaloArray((; a, b))` with `a`, `b`
+collections of the same field shape): the result is one rectangular array whose
+field axes are the outer container's followed by the inner ones
+(`field_shape`), indexed `c[outer, inner..., spatial...]`.
+
 # Examples
 ```julia
 state = MultiHaloArray(LocalHaloArray, Float64, (64, 64), 1; boundary_conditions=(
@@ -89,23 +94,29 @@ synchronize_halo!(vel)
 """
 const ArrayOfHaloArray{T,D,S,C<:AbstractArray} = FieldCollection{T,D,S,C}
 
-const HaloArrayField = AbstractSingleHaloArray
+# A field of a collection: a single halo array, or (nested) another collection.
+const HaloArrayField = Union{AbstractSingleHaloArray,AbstractHaloCollection}
 
 # ---- field-compatibility checks ------------------------------------------
 # Every field must match the first in spatial dimensionality, interior size,
-# halo width, and backend. `labeled_fields` is an iterable of (label, field)
-# pairs (the label only colours the error message — a field name for
-# MultiHaloArray, an index for ArrayOfHaloArray).
+# halo width, backend and — for nested collections — field shape, so the whole
+# is one rectangular array (a leaf and a collection, or two collections with
+# different field counts, cannot be). `labeled_fields` is an iterable of
+# (label, field) pairs (the label only colours the error message — a field name
+# for MultiHaloArray, an index for ArrayOfHaloArray).
 function _check_fields_compatible(what::AbstractString, ref, labeled_fields)
     ref_ndims   = _spatial_ndims(ref)
     ref_size    = _spatial_interior_size(ref)
     ref_halo    = halo_width(ref)
     ref_backend = halo_backend(ref)
+    ref_fshape  = field_shape(ref)
     for (label, a) in labeled_fields
         _spatial_ndims(a) == ref_ndims ||
             throw(ArgumentError("$what field `$label` has dimensionality $(_spatial_ndims(a)) != $ref_ndims"))
         _spatial_interior_size(a) == ref_size ||
             throw(DimensionMismatch("$what field `$label` has interior size $(_spatial_interior_size(a)) != $ref_size"))
+        field_shape(a) == ref_fshape ||
+            throw(DimensionMismatch("$what field `$label` has field shape $(field_shape(a)) != $ref_fshape (nested fields must share their field shape)"))
         halo_width(a) == ref_halo ||
             throw(DimensionMismatch("$what field `$label` has halo width $(halo_width(a)) != $ref_halo"))
         halo_backend(a) isa typeof(ref_backend) ||
@@ -150,6 +161,8 @@ end
 
 # ---- ground-truth constructors --------------------------------------------
 
+# D counts the container's own axes plus the fields' (which, for a nested
+# collection, include the inner field axes): D = ndims(field) + container axes.
 function MultiHaloArray(arrs::NamedTuple)
     field_names = keys(arrs)
     field_values = values(arrs)
@@ -157,15 +170,15 @@ function MultiHaloArray(arrs::NamedTuple)
 
     T = promote_type(map(eltype, field_values)...)
     S = _spatial_ndims(first(field_values))
-    return FieldCollection{T, S + 1, S, typeof(arrs)}(arrs)
+    return FieldCollection{T, ndims(first(field_values)) + 1, S, typeof(arrs)}(arrs)
 end
 
 function ArrayOfHaloArray(arrays::AbstractArray)
     _check_arrayofhaloarray_compatible(arrays)
 
     T = promote_type(map(eltype, arrays)...)
-    S = ndims(first(arrays))
-    return FieldCollection{T, S + ndims(arrays), S, typeof(arrays)}(arrays)
+    S = _spatial_ndims(first(arrays))
+    return FieldCollection{T, ndims(first(arrays)) + ndims(arrays), S, typeof(arrays)}(arrays)
 end
 
 # Rebuild the same kind of collection from a new field container (used by
@@ -197,6 +210,9 @@ end
 
 @inline _fields(c::FieldCollection)      = values(getfield(c, :arrays))
 @inline _first_field(c::FieldCollection) = first(_fields(c))
+# Number of axes of the field container itself (1 for a NamedTuple).
+@inline _container_ndims(::MultiHaloArray) = 1
+@inline _container_ndims(c::ArrayOfHaloArray) = ndims(getfield(c, :arrays))
 @inline _map_fields(g, c::FieldCollection) = _rebuild_collection(map(g, getfield(c, :arrays)))
 @inline _check_same_fields(dest::FieldCollection, src::FieldCollection) =
     keys(getfield(dest, :arrays)) == keys(getfield(src, :arrays)) ||
@@ -217,19 +233,20 @@ active_fields(c::FieldCollection) = map(is_active, getfield(c, :arrays))
     map(a -> tile_parent(a, tile_id), getfield(c, :arrays))
 
 # ---- indexing: field axes first, then spatial axes --------------------------
-# `field_ndims = D - S` (1 for named collections). Short indexing with up to
-# field_ndims indices returns the field; full-dims indexing reaches a cell.
-# NamedTuples support integer indexing, so this covers both flavors.
+# The container's own axes come first (1 for named collections); the rest of
+# the indices go to the selected field, which recurses for a nested collection
+# and reaches a cell on a leaf. Short indexing with up to the container's axes
+# returns the field. NamedTuples support integer indexing, so this covers both
+# flavors.
 
 function Base.getindex(c::FieldCollection{T,D,S}, I...) where {T,D,S}
-    field_ndims = D - S
-
-    if length(I) <= field_ndims
+    cn = _container_ndims(c)
+    if length(I) <= cn
         return getindex(getfield(c, :arrays), I...)
     elseif length(I) == D
-        field_idx = ntuple(d -> I[d], field_ndims)
-        spatial_idx = ntuple(d -> I[field_ndims + d], S)
-        return getindex(getfield(c, :arrays)[field_idx...], spatial_idx...)
+        field_idx = ntuple(d -> I[d], cn)
+        rest = ntuple(d -> I[cn + d], D - cn)
+        return getindex(getfield(c, :arrays)[field_idx...], rest...)
     else
         throw(BoundsError(c, I))
     end
@@ -238,12 +255,11 @@ end
 Base.getindex(c::FieldCollection, I::CartesianIndex) = getindex(c, Tuple(I)...)
 
 function Base.setindex!(c::FieldCollection{T,D,S}, value, I...) where {T,D,S}
-    field_ndims = D - S
-
+    cn = _container_ndims(c)
     if length(I) == D
-        field_idx = ntuple(d -> I[d], field_ndims)
-        spatial_idx = ntuple(d -> I[field_ndims + d], S)
-        setindex!(getfield(c, :arrays)[field_idx...], value, spatial_idx...)
+        field_idx = ntuple(d -> I[d], cn)
+        rest = ntuple(d -> I[cn + d], D - cn)
+        setindex!(getfield(c, :arrays)[field_idx...], value, rest...)
         return c
     else
         throw(BoundsError(c, I))
@@ -264,20 +280,21 @@ Base.setindex!(c::FieldCollection, value, I::CartesianIndex) =
     throw(DimensionMismatch("cannot change the field count of a named collection (MultiHaloArray) via similar"))
 
 function Base.similar(c::FieldCollection{AA,D,S}, ::Type{T}, dims::Dims{M}) where {AA,D,S,T,M}
-    field_ndims = D - S
     M == D ||
         throw(DimensionMismatch("collection similar dims must have $D dimensions"))
+    # The container's own axes come first; the rest (inner field axes of a
+    # nested field, then spatial) are the dims of each field.
+    cn = _container_ndims(c)
+    new_container_shape = ntuple(d -> Int(dims[d]), cn)
+    field_dims = ntuple(d -> Int(dims[cn + d]), D - cn)
 
-    new_field_shape = ntuple(d -> Int(dims[d]), Val(field_ndims))
-    spatial_dims = ntuple(d -> Int(dims[field_ndims + d]), Val(S))
-
-    if new_field_shape == field_shape(c)
-        return _map_fields(a -> similar(a, T, spatial_dims), c)
+    if new_container_shape == _container_shape(c)
+        return _map_fields(a -> similar(a, T, field_dims), c)
     else
         ref = _first_field(c)
-        prototype = similar(ref, T, spatial_dims)
-        arrs = _reshape_field_container(getfield(c, :arrays), new_field_shape,
-            prototype, () -> similar(ref, T, spatial_dims))
+        prototype = similar(ref, T, field_dims)
+        arrs = _reshape_field_container(getfield(c, :arrays), new_container_shape,
+            prototype, () -> similar(ref, T, field_dims))
         return _rebuild_collection(arrs)
     end
 end
@@ -342,9 +359,12 @@ leaves — in the same container kind as the collection (a `NamedTuple` for
 [`MultiHaloArray`](@ref), an array for [`ArrayOfHaloArray`](@ref)). Index these
 with **storage** indices (ghost-inclusive), e.g. over [`interior_range`](@ref)
 or a [`FaceRanges`](@ref) sweep. Contrast `parent` (the field container) and
-[`interior_view`](@ref) (ghost-free views).
+[`interior_view`](@ref) (ghost-free views). A nested collection gives nested
+containers, one level per collection, down to the leaf storages.
 """
-@inline field_storages(c::FieldCollection) = map(parent, getfield(c, :arrays))
+@inline field_storages(c::FieldCollection) = map(_leaf_storages, getfield(c, :arrays))
+@inline _leaf_storages(a::AbstractSingleHaloArray) = parent(a)
+@inline _leaf_storages(c::FieldCollection) = field_storages(c)
 
 """
     field_storages!(dest, c::FieldCollection)
@@ -356,8 +376,9 @@ for an [`ArrayOfHaloArray`](@ref) (its field count is not part of its type, so
 the result cannot be a stack-allocated tuple). A hot loop that needs the raw
 storages can hoist a `dest` container out of the loop and refill it here instead,
 staying allocation-free. `dest` must be indexable in the collection's field
-order with `prod(field_shape(c))` entries — `similar(field_storages(c))` gives a
-suitable one.
+order with `prod(field_shape(c))` entries (the leaf fields in column-major
+[`field_shape`](@ref) order for a nested collection) — `similar(field_storages(c))`
+gives a suitable one for a flat collection.
 
 ```julia
 cache = similar(field_storages(u))
@@ -366,11 +387,11 @@ accumulate_flux_divergence!(field_storages!(cache2, du), cache, ranges, 1, inv(d
 ```
 """
 function field_storages!(dest, c::FieldCollection)
-    fields = getfield(c, :arrays)
-    length(dest) == length(fields) ||
-        throw(DimensionMismatch("dest must hold one entry per field; got $(length(dest)) for $(length(fields)) fields"))
-    @inbounds for (j, field) in zip(eachindex(dest), fields)
-        dest[j] = parent(field)
+    n = n_field(c)
+    length(dest) == n ||
+        throw(DimensionMismatch("dest must hold one entry per leaf field; got $(length(dest)) for $n fields"))
+    @inbounds for (j, k) in zip(eachindex(dest), 1:n)
+        dest[j] = parent(_leaf_field(c, k))
     end
     return dest
 end

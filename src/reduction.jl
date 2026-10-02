@@ -565,6 +565,8 @@ function _classify_collection_dims(c::AbstractHaloCollection, dims)
     isempty(dn) && throw(ArgumentError("dims must select at least one dimension"))
     fdims = _tfilter(d -> d <= Fax, dn)
     sdims = map(d -> d - Fax, _tfilter(d -> d > Fax, dn))   # shifted to field-local coords
+    (!isempty(fdims) && Fax > _container_ndims(c)) && throw(ArgumentError(
+        "reducing over a field axis of a nested collection is not supported; reduce the inner collections"))
     (length(fdims) == Fax && length(sdims) == S) && throw(ArgumentError(
         "Reducing every axis of a collection to a scalar is not supported; use `sum(c)` etc."))
     return fdims, sdims
@@ -610,8 +612,11 @@ function DimReductionPlan(c::AbstractHaloCollection, dims; output_eltype=nothing
     # fresh fold at each reduce! shares the same topology, `similar` reusing it).
     fields = isempty(fdims) ? _source_fields(c) :
              _source_fields(_reduce_field_axes(identity, +, c, fdims))
+    # `sdims` are spatial (field-local) axes; a nested field counts its own
+    # field axes first, so shift into its coordinates.
     splans = map(fields) do fld
-        DimReductionPlan(fld, sdims; output_eltype = output_eltype === nothing ? eltype(fld) : output_eltype)
+        DimReductionPlan(fld, map(d -> d + ndims(fld) - _spatial_ndims(fld), sdims);
+            output_eltype = output_eltype === nothing ? eltype(fld) : output_eltype)
     end
     return CollectionDimReductionPlan(fdims, sdims, splans)
 end
@@ -646,7 +651,7 @@ _rewrap_reduced(src::AbstractHaloCollection, reduced) =
 _rebuild_like(c::MultiHaloArray, fields) =
     MultiHaloArray(NamedTuple{keys(getfield(c, :arrays))}(Tuple(fields)))
 _rebuild_like(c::ArrayOfHaloArray, fields) =
-    ArrayOfHaloArray(reshape(collect(fields), field_shape(c)))
+    ArrayOfHaloArray(reshape(collect(fields), _container_shape(c)))   # one reduced field per outer field
 
 free!(plan::CollectionDimReductionPlan) = (foreach(free!, plan.spatial_plans); plan)
 _release_transient!(plan::CollectionDimReductionPlan) =

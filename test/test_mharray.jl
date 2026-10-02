@@ -231,39 +231,100 @@ end
             q_interior[i, j] = 100 * c + 10 * i + j
         end
     end
-
     q = ArrayOfHaloArray(q_arrays)
-    nested_fields = MultiHaloArray((; rho=u, q))
 
+    # A leaf next to a collection, or collections of different field shapes,
+    # cannot form one rectangular array: rejected.
+    @test_throws DimensionMismatch MultiHaloArray((; rho=u, q))
+    @test_throws DimensionMismatch MultiHaloArray((; a=q, b=ArrayOfHaloArray([copy(u), copy(u), copy(u)])))
+
+    # Nested collections of equal field shape: one array whose field axes are
+    # the outer container's followed by the inner ones.
+    p = ArrayOfHaloArray([copy(u), 2 .* u])
+    nested_fields = MultiHaloArray((; q, p))
     @test nested_fields isa MultiHaloArray
-    @test ndims(nested_fields) == 3
-    @test size(nested_fields) == (2, 3, 2)
-    @test size(nested_fields) == size(nested_fields)
-    @test interior_size(nested_fields) == (2, 3, 2)
-    @test interior_size(nested_fields) == (2, 3, 2)
-    @test size(nested_fields) == (2, 3, 2)
-    @test storage_size(nested_fields) == (2, 5, 4)
+    @test eltype(nested_fields) == Float64
+    @test ndims(nested_fields) == 4
+    @test size(nested_fields) == (2, 2, 3, 2)
+    @test size(nested_fields, 4) == 2 && length(nested_fields) == 24
+    @test field_shape(nested_fields) == (2, 2) && HaloArrays.n_field(nested_fields) == 4
+    @test interior_size(nested_fields) == (2, 2, 3, 2)
+    @test storage_size(nested_fields) == (2, 2, 5, 4)
+    @test axes(nested_fields) == (Base.OneTo(2), Base.OneTo(2), Base.OneTo(3), Base.OneTo(2))
     @test halo_width(nested_fields) == 1
-    @test nested_fields[:q] === q
+    @test nested_fields[:q] === q && nested_fields.p === p
+    # full indexing: outer, inner, spatial — and the same through siteview
+    @test nested_fields[1, 2, 3, 1] == q[2][3, 1] == 231
+    @test nested_fields[2, 1, 1, 2] == u[1, 2]
+    nested_fields[2, 2, 1, 1] = 7.5
+    @test p[2][1, 1] == 7.5
+    sv = siteview(nested_fields, CartesianIndex(2, 2))   # storage index of cell (1, 1)
+    @test size(sv) == (2, 2)
+    @test sv == [nested_fields[i, j, 1, 1] for i in 1:2, j in 1:2]
+    sv[1, 1] = 42.0
+    @test q[1][1, 1] == 42.0
+    # fill_from_global_indices!: one value per leaf, column-major field order
+    fill_from_global_indices!(I -> (1.0, 2.0, 3.0, 4.0), nested_fields)
+    @test all(==(1.0), interior_view(q[1])) && all(==(2.0), interior_view(p[1]))
+    @test all(==(3.0), interior_view(q[2])) && all(==(4), interior_view(p[2]))
+    fill_from_global_indices!(I -> I[1] + 10 * I[2], nested_fields)
+    @test p[2][3, 2] == 23 && q[2][3, 2] == 23
+    @test sum(nested_fields) == 4 * sum(i + 10j for i in 1:3, j in 1:2)
 
     nested_shifted = nested_fields .+ 2
     @test nested_shifted isa MultiHaloArray
     @test nested_shifted.arrays.q isa ArrayOfHaloArray
-    @test collect(interior_view(nested_shifted.arrays.rho)) == [i + j / 10 + 2 for i in 1:3, j in 1:2]
-    @test collect(interior_view(nested_shifted.arrays.q[1])) == [100 + 10 * i + j + 2 for i in 1:3, j in 1:2]
-    @test collect(interior_view(nested_shifted.arrays.q[2])) == [200 + 10 * i + j + 2 for i in 1:3, j in 1:2]
+    @test size(nested_shifted) == size(nested_fields)
+    @test collect(interior_view(nested_shifted.arrays.q[1])) == [i + 10j + 2 for i in 1:3, j in 1:2]
 
     nested_dest = similar(nested_fields)
     nested_dest .= 2 .* nested_fields .+ nested_shifted
-    @test collect(interior_view(nested_dest.arrays.rho)) == [3 * (i + j / 10) + 2 for i in 1:3, j in 1:2]
-    @test collect(interior_view(nested_dest.arrays.q[1])) == [3 * (100 + 10 * i + j) + 2 for i in 1:3, j in 1:2]
-    @test collect(interior_view(nested_dest.arrays.q[2])) == [3 * (200 + 10 * i + j) + 2 for i in 1:3, j in 1:2]
+    @test collect(interior_view(nested_dest.arrays.p[2])) == [3 * (i + 10j) + 2 for i in 1:3, j in 1:2]
+
+    # dims reductions: a spatial axis keeps both field axes; a field axis of a
+    # nested collection is refused
+    r = HaloArrays.getdata(sum(nested_fields; dims=3))     # MPI fields: Maybe-wrapped like a flat collection
+    @test r isa MultiHaloArray && size(r) == (2, 2, 2)
+    @test r[1, 2, 1] == sum(q[2][i, 1] for i in 1:3)
+    @test_throws ArgumentError sum(nested_fields; dims=1)
+    @test_throws ArgumentError sum(nested_fields; dims=2)
 
     synchronize_halo!(nested_fields)
     @test parent(nested_fields.arrays.q[1])[1, 2] == first(interior_view(nested_fields.arrays.q[1]))
-    @test parent(nested_fields.arrays.q[2])[end, 3] == last(interior_view(nested_fields.arrays.q[2]))
     @test all(x -> x > 0, nested_fields)
-    @test any(x -> x == 111, nested_fields)
+    @test any(x -> x == 23, nested_fields)
+    g = gather_haloarray(nested_fields)
+    @test keys(g) == (:q, :p) && size(g.q) == (2, 3, 2)
+    # an ArrayOfHaloArray of ArrayOfHaloArrays gathers to one array, outer axis first
+    aa = ArrayOfHaloArray([q, p])
+    @test ndims(aa) == 4 && HaloArrays._spatial_ndims(aa) == 2 && field_shape(aa) == (2, 2)
+    ga = gather_haloarray(aa)
+    @test size(ga) == (2, 2, 3, 2)
+    @test ga[1, 2, 3, 1] == q[2][3, 1] && ga[2, 1, 1, 2] == p[1][1, 2]
+    @test size(siteview(aa, CartesianIndex(2, 2))) == (2, 2)
+    @test size(HaloArrays.getdata(sum(aa; dims=3))) == (2, 2, 2)      # spatial axis, not the inner field axis
+    # similar with explicit dims: container axes first, then the field's own dims
+    @test size(similar(nested_fields, Float32, (2, 2, 3, 2))) == (2, 2, 3, 2)
+    @test size(similar(nested_fields, (2, 2, 6, 4))) == (2, 2, 6, 4)
+    @test_throws DimensionMismatch similar(nested_fields, (3, 2, 3, 2))   # named outer cannot grow
+    @test size(similar(aa, Float64, (3, 2, 3, 2))) == (3, 2, 3, 2)      # array outer can
+    @test size(similar(aa, (2, 3, 3, 2))) == (2, 3, 3, 2)               # and so can the inner array containers
+    # raw storages: nested containers down to the leaves; the flat refill takes
+    # one leaf per entry in column-major field order
+    fs = field_storages(nested_fields)
+    @test keys(fs) == (:q, :p) && fs.q[2] === parent(q[2]) && fs.p[1] === parent(p[1])
+    cache = Vector{Matrix{Float64}}(undef, 4)
+    @test field_storages!(cache, nested_fields) === cache
+    @test cache[1] === parent(q[1]) && cache[2] === parent(p[1]) && cache[4] === parent(p[2])
+    @test_throws DimensionMismatch field_storages!(Vector{Matrix{Float64}}(undef, 2), nested_fields)
+    # alias checks descend to the leaves: self-aliased site operations are detected
+    sq = siteview(nested_fields, CartesianIndex(2, 2))
+    @test Base.mightalias(sq, parent(q[1])) && !Base.mightalias(sq, zeros(2))
+    @test Base.mightalias(sq, siteview(nested_fields, CartesianIndex(3, 2)))
+    sq .= sq .+ 1                               # broadcast with alias preprocessing
+    @test sq[1, 1] == q[1][1, 1]
+    geo = cell_geometry(nested_fields, UniformAxis(0, 1), UniformAxis(0, 1))
+    @test size(geo) == (4, 3, 2)
 
     copied = copy(fields)
     interior_view(copied.arrays.u)[1, 1] = -1

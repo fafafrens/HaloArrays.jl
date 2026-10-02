@@ -472,11 +472,14 @@ function _check_nested_multihaloarray_broadcast()
         end
     end
 
-    fields = MultiHaloArray((; rho, q=ArrayOfHaloArray(q_arrays)))
+    # a leaf beside a collection is rejected; nest rectangularly instead
+    @test_throws DimensionMismatch MultiHaloArray((; rho, q=ArrayOfHaloArray(q_arrays)))
+    fields = MultiHaloArray((; p=ArrayOfHaloArray([rho, copy(rho)]), q=ArrayOfHaloArray(q_arrays)))
+    @test size(fields) == (2, 2, size(rho, 1))
     shifted = fields .+ 4
     @test shifted isa MultiHaloArray
     @test shifted.arrays.q isa ArrayOfHaloArray
-    @test collect(interior_view(shifted.arrays.rho)) == [rank + i + 4 for i in 1:4]
+    @test collect(interior_view(shifted.arrays.p[1])) == [rank + i + 4 for i in 1:4]
     @test collect(interior_view(shifted.arrays.q[1])) == [100 + rank + i + 4 for i in 1:4]
     @test collect(interior_view(shifted.arrays.q[2])) == [200 + rank + i + 4 for i in 1:4]
 
@@ -490,11 +493,16 @@ function _check_nested_multihaloarray_broadcast()
     halo_exchange!(dest)
     MPI.Barrier(comm)
 
-    @test parent(dest.arrays.rho)[1] == 2 * (left_rank + 4) + 4
-    @test parent(dest.arrays.rho)[end] == 2 * (right_rank + 1) + 4
+    @test parent(dest.arrays.p[1])[1] == 2 * (left_rank + 4) + 4
+    @test parent(dest.arrays.p[1])[end] == 2 * (right_rank + 1) + 4
     for c in eachindex(dest.arrays.q.arrays)
         @test parent(dest.arrays.q[c])[1] == 2 * (100 * c + left_rank + 4) + 4
         @test parent(dest.arrays.q[c])[end] == 2 * (100 * c + right_rank + 1) + 4
+    end
+    # the gathered nested collection has the outer axis first
+    g = gather_haloarray(fields)
+    if is_root(fields)
+        @test size(g.p) == (2, size(rho, 1)) && size(g.q) == (2, size(rho, 1))
     end
 
     return nothing
