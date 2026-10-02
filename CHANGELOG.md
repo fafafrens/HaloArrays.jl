@@ -4,6 +4,39 @@ All notable changes to HaloArrays.jl are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] — 2026-10-02
+
+### Added
+- **Cell geometry.** `cell_geometry(u, axes; system, T)` builds a
+  `MultiHaloArray` of coordinates and widths on the layout of any halo array
+  or collection (same backend, halo, tiling, topology, device): the interior
+  from the global index, the ghosts by one `synchronize_halo!` (the exchange
+  across ranks, tiles and periodic edges; a `FunctionBC` continuing the axis on
+  physical edges). Axes: `UniformAxis(a, b)`, `EdgeAxis(edges)` and
+  `cell_edges(breaks, counts)` for graded distributions. Coordinate systems:
+  `Cartesian`, `Polar`, `Cylindrical`, `Spherical` (radius first; missing
+  extents count as unit length/angle), with `coordinate_names`.
+- **Metric helpers**, allocation-free, reading the site through `siteview`
+  (geometry, padded-storage index, and the tile id on a threaded geometry):
+  `cell_center`, `cell_width`, `cell_volume`, `face_center`, `face_distance`,
+  `face_area`, `face_normal`. Volumes and face areas are exact integrals of the
+  metric over the cell; `face_distance` is the physical centre-to-centre
+  distance (`r Δθ` along an angle). Plus-face convention: the minus face of `I`
+  is the plus face of `I - e_d`.
+- `map_dims(f, Val(N))`: `(f(Dim(1)), …, f(Dim(N)))` unrolled with `f` inlined,
+  so a do-block over directions keeps every `Dim`-dispatched helper static and
+  costs the same as a hand-written recursion.
+- Examples: `heat/geometry.jl` (conservative finite-volume heat equation on a
+  geometry: reproduces the stencil on a Cartesian grid to round-off, conserves
+  the heat content on a graded polar disk, checks the discrete Laplacian of a
+  harmonic function) and `dg/` (a 1-D nodal discontinuous Galerkin reference
+  element and the large-N O(N) flow of arXiv:1903.09503, with the shock
+  position checked against the analytic Rankine-Hugoniot solution).
+
+### Changed
+- Comments, example and benchmark READMEs no longer mention the names
+  deprecated in 0.9.0; `show` methods of every array kind are tested.
+
 ## [0.9.1] — 2026-10-01
 
 ### Fixed
