@@ -111,8 +111,8 @@ _noncorner(data, hw) = (I for I in CartesianIndices(data)
         @test face_area(sys, g, Dim(1), I) ≈ 0.4 * 4 / 3
         @test face_area(sys, g, Dim(3), I) ≈ 0.5 * 0.4
         @test face_center(sys, g, Dim(1), I) ≈ SVector(1.0, -0.4, 1 + 4 / 3 / 2)
-        @test face_distance(g, Dim(3), CartesianIndex(3, 3, 2)) ≈ (1 + 4 / 3) / 2   # graded cells
-        @test face_distance(g, Dim(1), CartesianIndex(3, 3, 3)) ≈ 0.5
+        @test face_distance(sys, g, Dim(3), CartesianIndex(3, 3, 2)) ≈ (1 + 4 / 3) / 2   # graded cells
+        @test face_distance(sys, g, Dim(1), CartesianIndex(3, 3, 3)) ≈ 0.5
         @test face_normal(sys, g, Dim(2), I) == SVector(0.0, 1.0, 0.0)
         # consistency: the plus face of I - e_d is the minus face of I
         @test face_center(sys, g, Dim(3), CartesianIndex(3, 3, 2))[3] ≈
@@ -131,11 +131,18 @@ _noncorner(data, hw) = (I for I in CartesianIndices(data)
         # z faces: the disk π R²; θ faces: the rectangle R H
         @test sum(face_area(sys, g, Dim(3), I) for I in _interior(c) if I[3] == 6) ≈ π * 2^2
         @test sum(face_area(sys, g, Dim(2), I) for I in _interior(c) if I[2] == 4) ≈ 2 * 3
+        # distances: r Δθ along θ, Δz along z, Δr along r
+        I = CartesianIndex(5, 4, 3)
+        c, w = cell_center(sys, g, I), cell_width(sys, g, I)
+        @test face_distance(sys, g, Dim(2), I) ≈ c[1] * w[2]
+        @test face_distance(sys, g, Dim(3), I) ≈ w[3]
+        @test face_distance(sys, g, Dim(1), I) ≈ w[1]
         # axisymmetric (r, z) and radial-only forms: per unit angle
         c2 = LocalHaloArray(Float64, (10, 5), 1)
         g2 = cell_geometry(c2, (UniformAxis(0, 2), UniformAxis(0, 3)); system=Cylindrical())
         @test propertynames(g2) == (:r, :z, :hr, :hz)
         @test sum(cell_volume(sys, g2, I) for I in _interior(c2)) ≈ 2^2 / 2 * 3
+        @test face_distance(sys, g2, Dim(2), CartesianIndex(4, 3)) ≈ cell_width(sys, g2, CartesianIndex(4, 3))[2]
         c1 = LocalHaloArray(Float64, (10,), 1)
         g1 = cell_geometry(c1, EdgeAxis(cell_edges((0, 1, 2), (4, 6))); system=Cylindrical())
         @test sum(cell_volume(sys, g1, I) for I in _interior(c1)) ≈ 2^2 / 2
@@ -151,6 +158,10 @@ _noncorner(data, hw) = (I for I in CartesianIndices(data)
         @test all(face_area(sys, g, Dim(1), CartesianIndex(1, j)) ≈ 0 for j in 2:9)         # centre
         @test sum(face_area(sys, g, Dim(2), I) for I in _interior(d) if I[2] == 3) ≈ 2       # a radius
         I = CartesianIndex(5, 4)
+        # distances are physical: r Δθ along the angle, Δr along the radius
+        c, w = cell_center(sys, g, I), cell_width(sys, g, I)
+        @test face_distance(sys, g, Dim(2), I) ≈ c[1] * w[2]
+        @test face_distance(sys, g, Dim(1), CartesianIndex(3, 4)) ≈ (cell_width(sys, g, CartesianIndex(3, 4))[1] + cell_width(sys, g, CartesianIndex(4, 4))[1]) / 2
         @test face_center(sys, g, Dim(1), I)[1] ≈ cell_center(sys, g, I)[1] + cell_width(sys, g, I)[1] / 2
         @test face_normal(sys, g, Dim(2), I) == SVector(0.0, 1.0)
         f(g, I) = cell_volume(sys, g, I) + face_area(sys, g, Dim(1), I) + face_area(sys, g, Dim(2), I)
@@ -166,6 +177,12 @@ _noncorner(data, hw) = (I for I in CartesianIndices(data)
         @test sum(face_area(sys, g, Dim(1), I) for I in _interior(s) if I[1] == 11) ≈ 4π * 2^2
         @test sum(face_area(sys, g, Dim(2), I) for I in _interior(s) if I[2] == 4) ≈ π * 2^2   # equatorial disk
         @test sum(face_area(sys, g, Dim(3), I) for I in _interior(s) if I[3] == 2) ≈ π * 2^2 / 2 # meridian half-disk
+        # distances: Δr, r Δθ, r sin θ Δφ
+        I = CartesianIndex(5, 4, 3)
+        c, w = cell_center(sys, g, I), cell_width(sys, g, I)
+        @test face_distance(sys, g, Dim(1), I) ≈ w[1]
+        @test face_distance(sys, g, Dim(2), I) ≈ c[1] * w[2]
+        @test face_distance(sys, g, Dim(3), I) ≈ c[1] * sin(c[2]) * w[3]
         s2 = LocalHaloArray(Float64, (10, 6), 1)
         g2 = cell_geometry(s2, (UniformAxis(0, 2), UniformAxis(0, π)); system=Spherical())
         @test sum(cell_volume(sys, g2, I) for I in _interior(s2)) ≈ 4 / 3 * π * 2^3 / (2π)
@@ -182,7 +199,7 @@ _noncorner(data, hw) = (I for I in CartesianIndices(data)
                              (Spherical(), (UniformAxis(0, 1), UniformAxis(0, π), UniformAxis(0, 2π))))
             f(g, I, tile) = cell_volume(sys, g, I, tile) + face_area(sys, g, Dim(1), I, tile) +
                 face_area(sys, g, Dim(2), I, tile) + face_area(sys, g, Dim(3), I, tile) +
-                face_distance(g, Dim(2), I, tile) + sum(face_center(sys, g, Dim(1), I, tile)) +
+                face_distance(sys, g, Dim(2), I, tile) + sum(face_center(sys, g, Dim(1), I, tile)) +
                 sum(cell_center(sys, g, I, tile) + cell_width(sys, g, I, tile) + face_normal(sys, g, Dim(3), I, tile))
             g  = cell_geometry(u, axes3; system=sys)
             gt = cell_geometry(t, axes3; system=sys)

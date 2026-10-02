@@ -53,6 +53,16 @@ julia --project=. examples/heat/local.jl
 mpiexec -n 4 julia --project=. examples/heat/mpi.jl
 ```
 
+`heat/geometry.jl` writes the heat equation as a conservative finite-volume
+scheme on a `cell_geometry`: the same kernel runs on a uniform Cartesian grid
+(where it reproduces the stencil above to round-off) and on a polar disk with a
+graded radial axis (where it conserves the heat content exactly), on a
+`LocalHaloArray` and a `ThreadedHaloArray`:
+
+```bash
+julia --project=. -t 2 examples/heat/geometry.jl
+```
+
 `heat/local_vs_threaded.jl` solves the same 2-D problem on a `LocalHaloArray` and
 a `ThreadedHaloArray`, both by hand (explicit Euler) and via OrdinaryDiffEq:
 
