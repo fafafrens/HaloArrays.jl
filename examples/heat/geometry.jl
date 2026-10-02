@@ -10,8 +10,9 @@ include("common.jl")
 #
 #     u_I += α dt / V_I · Σ_faces  A_f · (u_neighbour − u_I) / d_f
 #
-# with the cell volume V_I, the face area A_f and the centre-to-centre distance
-# d_f read from a `cell_geometry`. On a uniform Cartesian grid this reduces to
+# with the cell volume V_I, the face area A_f and the physical centre-to-centre
+# distance d_f read from a `cell_geometry` (along an angle d_f is r Δθ, which
+# is what gives the angular term its 1/r² scaling). On a uniform Cartesian grid this reduces to
 # the finite-difference stencil of common.jl (checked below to round-off); on a
 # polar disk with a graded radial axis the same kernel conserves the heat
 # content Σ u V exactly, with no special treatment of the axis (its faces have
@@ -28,8 +29,8 @@ include("common.jl")
 @inline function _face_fluxes(old, g, sys, I::CartesianIndex{N}, tile, ::Val{D}) where {N,D}
     e = unit_vector(Val(N), D)
     Ip, Im = I + e, I - e
-    f = @inbounds (face_area(sys, g, Dim(D), I, tile) * (old[Ip] - old[I]) / face_distance(g, Dim(D), I, tile) -
-                   face_area(sys, g, Dim(D), Im, tile) * (old[I] - old[Im]) / face_distance(g, Dim(D), Im, tile))
+    f = @inbounds (face_area(sys, g, Dim(D), I, tile) * (old[Ip] - old[I]) / face_distance(sys, g, Dim(D), I, tile) -
+                   face_area(sys, g, Dim(D), Im, tile) * (old[I] - old[Im]) / face_distance(sys, g, Dim(D), Im, tile))
     return f + _face_fluxes(old, g, sys, I, tile, Val(D - 1))
 end
 
@@ -63,8 +64,8 @@ end
 @inline _face_weights(g, sys, I::CartesianIndex, tile, ::Val{0}) = 0.0
 @inline function _face_weights(g, sys, I::CartesianIndex{N}, tile, ::Val{D}) where {N,D}
     Im = I - unit_vector(Val(N), D)
-    w = face_area(sys, g, Dim(D), I, tile) / face_distance(g, Dim(D), I, tile) +
-        face_area(sys, g, Dim(D), Im, tile) / face_distance(g, Dim(D), Im, tile)
+    w = face_area(sys, g, Dim(D), I, tile) / face_distance(sys, g, Dim(D), I, tile) +
+        face_area(sys, g, Dim(D), Im, tile) / face_distance(sys, g, Dim(D), Im, tile)
     return w + _face_weights(g, sys, I, tile, Val(D - 1))
 end
 
@@ -147,6 +148,22 @@ end
 const DISK_AXES = (EdgeAxis(cell_edges((0, 0.2, 1), (16, 32))), UniformAxis(0, 2π))
 const DISK_BC   = ((Reflecting(), Reflecting()), (Periodic(), Periodic()))   # no flux at the rim
 
+# The discrete Laplacian of the harmonic function r² cos 2θ must vanish up to
+# the O(Δθ²) truncation error — each of its radial and angular parts is ±4, so
+# a wrong angular metric (Δθ instead of r Δθ) shows up as an O(1) residual.
+# Checked on a uniform radial axis: at a jump in the radial spacing the
+# centred face gradient is only first-order accurate (the face is not midway
+# between the two centres), which adds a local O(Δh) residual of its own.
+function harmonic_residual(u, g, sys)
+    data = parent(u)
+    for I in CartesianIndices(data)
+        c = cell_center(sys, g, I)
+        data[I] = c[1]^2 * cos(2c[2])
+    end
+    N = ndims(u)
+    return maximum(abs(fv_laplacian(data, g, sys, I, nothing, Val(N))) for I in CartesianIndices(interior_range(u)))
+end
+
 function disk_run(u; nt=200, alpha=0.05)
     sys = Polar()
     g   = cell_geometry(u, DISK_AXES; system=sys)
@@ -160,6 +177,12 @@ end
 function main()
     err = cartesian_check()
     @printf("Cartesian 64×64:  |finite volume − finite difference| = %.2e\n", err)
+
+    hu = LocalHaloArray(Float64, (48, 64), 1; boundary_condition=DISK_BC)
+    res = harmonic_residual(hu, cell_geometry(hu, (UniformAxis(0, 1), UniformAxis(0, 2π)); system=Polar()), Polar())
+    @printf("polar disk:  max |Δ_h(r² cos 2θ)| = %.2e  (each term is 4; expected O(Δθ²) ≈ %.1e)\n",
+        res, 4 * (2π / 64)^2 / 3)
+    res < 0.05 || error("polar Laplacian residual $res: the angular metric is wrong")
 
     lu, b, a, dt = disk_run(LocalHaloArray(Float64, (48, 64), 1; boundary_condition=DISK_BC))
     @printf("polar disk Local:    dt=%.3e  heat content %.12f -> %.12f  (rel. change %.1e)\n",

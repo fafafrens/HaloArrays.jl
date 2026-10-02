@@ -315,16 +315,30 @@ with `I + e_d`); the minus face of `I` is the plus face of `I - e_d`.
     return c + SVector{N,eltype(c)}(versors(Val(N))[D]) * (_width(q, D) / 2)
 end
 
-"""
-    face_distance(g, Dim(d), I[, tile]) -> Real
+# Lamé coefficient h_D at the cell centre: the physical length of a unit
+# coordinate step along axis D (1 along a radius; r along an angle in the
+# plane; r sin θ along the azimuth of a sphere).
+@inline _scale_factor(::Cartesian,   q, ::Val{N}, ::Val{D}) where {N,D} = one(eltype(q))
+@inline _scale_factor(::Polar,       q, ::Val{N}, ::Val{D}) where {N,D} = D == 2 ? _coord(q, 1) : one(eltype(q))
+@inline _scale_factor(::Cylindrical, q, ::Val{N}, ::Val{D}) where {N,D} =
+    (N == 3 && D == 2) ? _coord(q, 1) : one(eltype(q))
+@inline _scale_factor(::Spherical,   q, ::Val{N}, ::Val{D}) where {N,D} =
+    D == 1 ? one(eltype(q)) : D == 2 ? _coord(q, 1) : _coord(q, 1) * sin(_coord(q, 2))
 
-Distance between the centres of cell `I` and its neighbour `I + e_d` across the
-plus face along axis `d`: what a face gradient divides by.
 """
-@inline function face_distance(g::AbstractHaloCollection, ::Dim{D}, I::CartesianIndex, tile=nothing) where {D}
+    face_distance(system, g, Dim(d), I[, tile]) -> Real
+
+Physical distance between the centres of cell `I` and its neighbour `I + e_d`
+across the plus face along axis `d`: what a face gradient divides by. It is the
+mean of the two cells' coordinate widths times the metric scale factor along
+`d` (`1` along a radius, `r` along an angle in the plane, `r sin θ` along the
+azimuth of a sphere), so an angular gradient is `Δu / (r Δθ)`, not `Δu / Δθ`.
+"""
+@inline function face_distance(sys::CoordinateSystem, g::AbstractHaloCollection, ::Dim{D}, I::CartesianIndex, tile=nothing) where {D}
     N = _geo_ndims(g)
     J = I + unit_vector(Val(N), D)
-    return (_width(_site(g, I, tile), D) + _width(_site(g, J, tile), D)) / 2
+    q = _site(g, I, tile)
+    return _scale_factor(sys, q, Val(N), Val(D)) * (_width(q, D) + _width(_site(g, J, tile), D)) / 2
 end
 
 """
