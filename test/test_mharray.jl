@@ -303,6 +303,14 @@ end
     @test ga[1, 2, 3, 1] == q[2][3, 1] && ga[2, 1, 1, 2] == p[1][1, 2]
     @test size(siteview(aa, CartesianIndex(2, 2))) == (2, 2)
     @test size(HaloArrays.getdata(sum(aa; dims=3))) == (2, 2, 2)      # spatial axis, not the inner field axis
+    # raw storages: nested containers down to the leaves; the flat refill takes
+    # one leaf per entry in column-major field order
+    fs = field_storages(nested_fields)
+    @test keys(fs) == (:q, :p) && fs.q[2] === parent(q[2]) && fs.p[1] === parent(p[1])
+    cache = Vector{Matrix{Float64}}(undef, 4)
+    @test field_storages!(cache, nested_fields) === cache
+    @test cache[1] === parent(q[1]) && cache[2] === parent(p[1]) && cache[4] === parent(p[2])
+    @test_throws DimensionMismatch field_storages!(Vector{Matrix{Float64}}(undef, 2), nested_fields)
     # alias checks descend to the leaves: self-aliased site operations are detected
     sq = siteview(nested_fields, CartesianIndex(2, 2))
     @test Base.mightalias(sq, parent(q[1])) && !Base.mightalias(sq, zeros(2))

@@ -358,9 +358,12 @@ leaves — in the same container kind as the collection (a `NamedTuple` for
 [`MultiHaloArray`](@ref), an array for [`ArrayOfHaloArray`](@ref)). Index these
 with **storage** indices (ghost-inclusive), e.g. over [`interior_range`](@ref)
 or a [`FaceRanges`](@ref) sweep. Contrast `parent` (the field container) and
-[`interior_view`](@ref) (ghost-free views).
+[`interior_view`](@ref) (ghost-free views). A nested collection gives nested
+containers, one level per collection, down to the leaf storages.
 """
-@inline field_storages(c::FieldCollection) = map(parent, getfield(c, :arrays))
+@inline field_storages(c::FieldCollection) = map(_leaf_storages, getfield(c, :arrays))
+@inline _leaf_storages(a::AbstractSingleHaloArray) = parent(a)
+@inline _leaf_storages(c::FieldCollection) = field_storages(c)
 
 """
     field_storages!(dest, c::FieldCollection)
@@ -372,8 +375,9 @@ for an [`ArrayOfHaloArray`](@ref) (its field count is not part of its type, so
 the result cannot be a stack-allocated tuple). A hot loop that needs the raw
 storages can hoist a `dest` container out of the loop and refill it here instead,
 staying allocation-free. `dest` must be indexable in the collection's field
-order with `prod(field_shape(c))` entries — `similar(field_storages(c))` gives a
-suitable one.
+order with `prod(field_shape(c))` entries (the leaf fields in column-major
+[`field_shape`](@ref) order for a nested collection) — `similar(field_storages(c))`
+gives a suitable one for a flat collection.
 
 ```julia
 cache = similar(field_storages(u))
@@ -382,11 +386,11 @@ accumulate_flux_divergence!(field_storages!(cache2, du), cache, ranges, 1, inv(d
 ```
 """
 function field_storages!(dest, c::FieldCollection)
-    fields = getfield(c, :arrays)
-    length(dest) == length(fields) ||
-        throw(DimensionMismatch("dest must hold one entry per field; got $(length(dest)) for $(length(fields)) fields"))
-    @inbounds for (j, field) in zip(eachindex(dest), fields)
-        dest[j] = parent(field)
+    n = n_field(c)
+    length(dest) == n ||
+        throw(DimensionMismatch("dest must hold one entry per leaf field; got $(length(dest)) for $n fields"))
+    @inbounds for (j, k) in zip(eachindex(dest), 1:n)
+        dest[j] = parent(_leaf_field(c, k))
     end
     return dest
 end
