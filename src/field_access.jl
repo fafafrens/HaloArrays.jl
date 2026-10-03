@@ -106,10 +106,12 @@ end
 # different type, which would put a type union in the hot loop).
 # These carry the caller's @inbounds to the storage access: without it every
 # site access is bounds-checked and the loop stops vectorising (2-3x slower).
-Base.@propagate_inbounds _site_get(state, k::Int, tile, I) = _has_leaf_axis(state) ?
-    _concat_get(_site_fields(state), k, tile, I) : _cell_storage(_leaf_field(state, k), tile)[I]
-Base.@propagate_inbounds _site_set!(state, v, k::Int, tile, I) = _has_leaf_axis(state) ?
-    _concat_set!(_site_fields(state), v, k, tile, I) : (_cell_storage(_leaf_field(state, k), tile)[I] = v; nothing)
+Base.@propagate_inbounds _site_get(state, k::Int, tile, I) = _site_get(_layout(state), state, k, tile, I)
+Base.@propagate_inbounds _site_get(::Stacked, state, k, tile, I)  = _cell_storage(_leaf_field(state, k), tile)[I]
+Base.@propagate_inbounds _site_get(::LeafAxis, state, k, tile, I) = _concat_get(_site_fields(state), k, tile, I)
+Base.@propagate_inbounds _site_set!(state, v, k::Int, tile, I) = _site_set!(_layout(state), state, v, k, tile, I)
+Base.@propagate_inbounds _site_set!(::Stacked, state, v, k, tile, I)  = (_cell_storage(_leaf_field(state, k), tile)[I] = v; nothing)
+Base.@propagate_inbounds _site_set!(::LeafAxis, state, v, k, tile, I) = _concat_set!(_site_fields(state), v, k, tile, I)
 _concat_get(::Tuple{}, k::Int, tile, I) = throw(BoundsError((), k))
 Base.@propagate_inbounds function _concat_get(fields::Tuple, k::Int, tile, I)
     f = first(fields); n = _leaf_count(f)
