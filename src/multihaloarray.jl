@@ -89,7 +89,7 @@ the fields' own field shape; a `MultiHaloArray` whose fields differ in field
 shape has the single axis `(number of leaves,)`. `prod(field_shape(c))` is the
 number of leaf fields; a single halo array has field shape `()`.
 """
-@inline field_shape(c::AbstractHaloCollection) = _is_record(c) ?
+@inline field_shape(c::AbstractHaloCollection) = _has_leaf_axis(c) ?
     (sum(_leaf_count, _fields(c)),) :
     (_container_shape(c)..., field_shape(_first_field(c))...)
 @inline field_shape(::AbstractSingleHaloArray) = ()

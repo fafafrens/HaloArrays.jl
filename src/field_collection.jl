@@ -52,7 +52,7 @@ Fields may themselves be collections. When they share their field shape
 result has the outer field axis followed by the inner ones, size
 `(2, 4, spatial...)`, indexed `c[outer, inner..., spatial...]`. When they do not
 (a 4-field and a 6-field collection, or a single array next to a collection)
-the result is a record with one field axis over all its leaves in declaration
+the result has one field axis over all its leaves in declaration
 order, size `(10, spatial...)`, indexed `c[leaf, spatial...]`. Either way
 `length(c)` is the number of elements and `siteview` gives every leaf.
 
@@ -106,7 +106,7 @@ const HaloArrayField = Union{AbstractSingleHaloArray,AbstractHaloCollection}
 # halo width and backend. With `same_field_shape` (an ArrayOfHaloArray, whose
 # fields form a grid) nested fields must also share their field shape, so the
 # whole is one rectangular array; a MultiHaloArray may mix field shapes, and
-# then counts its leaves along one field axis (see `_is_record`).
+# then lists its leaves along one field axis (see `_has_leaf_axis`).
 # `labeled_fields` is an iterable of (label, field) pairs (the label only
 # colours the error message — a field name for MultiHaloArray, an index for
 # ArrayOfHaloArray).
@@ -170,8 +170,8 @@ end
 
 # D counts the container's own axes plus the fields' (which, for a nested
 # collection, include the inner field axes): D = ndims(field) + container axes.
-# Fields of different field shapes cannot be stacked: the collection is then a
-# record with one field axis over all its leaves, D = S + 1.
+# Fields of different field shapes cannot be stacked: the collection then has
+# one field axis over all its leaves, D = S + 1.
 function MultiHaloArray(arrs::NamedTuple)
     field_names = keys(arrs)
     field_values = values(arrs)
@@ -226,13 +226,14 @@ end
 @inline _container_ndims(::MultiHaloArray) = 1
 @inline _container_ndims(c::ArrayOfHaloArray) = ndims(getfield(c, :arrays))
 
-# A record: a MultiHaloArray whose fields differ in field shape (a single array
-# next to a collection, or collections of different field counts). It has one
-# field axis over all its leaves, in declaration order (each field's leaves in
-# that field's own order), instead of the outer-then-inner axes of an
-# equal-shape nesting. Decided by the type: D == S + 1 with a collection field.
-@inline _is_record(::AbstractHaloArray) = false
-@inline _is_record(::FieldCollection{T,D,S,NamedTuple{N,Tup}}) where {T,D,S,N,Tup} =
+# A MultiHaloArray whose fields differ in field shape (a single array next to a
+# collection, or collections of different field counts) has one field axis
+# over all its leaves, in declaration order (each field's leaves in that
+# field's own order), instead of the outer-then-inner axes of stacked fields.
+# Read back from the type the constructor chose: one field axis (D == S + 1)
+# while some field is itself a collection.
+@inline _has_leaf_axis(::AbstractHaloArray) = false
+@inline _has_leaf_axis(::FieldCollection{T,D,S,NamedTuple{N,Tup}}) where {T,D,S,N,Tup} =
     D - S == 1 && _any_collection(Tup)
 @inline _any_collection(::Type{Tuple{}}) = false
 @inline _any_collection(::Type{Tup}) where {Tup<:Tuple} =
@@ -268,7 +269,7 @@ active_fields(c::FieldCollection) = map(is_active, getfield(c, :arrays))
 # flavors.
 
 function Base.getindex(c::FieldCollection{T,D,S}, I...) where {T,D,S}
-    if _is_record(c)          # one field axis over the leaves
+    if _has_leaf_axis(c)
         (length(I) == 1 || length(I) == D) && 1 <= I[1] <= n_field(c) || throw(BoundsError(c, I))
         leaf = _leaf_field(c, I[1])
         return length(I) == 1 ? leaf : getindex(leaf, Base.tail(I)...)
@@ -288,7 +289,7 @@ end
 Base.getindex(c::FieldCollection, I::CartesianIndex) = getindex(c, Tuple(I)...)
 
 function Base.setindex!(c::FieldCollection{T,D,S}, value, I...) where {T,D,S}
-    if _is_record(c)
+    if _has_leaf_axis(c)
         length(I) == D && 1 <= I[1] <= n_field(c) || throw(BoundsError(c, I))
         setindex!(_leaf_field(c, I[1]), value, Base.tail(I)...)
         return c
@@ -320,7 +321,7 @@ Base.setindex!(c::FieldCollection, value, I::CartesianIndex) =
 function Base.similar(c::FieldCollection{AA,D,S}, ::Type{T}, dims::Dims{M}) where {AA,D,S,T,M}
     M == D ||
         throw(DimensionMismatch("collection similar dims must have $D dimensions"))
-    if _is_record(c)          # the leaf count is fixed by the named fields
+    if _has_leaf_axis(c)          # the leaf count is fixed by the named fields
         Int(dims[1]) == n_field(c) || throw(DimensionMismatch(
             "cannot change the field count of a named collection (MultiHaloArray) via similar"))
         spatial = ntuple(d -> Int(dims[1 + d]), D - 1)

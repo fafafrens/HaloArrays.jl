@@ -254,20 +254,38 @@ end
 @inline _field_value(v::Number, k) = v
 @inline _field_value(v, k) = v[k]
 
-# Leaf `k` of a (possibly nested) collection, in column-major order of
-# `field_shape`: the outer container index varies fastest.
-# A record (fields of different field shapes) lists its fields' leaves in
-# declaration order instead.
+# Leaf `k` of a collection — the one leaf lookup of the package (site views,
+# scalar indexing, fill_from_global_indices!, field_storages!). Two orders:
+#   - stacked fields (equal field shapes): column-major over `field_shape`, the
+#     outer container index fastest; flat collections take one direct lookup
+#     (the path Julia 1.10 keeps allocation-free);
+#   - a leaf axis (named fields of different field shapes, `_has_leaf_axis`):
+#     every field's leaves concatenated in declaration order.
 @inline _leaf_field(a::AbstractSingleHaloArray, k) = a
-@inline function _leaf_field(c::AbstractHaloCollection, k)
-    _is_record(c) && return _record_leaf(Tuple(_fields(c)), k)
-    n = prod(_container_shape(c))
-    return _leaf_field(_fields(c)[(k - 1) % n + 1], (k - 1) ÷ n + 1)
+@inline _leaf_field(c::AbstractHaloCollection, k) =
+    _has_leaf_axis(c) ? _concat_leaf(Tuple(_fields(c)), k) : _leaf_in(_fields(c), k)
+@inline _leaf_in(fields::Tuple{Vararg{AbstractSingleHaloArray}}, k) = _nth_field(fields, k)
+@inline _leaf_in(fields::AbstractArray{<:AbstractSingleHaloArray}, k) = _nth_field(fields, k)
+@inline function _leaf_in(fields, k)
+    n = length(fields)
+    return _leaf_field(_nth_field(fields, (k - 1) % n + 1), (k - 1) ÷ n + 1)
 end
-_record_leaf(::Tuple{}, k) = throw(BoundsError((), k))
-@inline function _record_leaf(fields::Tuple, k)
+_concat_leaf(::Tuple{}, k) = throw(BoundsError((), k))
+@inline function _concat_leaf(fields::Tuple, k)
     n = _leaf_count(first(fields))
-    return k <= n ? _leaf_field(first(fields), k) : _record_leaf(Base.tail(fields), k - n)
+    return k <= n ? _leaf_field(first(fields), k) : _concat_leaf(Base.tail(fields), k - n)
+end
+
+# Field `k` of a field container in column-major order. Ordinary arrays and
+# tuples index directly; the general path also handles containers whose axes
+# do not start at 1.
+@inline _nth_field(fields::Tuple, k::Int) = fields[k]
+@inline _nth_field(fields::Array, k::Int) = fields[k]
+@inline function _nth_field(fields::AbstractArray, k::Int)
+    ordinal = CartesianIndices(size(fields))[k]
+    index = CartesianIndex(ntuple(d -> ordinal[d] + first(axes(fields, d)) - 1,
+        Val(ndims(fields))))
+    return fields[index]
 end
 function global_to_storage_index end
 function is_root end

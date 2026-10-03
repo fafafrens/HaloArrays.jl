@@ -235,7 +235,7 @@ end
     q = ArrayOfHaloArray(q_arrays)
 
     # A leaf next to a collection, or collections of different field shapes:
-    # a named collection becomes a record with one axis over its leaves; an
+    # a named collection gets one axis over its leaves; an
     # indexed collection (a grid of fields) must stay rectangular.
     @test size(MultiHaloArray((; rho=u, q))) == (3, 3, 2)
     @test size(MultiHaloArray((; a=q, b=ArrayOfHaloArray([copy(u), copy(u), copy(u)])))) == (5, 3, 2)
@@ -355,7 +355,7 @@ end
     @test any(x -> x == 22, fields)
 end
 
-@testset "MultiHaloArray of fields with different field shapes (record)" begin
+@testset "MultiHaloArray of fields with different field shapes (one leaf axis)" begin
     _calls(f::F, n, args::Tuple) where {F} = (s = 0.0; for _ in 1:n; s += f(args...); end; s)
     _allocation_free(f::F, args...) where {F} =
         (a = args; _calls(f, 1, a); @allocated(_calls(f, 1, a)) == @allocated(_calls(f, 1000, a)))
@@ -409,7 +409,7 @@ end
         @test size(similar(r, Float32, (11, 3, 2))) == (11, 3, 2)
         @test_throws DimensionMismatch similar(r, (10, 6, 4))
 
-        x = HaloArrays.getdata(sum(r; dims=2))  # first spatial axis: a record of reduced fields
+        x = HaloArrays.getdata(sum(r; dims=2))  # first spatial axis: reduced fields, still one leaf axis
         @test size(x) == (11, 4) && propertynames(x) == (:rho, :v, :w)
         y = sum(r; dims=1)                       # the leaf axis: one array
         @test size(y) == (6, 4) && y[1, 1] == 22.0

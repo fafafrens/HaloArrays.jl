@@ -143,7 +143,7 @@ _read(path, dset) = h5open(path, "r") do fid; read(fid[dset]); end
         scalar = similar(q1); interior_view(scalar) .= [7, 8]
         append_haloarray!(path, "t", MultiHaloArray((; rho, mom=copy(rho))))
         @test vec(_read(path, "t/rho")[1, :]) == [1, 2, 3, 4]
-        # a leaf beside a collection (a record): one dataset per named field
+        # a leaf beside a collection (one leaf axis): one dataset per named field
         append_haloarray!(path, "r", MultiHaloArray((; scalar, q=ArrayOfHaloArray([q1, q2]))))
         @test vec(_read(path, "r/scalar")[1, :]) == [7, 8]
         @test size(_read(path, "r/q")) == (1, 2, 2)
