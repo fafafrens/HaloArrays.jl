@@ -105,7 +105,8 @@ end
 # same path as before nesting was supported, which Julia 1.10 keeps
 # allocation-free; a nested one recurses one level per container.
 @inline _site_leaf(state::AbstractSingleHaloArray, k::Int) = state
-@inline _site_leaf(state::AbstractHaloCollection, k::Int) = _site_leaf(_site_fields(state), k)
+@inline _site_leaf(state::AbstractHaloCollection, k::Int) =
+    _is_record(state) ? _leaf_field(state, k) : _site_leaf(_site_fields(state), k)
 @inline _site_leaf(fields::Tuple{Vararg{AbstractSingleHaloArray}}, k::Int) = _site_field(fields, k)
 @inline _site_leaf(fields::AbstractArray{<:AbstractSingleHaloArray}, k::Int) = _site_field(fields, k)
 @inline function _site_leaf(fields, k::Int)
@@ -115,13 +116,33 @@ end
 
 Base.@propagate_inbounds function Base.getindex(q::SiteView{T}, k::Int) where {T}
     @boundscheck checkbounds(q, k)
-    return convert(T, _cell_storage(_site_leaf(q.state, k), q.tile)[q.index])
+    return convert(T, _site_get(q.state, k, q.tile, q.index))
 end
 
 Base.@propagate_inbounds function Base.setindex!(q::SiteView, value, k::Int)
     @boundscheck checkbounds(q, k)
-    _cell_storage(_site_leaf(q.state, k), q.tile)[q.index] = value
+    _site_set!(q.state, value, k, q.tile, q.index)
     return q
+end
+
+# Read/write leaf `k` at the site. A record's fields have different types, so it
+# walks its field tuple at the value level (each step returns an element, not a
+# leaf array of a different type); everything else looks the leaf up directly.
+# These carry the caller's @inbounds to the storage access: without it every
+# site access is bounds-checked and the loop stops vectorising (2-3x slower).
+Base.@propagate_inbounds _site_get(state, k::Int, tile, I) = _is_record(state) ?
+    _record_get(_site_fields(state), k, tile, I) : _cell_storage(_site_leaf(state, k), tile)[I]
+Base.@propagate_inbounds _site_set!(state, v, k::Int, tile, I) = _is_record(state) ?
+    _record_set!(_site_fields(state), v, k, tile, I) : (_cell_storage(_site_leaf(state, k), tile)[I] = v; nothing)
+_record_get(::Tuple{}, k, tile, I) = throw(BoundsError((), k))
+Base.@propagate_inbounds function _record_get(fields::Tuple, k::Int, tile, I)
+    f = first(fields); n = _leaf_count(f)
+    return k <= n ? _site_get(f, k, tile, I) : _record_get(Base.tail(fields), k - n, tile, I)
+end
+_record_set!(::Tuple{}, v, k, tile, I) = throw(BoundsError((), k))
+Base.@propagate_inbounds function _record_set!(fields::Tuple, v, k::Int, tile, I)
+    f = first(fields); n = _leaf_count(f)
+    return k <= n ? _site_set!(f, v, k, tile, I) : _record_set!(Base.tail(fields), v, k - n, tile, I)
 end
 
 Base.similar(::SiteView, ::Type{T}, dims::Dims) where {T} = Array{T}(undef, dims)

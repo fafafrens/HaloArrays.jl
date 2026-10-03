@@ -4,6 +4,21 @@ All notable changes to HaloArrays.jl are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.2] — 2026-10-03
+
+### Fixed
+- A `MultiHaloArray` whose fields have different field shapes is accepted
+  again (0.10.1 rejected it with `DimensionMismatch`), now with consistent
+  dimensions: a named collection mixing, say, a 4-field and a 6-field
+  collection, or a single array and a collection, has one field axis over all
+  its leaves in declaration order. A `(; v, w)` with 4 + 6 fields on a 6×6 grid
+  has size `(10, 6, 6)`, `length` 360, `siteview` a 10-vector, and is indexed
+  `c[leaf, x, y]`; broadcasts, reductions (a `dims=1` reduction folds all
+  leaves), `similar`, `fill_from_global_indices!` (one value per leaf, in that
+  order), `field_storages!`, gather, HDF5 output and `cell_geometry` all work.
+  Fields of equal field shape keep the outer-then-inner axes of 0.10.1, and an
+  `ArrayOfHaloArray` still requires equal field shapes.
+
 ## [0.10.1] — 2026-10-02
 
 ### Fixed

@@ -679,7 +679,8 @@ end
 # MultiHaloArray has one field axis, so a field reduction always collapses every
 # named field into a single (name-free) HaloArray.
 _reduce_field_axes(f::F, op::OP, c::MultiHaloArray, ::Any) where {F,OP} =
-    _fold_fields(f, op, _reduced_eltype(f, op, eltype(c)), eachfield(c))
+    _fold_fields(f, op, _reduced_eltype(f, op, eltype(c)),
+        _is_record(c) ? Tuple(_leaf_field(c, k) for k in 1:n_field(c)) : eachfield(c))
 
 # ArrayOfHaloArray field axes may be multi-dimensional: fold along `fdims`,
 # each kept-index group becoming one field. All field axes consumed → a single

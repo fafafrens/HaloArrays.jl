@@ -85,10 +85,13 @@ dimensions that select a field, leaving the spatial dimensions out. For a
 `MultiHaloArray` of `n` named fields this is `(n,)`; for an `ArrayOfHaloArray` it
 is the `size` of the backing field array (e.g. `(4, 2)` for a `4×2` grid of
 fields). For a nested collection the outer container's shape is followed by
-the fields' own field shape. `prod(field_shape(c))` is the number of leaf
-fields; a single halo array has field shape `()`.
+the fields' own field shape; a `MultiHaloArray` whose fields differ in field
+shape has the single axis `(number of leaves,)`. `prod(field_shape(c))` is the
+number of leaf fields; a single halo array has field shape `()`.
 """
-@inline field_shape(c::AbstractHaloCollection) = (_container_shape(c)..., field_shape(_first_field(c))...)
+@inline field_shape(c::AbstractHaloCollection) = _is_record(c) ?
+    (sum(_leaf_count, _fields(c)),) :
+    (_container_shape(c)..., field_shape(_first_field(c))...)
 @inline field_shape(::AbstractSingleHaloArray) = ()
 @inline _container_shape(mha::MultiHaloArray) = (length(getfield(mha, :arrays)),)
 # parent (the field NamedTuple) and field_storages (the storage NamedTuple) are

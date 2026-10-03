@@ -1,6 +1,7 @@
 using Test
 using MPI
 using HaloArrays
+using LinearAlgebra: norm, dot
 
 if !MPI.Initialized()
     MPI.Init()
@@ -233,10 +234,12 @@ end
     end
     q = ArrayOfHaloArray(q_arrays)
 
-    # A leaf next to a collection, or collections of different field shapes,
-    # cannot form one rectangular array: rejected.
-    @test_throws DimensionMismatch MultiHaloArray((; rho=u, q))
-    @test_throws DimensionMismatch MultiHaloArray((; a=q, b=ArrayOfHaloArray([copy(u), copy(u), copy(u)])))
+    # A leaf next to a collection, or collections of different field shapes:
+    # a named collection becomes a record with one axis over its leaves; an
+    # indexed collection (a grid of fields) must stay rectangular.
+    @test size(MultiHaloArray((; rho=u, q))) == (3, 3, 2)
+    @test size(MultiHaloArray((; a=q, b=ArrayOfHaloArray([copy(u), copy(u), copy(u)])))) == (5, 3, 2)
+    @test_throws DimensionMismatch ArrayOfHaloArray([q, ArrayOfHaloArray([copy(u), copy(u), copy(u)])])
 
     # Nested collections of equal field shape: one array whose field axes are
     # the outer container's followed by the inner ones.
@@ -350,4 +353,75 @@ end
 
     @test all(x -> x > 0, fields)
     @test any(x -> x == 22, fields)
+end
+
+@testset "MultiHaloArray of fields with different field shapes (record)" begin
+    _calls(f::F, n, args::Tuple) where {F} = (s = 0.0; for _ in 1:n; s += f(args...); end; s)
+    _allocation_free(f::F, args...) where {F} =
+        (a = args; _calls(f, 1, a); @allocated(_calls(f, 1, a)) == @allocated(_calls(f, 1000, a)))
+
+    for backend in (:local, :threaded)
+        if backend === :local
+            v   = MultiHaloArray(LocalHaloArray, Float64, (6, 4), 1; fields=(:a, :b, :c, :d), boundary_condition=:periodic)
+            w   = ArrayOfHaloArray(LocalHaloArray, Float64, (6,), (6, 4), 1; boundary_condition=:periodic)
+            rho = LocalHaloArray(Float64, (6, 4), 1; boundary_condition=:periodic)
+            tile = nothing
+        else
+            v   = MultiHaloArray(ThreadedHaloArray, Float64, (6, 2), 1; dims=(1, 2), fields=(:a, :b, :c, :d), boundary_condition=:periodic)
+            w   = ArrayOfHaloArray(ThreadedHaloArray, Float64, (6,), (6, 2), 1; dims=(1, 2), boundary_condition=:periodic)
+            rho = ThreadedHaloArray(Float64, (6, 2), 1; dims=(1, 2), boundary_condition=:periodic)
+            tile = 2
+        end
+        r = MultiHaloArray((; rho, v, w))       # 1 + 4 + 6 leaves
+        @test r isa MultiHaloArray
+        @test ndims(r) == 3 && size(r) == (11, 6, 4) && length(r) == 11 * 24
+        @test field_shape(r) == (11,) && HaloArrays.n_field(r) == 11
+        @test axes(r, 1) == Base.OneTo(11)
+
+        # leaves in declaration order, each field's leaves in its own order
+        fill_from_global_indices!(I -> ntuple(k -> 100k + I[1] + 10I[2], 11), r)
+        @test rho[1, 1] == 111 && v.a[1, 1] == 211 && v.d[1, 1] == 511
+        @test w[1][1, 1] == 611 && w[6][2, 3] == 1100 + 32
+        @test r[1, 1, 1] == 111 && r[11, 2, 3] == 1132
+        @test r[3] === v.b && r[7] === w[2]
+        @test_throws BoundsError r[12]
+        @test_throws BoundsError r[0, 1, 1]
+        r[8, 2, 2] = -1.0
+        @test w[3][2, 2] == -1.0
+
+        I = CartesianIndex(2, 2)                 # storage index of cell (1, 1)
+        q = siteview(r, I, tile)
+        @test size(q) == (11,)
+        @test collect(q) == [r[k, 1, 1 + (backend === :threaded ? 2 : 0)] for k in 1:11]
+        q[6] = 42.0
+        @test parent(w[1]) isa AbstractArray && w[1][1, 1 + (backend === :threaded ? 2 : 0)] == 42.0
+        sitesum(r, I, tile) = sum(siteview(r, I, tile))
+        @test _allocation_free(sitesum, r, I, tile)
+
+        fill!(r, 2.0)
+        @test sum(r) == 2 * length(r)
+        @test norm(r) ≈ sqrt(4 * length(r)) && dot(r, r) ≈ 4 * length(r)
+        s = r .+ 1
+        @test s isa MultiHaloArray && size(s) == size(r) && sum(s) == 3 * length(r)
+        d = similar(r); d .= 2 .* r .+ s
+        @test sum(d) == 7 * length(r)
+        @test copy(r) == r
+        @test size(similar(r, Float32, (11, 3, 2))) == (11, 3, 2)
+        @test_throws DimensionMismatch similar(r, (10, 6, 4))
+
+        x = HaloArrays.getdata(sum(r; dims=2))  # first spatial axis: a record of reduced fields
+        @test size(x) == (11, 4) && propertynames(x) == (:rho, :v, :w)
+        y = sum(r; dims=1)                       # the leaf axis: one array
+        @test size(y) == (6, 4) && y[1, 1] == 22.0
+
+        synchronize_halo!(r)
+        g = gather_haloarray(r)
+        @test keys(g) == (:rho, :v, :w) && size(g.w) == (6, 6, 4)
+        @test size(cell_geometry(r, UniformAxis(0, 1), UniformAxis(0, 1))) == (4, 6, 4)
+        if backend === :local
+            cache = Vector{Matrix{Float64}}(undef, 11)
+            field_storages!(cache, r)
+            @test cache[1] === parent(rho) && cache[2] === parent(v.a) && cache[6] === parent(w[1])
+        end
+    end
 end

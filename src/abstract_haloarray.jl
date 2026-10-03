@@ -216,7 +216,9 @@ the idiomatic way to set an initial condition. Returns `u`.
 
 For a collection, `f(I)` gives the values of all fields at the site: a scalar
 (the same for every field) or a tuple / `SVector` / array with one entry per
-leaf field in column-major [`field_shape`](@ref) order.
+leaf field, in the order of the field axes (column-major [`field_shape`](@ref)
+order; declaration order for a `MultiHaloArray` whose fields differ in field
+shape).
 
 # Example
 ```julia
@@ -254,10 +256,18 @@ end
 
 # Leaf `k` of a (possibly nested) collection, in column-major order of
 # `field_shape`: the outer container index varies fastest.
+# A record (fields of different field shapes) lists its fields' leaves in
+# declaration order instead.
 @inline _leaf_field(a::AbstractSingleHaloArray, k) = a
 @inline function _leaf_field(c::AbstractHaloCollection, k)
+    _is_record(c) && return _record_leaf(Tuple(_fields(c)), k)
     n = prod(_container_shape(c))
     return _leaf_field(_fields(c)[(k - 1) % n + 1], (k - 1) ÷ n + 1)
+end
+_record_leaf(::Tuple{}, k) = throw(BoundsError((), k))
+@inline function _record_leaf(fields::Tuple, k)
+    n = _leaf_count(first(fields))
+    return k <= n ? _leaf_field(first(fields), k) : _record_leaf(Base.tail(fields), k - n)
 end
 function global_to_storage_index end
 function is_root end
