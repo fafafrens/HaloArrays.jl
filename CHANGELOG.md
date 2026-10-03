@@ -4,6 +4,29 @@ All notable changes to HaloArrays.jl are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] — 2026-10-03
+
+### Changed
+- **Breaking:** `cell_geometry` returns a `CellGeometry{Sys}`, which carries
+  its coordinate system in its type, instead of a bare `MultiHaloArray`. The
+  metric helpers take the geometry alone: `cell_volume(g, I[, tile])`,
+  `cell_center`, `cell_width`, `face_center(g, Dim(d), I[, tile])`,
+  `face_distance`, `face_area`, `face_normal`. Passing the wrong system can no
+  longer give wrong numbers silently (before, `cell_volume(Cartesian(), g, I)`
+  on a polar geometry returned a Cartesian volume), and kernels no longer
+  thread the system through every call. `coordinate_system(g)` returns it.
+- The geometry forwards what geometry code uses to its `MultiHaloArray`:
+  property access (`g.r`, `g.hθ`), `field_storages`, `siteview`, `tile_parent`,
+  `tile_count`, `synchronize_halo!`, `gather_haloarray` and `append_haloarray!`.
+  `parent(g)` is the `MultiHaloArray`, for broadcasting or passing it where a
+  collection is expected.
+
+### Deprecated
+- The system-first helpers, `cell_volume(system, g, I[, tile])` and the
+  others, still work for one release with a deprecation warning. On a
+  `CellGeometry` they throw `ArgumentError` when the system differs from the
+  geometry's own; on a bare `MultiHaloArray` they use the given system.
+
 ## [0.10.2] — 2026-10-03
 
 ### Fixed

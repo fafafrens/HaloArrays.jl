@@ -20,7 +20,7 @@ import HaloArrays:
     AbstractHaloCollection, HaloArray, MultiHaloArray, ArrayOfHaloArray,
     MaybeHaloArray, field_shape, _container_shape, interior_size, interior_view,
     communicator, _first_field, gather_haloarray, is_active, getdata,
-    append_haloarray!
+    append_haloarray!, CellGeometry
 
 const _Parent = Union{HDF5.File,HDF5.Group}
 
@@ -137,6 +137,12 @@ function append_haloarray!(parent::_Parent, name::AbstractString, halo::MaybeHal
     is_active(halo) || return nothing
     return append_haloarray!(parent, name, getdata(halo))
 end
+
+# A cell geometry is written as its MultiHaloArray of coordinates and widths.
+append_haloarray!(parent::_Parent, name::AbstractString, g::CellGeometry) =
+    append_haloarray!(parent, name, Base.parent(g))
+append_haloarray!(filename::AbstractString, name::AbstractString, g::CellGeometry) =
+    append_haloarray!(filename, name, Base.parent(g))
 
 function append_haloarray!(filename::AbstractString, name::AbstractString, halo::AbstractHaloArray)
     comm = _comm(halo)

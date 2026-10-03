@@ -17,26 +17,27 @@ include("common.jl")
 # polar disk with a graded radial axis the same kernel conserves the heat
 # content Σ u V exactly, with no special treatment of the axis (its faces have
 # zero area). One kernel serves LocalHaloArray and ThreadedHaloArray: the
-# geometry helpers take the tile id, like `siteview`.
+# geometry helpers take the tile id, like `siteview`, and the geometry carries
+# its coordinate system, so the kernel never names it.
 
 # ---- kernel -----------------------------------------------------------------
 
 # Net diffusive flux into cell I through its 2N faces, per unit volume.
 # `map_dims` hands the do-block a static `Dim`, so every helper call resolves
 # at compile time and the kernel is allocation-free.
-@inline function fv_laplacian(old, g, sys, I::CartesianIndex{N}, tile) where {N}
+@inline function fv_laplacian(old, g, I::CartesianIndex{N}, tile) where {N}
     flux = sum(map_dims(Val(N)) do D
         e = unit_vector(Val(N), D)
         Ip, Im = I + e, I - e
-        @inbounds (face_area(sys, g, D, I, tile) * (old[Ip] - old[I]) / face_distance(sys, g, D, I, tile) -
-                   face_area(sys, g, D, Im, tile) * (old[I] - old[Im]) / face_distance(sys, g, D, Im, tile))
+        @inbounds (face_area(g, D, I, tile) * (old[Ip] - old[I]) / face_distance(g, D, I, tile) -
+                   face_area(g, D, Im, tile) * (old[I] - old[Im]) / face_distance(g, D, Im, tile))
     end)
-    return flux / cell_volume(sys, g, I, tile)
+    return flux / cell_volume(g, I, tile)
 end
 
-function _fv_heat_tile!(next, old, g, sys, alpha, dt, rng, tile)
+function _fv_heat_tile!(next, old, g, alpha, dt, rng, tile)
     @inbounds for I in CartesianIndices(rng)
-        next[I] = old[I] + alpha * dt * fv_laplacian(old, g, sys, I, tile)
+        next[I] = old[I] + alpha * dt * fv_laplacian(old, g, I, tile)
     end
     return next
 end
@@ -46,39 +47,39 @@ end
 _geometry_tile(::ThreadedHaloArray, t) = t
 _geometry_tile(u, t) = nothing
 
-function fv_heat_step!(u_next, u_old, g, sys, alpha, dt)
+function fv_heat_step!(u_next, u_old, g, alpha, dt)
     rng = interior_range(u_old)
     @tasks for t in 1:tile_count(u_old)
-        _fv_heat_tile!(tile_parent(u_next, t), tile_parent(u_old, t), g, sys, alpha, dt,
+        _fv_heat_tile!(tile_parent(u_next, t), tile_parent(u_old, t), g, alpha, dt,
             rng, _geometry_tile(u_old, t))
     end
     return u_next
 end
 
 # Σ_faces A_f / d_f of cell I.
-@inline face_weights(g, sys, I::CartesianIndex{N}, tile) where {N} = sum(map_dims(Val(N)) do D
+@inline face_weights(g, I::CartesianIndex{N}, tile) where {N} = sum(map_dims(Val(N)) do D
     Im = I - unit_vector(Val(N), D)
-    face_area(sys, g, D, I, tile) / face_distance(sys, g, D, I, tile) +
-    face_area(sys, g, D, Im, tile) / face_distance(sys, g, D, Im, tile)
+    face_area(g, D, I, tile) / face_distance(g, D, I, tile) +
+    face_area(g, D, Im, tile) / face_distance(g, D, Im, tile)
 end)
 
 # Explicit Euler is stable while α dt Σ_faces A_f / (d_f V_I) ≤ 1 in every cell.
-function fv_stable_dt(u, g, sys, alpha; cfl=0.8)
+function fv_stable_dt(u, g, alpha; cfl=0.8)
     worst = 0.0
     for t in 1:tile_count(u)
         tile = _geometry_tile(u, t)
         for I in CartesianIndices(interior_range(u))
-            worst = max(worst, face_weights(g, sys, I, tile) / cell_volume(sys, g, I, tile))
+            worst = max(worst, face_weights(g, I, tile) / cell_volume(g, I, tile))
         end
     end
     return cfl / (alpha * worst)
 end
 
-function solve_fv_heat!(u, g, sys; alpha, dt, nt)
+function solve_fv_heat!(u, g; alpha, dt, nt)
     current, next = u, similar(u)
     for _ in 1:nt
         synchronize_halo!(current)
-        fv_heat_step!(next, current, g, sys, alpha, dt)
+        fv_heat_step!(next, current, g, alpha, dt)
         current, next = next, current
     end
     synchronize_halo!(current)
@@ -93,12 +94,12 @@ end
 _embed(::Cartesian, c) = c
 _embed(::Polar, c) = SVector(c[1] * cos(c[2]), c[1] * sin(c[2]))
 
-function fill_gaussian!(u, g, sys, x0; width, baseline=1.0, amplitude=1.0)
+function fill_gaussian!(u, g, x0; width, baseline=1.0, amplitude=1.0)
     for t in 1:tile_count(u)
         tile = _geometry_tile(u, t)
         data = tile_parent(u, t)
         for I in CartesianIndices(interior_range(u))
-            x = _embed(sys, cell_center(sys, g, I, tile))
+            x = _embed(coordinate_system(g), cell_center(g, I, tile))
             data[I] = baseline + amplitude * exp(-sum(abs2, x - x0) / width^2)
         end
     end
@@ -107,13 +108,13 @@ function fill_gaussian!(u, g, sys, x0; width, baseline=1.0, amplitude=1.0)
 end
 
 # Σ u V over the interior: the conserved quantity of the scheme.
-function heat_content(u, g, sys)
+function heat_content(u, g)
     total = 0.0
     for t in 1:tile_count(u)
         tile = _geometry_tile(u, t)
         data = tile_parent(u, t)
         for I in CartesianIndices(interior_range(u))
-            total += data[I] * cell_volume(sys, g, I, tile)
+            total += data[I] * cell_volume(g, I, tile)
         end
     end
     return total
@@ -131,7 +132,7 @@ function cartesian_check(; n=(64, 64), nt=100, alpha=1.0, cfl=0.2)
     g    = cell_geometry(u_fv, UniformAxis(0, 1), UniformAxis(0, 1))
 
     solve_heat!(u_fd; alpha, dt, dx, nt)                          # common.jl stencil
-    solve_fv_heat!(u_fv, g, Cartesian(); alpha, dt, nt)           # geometry kernel
+    solve_fv_heat!(u_fv, g; alpha, dt, nt)                        # geometry kernel
     return maximum(abs.(interior_view(u_fd) .- interior_view(u_fv)))
 end
 
@@ -146,23 +147,22 @@ const DISK_BC   = ((Reflecting(), Reflecting()), (Periodic(), Periodic()))   # n
 # Checked on a uniform radial axis: at a jump in the radial spacing the
 # centred face gradient is only first-order accurate (the face is not midway
 # between the two centres), which adds a local O(Δh) residual of its own.
-function harmonic_residual(u, g, sys)
+function harmonic_residual(u, g)
     data = parent(u)
     for I in CartesianIndices(data)
-        c = cell_center(sys, g, I)
+        c = cell_center(g, I)
         data[I] = c[1]^2 * cos(2c[2])
     end
-    return maximum(abs(fv_laplacian(data, g, sys, I, nothing)) for I in CartesianIndices(interior_range(u)))
+    return maximum(abs(fv_laplacian(data, g, I, nothing)) for I in CartesianIndices(interior_range(u)))
 end
 
 function disk_run(u; nt=200, alpha=0.05)
-    sys = Polar()
-    g   = cell_geometry(u, DISK_AXES; system=sys)
-    fill_gaussian!(u, g, sys, SVector(0.4, 0.0); width=0.15)
-    before = heat_content(u, g, sys)
-    dt = fv_stable_dt(u, g, sys, alpha)
-    solve_fv_heat!(u, g, sys; alpha, dt, nt)
-    return u, before, heat_content(u, g, sys), dt
+    g = cell_geometry(u, DISK_AXES; system=Polar())
+    fill_gaussian!(u, g, SVector(0.4, 0.0); width=0.15)
+    before = heat_content(u, g)
+    dt = fv_stable_dt(u, g, alpha)
+    solve_fv_heat!(u, g; alpha, dt, nt)
+    return u, before, heat_content(u, g), dt
 end
 
 function main()
@@ -170,7 +170,7 @@ function main()
     @printf("Cartesian 64×64:  |finite volume − finite difference| = %.2e\n", err)
 
     hu = LocalHaloArray(Float64, (48, 64), 1; boundary_condition=DISK_BC)
-    res = harmonic_residual(hu, cell_geometry(hu, (UniformAxis(0, 1), UniformAxis(0, 2π)); system=Polar()), Polar())
+    res = harmonic_residual(hu, cell_geometry(hu, (UniformAxis(0, 1), UniformAxis(0, 2π)); system=Polar()))
     @printf("polar disk:  max |Δ_h(r² cos 2θ)| = %.2e  (each term is 4; expected O(Δθ²) ≈ %.1e)\n",
         res, 4 * (2π / 64)^2 / 3)
     res < 0.05 || error("polar Laplacian residual $res: the angular metric is wrong")
