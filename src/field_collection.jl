@@ -12,15 +12,17 @@
 # ============================================================
 
 """
-    FieldCollection{T,D,S,C} <: AbstractHaloCollection{T,D,S}
+    FieldCollection{T,D,S,C,L} <: AbstractHaloCollection{T,D,S}
 
 The common storage for multi-field halo collections: `arrays::C` is either a
 `NamedTuple` of fields ([`MultiHaloArray`](@ref)) or an `AbstractArray` of
 fields ([`ArrayOfHaloArray`](@ref)). `T` is the promoted element type, `D` the
 total logical dimensionality (field axes + spatial axes), and `S` the spatial
-dimensionality of the fields. Construct through the aliases.
+dimensionality of the fields. `L` is the field layout (`Stacked` or `LeafAxis`),
+chosen by the constructor and carried only in the type. Construct through the
+aliases.
 """
-struct FieldCollection{T,D,S,C} <: AbstractHaloCollection{T,D,S}
+struct FieldCollection{T,D,S,C,L} <: AbstractHaloCollection{T,D,S}
     arrays::C
 end
 
@@ -47,10 +49,14 @@ Use this when a solver evolves several fields on one grid (e.g. `rho`, `u`, `v`,
 [`ArrayOfHaloArray`](@ref). Both are aliases of one underlying type
 (`FieldCollection`), so they share all generic behaviour.
 
-Fields may themselves be collections (`MultiHaloArray((; a, b))` with `a`, `b`
-collections of the same field shape): the result is one rectangular array whose
-field axes are the outer container's followed by the inner ones
-(`field_shape`), indexed `c[outer, inner..., spatial...]`.
+Fields may themselves be collections. When they share their field shape
+(`MultiHaloArray((; a, b))` with `a`, `b` collections of 4 fields each) the
+result has the outer field axis followed by the inner ones, size
+`(2, 4, spatial...)`, indexed `c[outer, inner..., spatial...]`. When they do not
+(a 4-field and a 6-field collection, or a single array next to a collection)
+the result has one field axis over all its leaves in declaration
+order, size `(10, spatial...)`, indexed `c[leaf, spatial...]`. Either way
+`length(c)` is the number of elements and `siteview` gives every leaf.
 
 # Examples
 ```julia
@@ -64,7 +70,7 @@ q = MultiHaloArray(ThreadedHaloArray, Float64, (32, 32), 1; dims=(2, 2),
                    fields=(:rho, :p), boundary_condition=:periodic)
 ```
 """
-const MultiHaloArray{T,D,S,C<:NamedTuple} = FieldCollection{T,D,S,C}
+const MultiHaloArray{T,D,S,C<:NamedTuple,L} = FieldCollection{T,D,S,C,L}
 
 """
     ArrayOfHaloArray(FieldType, T, field_shape, owned_dims, halo; boundary_condition, …)
@@ -92,19 +98,21 @@ interior_view(vel[1]) .= 1.0
 synchronize_halo!(vel)
 ```
 """
-const ArrayOfHaloArray{T,D,S,C<:AbstractArray} = FieldCollection{T,D,S,C}
+const ArrayOfHaloArray{T,D,S,C<:AbstractArray,L} = FieldCollection{T,D,S,C,L}
 
 # A field of a collection: a single halo array, or (nested) another collection.
 const HaloArrayField = Union{AbstractSingleHaloArray,AbstractHaloCollection}
 
 # ---- field-compatibility checks ------------------------------------------
 # Every field must match the first in spatial dimensionality, interior size,
-# halo width, backend and — for nested collections — field shape, so the whole
-# is one rectangular array (a leaf and a collection, or two collections with
-# different field counts, cannot be). `labeled_fields` is an iterable of
-# (label, field) pairs (the label only colours the error message — a field name
-# for MultiHaloArray, an index for ArrayOfHaloArray).
-function _check_fields_compatible(what::AbstractString, ref, labeled_fields)
+# halo width and backend. With `same_field_shape` (an ArrayOfHaloArray, whose
+# fields form a grid) nested fields must also share their field shape, so the
+# whole is one rectangular array; a MultiHaloArray may mix field shapes, and
+# then lists its leaves along one field axis (LeafAxis).
+# `labeled_fields` is an iterable of (label, field) pairs (the label only
+# colours the error message — a field name for MultiHaloArray, an index for
+# ArrayOfHaloArray).
+function _check_fields_compatible(what::AbstractString, ref, labeled_fields; same_field_shape::Bool=true)
     ref_ndims   = _spatial_ndims(ref)
     ref_size    = _spatial_interior_size(ref)
     ref_halo    = halo_width(ref)
@@ -115,8 +123,9 @@ function _check_fields_compatible(what::AbstractString, ref, labeled_fields)
             throw(ArgumentError("$what field `$label` has dimensionality $(_spatial_ndims(a)) != $ref_ndims"))
         _spatial_interior_size(a) == ref_size ||
             throw(DimensionMismatch("$what field `$label` has interior size $(_spatial_interior_size(a)) != $ref_size"))
-        field_shape(a) == ref_fshape ||
-            throw(DimensionMismatch("$what field `$label` has field shape $(field_shape(a)) != $ref_fshape (nested fields must share their field shape)"))
+        (!same_field_shape || field_shape(a) == ref_fshape) ||
+            throw(DimensionMismatch("$what field `$label` has field shape $(field_shape(a)) != $ref_fshape " *
+                "(the fields of an ArrayOfHaloArray must share their field shape; a MultiHaloArray accepts different ones)"))
         halo_width(a) == ref_halo ||
             throw(DimensionMismatch("$what field `$label` has halo width $(halo_width(a)) != $ref_halo"))
         halo_backend(a) isa typeof(ref_backend) ||
@@ -138,47 +147,35 @@ function _check_same_layout(what, label, a::ThreadedHaloArray, ref::ThreadedHalo
     return nothing
 end
 
-function _check_multihaloarray_compatible(field_names, field_values)
-    isempty(field_values) && throw(ArgumentError("MultiHaloArray requires at least one field"))
-    _check_fields_compatible("MultiHaloArray", first(field_values),
-        zip(field_names, field_values))
-    return nothing
-end
-
-function _check_array_fields(arrays::AbstractArray)
-    isempty(arrays) && throw(ArgumentError("ArrayOfHaloArray requires at least one field"))
-    all(a -> a isa HaloArrayField, arrays) ||
-        throw(ArgumentError("All fields must be HaloArray, LocalHaloArray, or ThreadedHaloArray"))
-    return nothing
-end
-
-function _check_arrayofhaloarray_compatible(arrays::AbstractArray)
-    _check_array_fields(arrays)
-    _check_fields_compatible("ArrayOfHaloArray", first(arrays),
-        ((I, arrays[I]) for I in CartesianIndices(arrays)))
-    return nothing
-end
-
 # ---- ground-truth constructors --------------------------------------------
 
-# D counts the container's own axes plus the fields' (which, for a nested
-# collection, include the inner field axes): D = ndims(field) + container axes.
 function MultiHaloArray(arrs::NamedTuple)
-    field_names = keys(arrs)
-    field_values = values(arrs)
-    _check_multihaloarray_compatible(field_names, field_values)
-
-    T = promote_type(map(eltype, field_values)...)
-    S = _spatial_ndims(first(field_values))
-    return FieldCollection{T, ndims(first(field_values)) + 1, S, typeof(arrs)}(arrs)
+    isempty(arrs) && throw(ArgumentError("MultiHaloArray requires at least one field"))
+    fields = values(arrs)
+    _check_fields_compatible("MultiHaloArray", first(fields), pairs(arrs); same_field_shape=false)
+    ref_shape = field_shape(first(fields))
+    L = all(f -> field_shape(f) == ref_shape, fields) ? Stacked : LeafAxis
+    return _wrap_fields(arrs, L)
 end
 
 function ArrayOfHaloArray(arrays::AbstractArray)
-    _check_arrayofhaloarray_compatible(arrays)
+    isempty(arrays) && throw(ArgumentError("ArrayOfHaloArray requires at least one field"))
+    all(a -> a isa HaloArrayField, arrays) ||
+        throw(ArgumentError("All fields must be HaloArray, LocalHaloArray, or ThreadedHaloArray"))
+    _check_fields_compatible("ArrayOfHaloArray", first(arrays),
+        ((I, arrays[I]) for I in CartesianIndices(arrays)))
+    return _wrap_fields(arrays, Stacked)
+end
 
-    T = promote_type(map(eltype, arrays)...)
-    S = _spatial_ndims(first(arrays))
-    return FieldCollection{T, ndims(first(arrays)) + ndims(arrays), S, typeof(arrays)}(arrays)
+# Shared bookkeeping after validation: stacked fields prepend the container's
+# axes; a leaf layout has one field axis over all leaves.
+function _wrap_fields(arrays, ::Type{L}) where {L}
+    fields = values(arrays)
+    ref = first(fields)
+    T = promote_type(map(eltype, fields)...)
+    S = _spatial_ndims(ref)
+    D = L === Stacked ? ndims(ref) + _container_ndims(arrays) : S + 1
+    return FieldCollection{T, D, S, typeof(arrays), L}(arrays)
 end
 
 # Rebuild the same kind of collection from a new field container (used by
@@ -211,8 +208,18 @@ end
 @inline _fields(c::FieldCollection)      = values(getfield(c, :arrays))
 @inline _first_field(c::FieldCollection) = first(_fields(c))
 # Number of axes of the field container itself (1 for a NamedTuple).
-@inline _container_ndims(::MultiHaloArray) = 1
-@inline _container_ndims(c::ArrayOfHaloArray) = ndims(getfield(c, :arrays))
+@inline _container_ndims(::NamedTuple) = 1
+@inline _container_ndims(arrays::AbstractArray) = ndims(arrays)
+@inline _container_ndims(c::FieldCollection) = _container_ndims(getfield(c, :arrays))
+
+# LeafAxis overrides the default stacked leaf order by concatenating fields'
+# leaves in declaration order. Layout-dependent methods dispatch directly on L.
+@inline _leaf_field(c::FieldCollection{T,D,S,C,LeafAxis}, k) where {T,D,S,C} =
+    _concat_leaf(Tuple(_fields(c)), k)
+
+# Number of leaf arrays of a field.
+@inline _leaf_count(::AbstractSingleHaloArray) = 1
+@inline _leaf_count(c::AbstractHaloCollection) = n_field(c)
 @inline _map_fields(g, c::FieldCollection) = _rebuild_collection(map(g, getfield(c, :arrays)))
 @inline _check_same_fields(dest::FieldCollection, src::FieldCollection) =
     keys(getfield(dest, :arrays)) == keys(getfield(src, :arrays)) ||
@@ -239,7 +246,11 @@ active_fields(c::FieldCollection) = map(is_active, getfield(c, :arrays))
 # returns the field. NamedTuples support integer indexing, so this covers both
 # flavors.
 
-function Base.getindex(c::FieldCollection{T,D,S}, I...) where {T,D,S}
+Base.getindex(c::FieldCollection, I...) = _getindex(c, I...)
+Base.getindex(c::FieldCollection, I::CartesianIndex) = getindex(c, Tuple(I)...)
+Base.setindex!(c::FieldCollection, value, I...) = (_setindex!(c, value, I...); c)
+
+function _getindex(c::FieldCollection{T,D,S,C,Stacked}, I...) where {T,D,S,C}
     cn = _container_ndims(c)
     if length(I) <= cn
         return getindex(getfield(c, :arrays), I...)
@@ -251,19 +262,22 @@ function Base.getindex(c::FieldCollection{T,D,S}, I...) where {T,D,S}
         throw(BoundsError(c, I))
     end
 end
+function _getindex(c::FieldCollection{T,D,S,C,LeafAxis}, I...) where {T,D,S,C}
+    (length(I) == 1 || length(I) == D) && 1 <= I[1] <= n_field(c) || throw(BoundsError(c, I))
+    leaf = _leaf_field(c, I[1])
+    return length(I) == 1 ? leaf : getindex(leaf, Base.tail(I)...)
+end
 
-Base.getindex(c::FieldCollection, I::CartesianIndex) = getindex(c, Tuple(I)...)
-
-function Base.setindex!(c::FieldCollection{T,D,S}, value, I...) where {T,D,S}
+function _setindex!(c::FieldCollection{T,D,S,C,Stacked}, value, I...) where {T,D,S,C}
+    length(I) == D || throw(BoundsError(c, I))
     cn = _container_ndims(c)
-    if length(I) == D
-        field_idx = ntuple(d -> I[d], cn)
-        rest = ntuple(d -> I[cn + d], D - cn)
-        setindex!(getfield(c, :arrays)[field_idx...], value, rest...)
-        return c
-    else
-        throw(BoundsError(c, I))
-    end
+    field_idx = ntuple(d -> I[d], cn)
+    rest = ntuple(d -> I[cn + d], D - cn)
+    setindex!(getfield(c, :arrays)[field_idx...], value, rest...)
+end
+function _setindex!(c::FieldCollection{T,D,S,C,LeafAxis}, value, I...) where {T,D,S,C}
+    length(I) == D && 1 <= I[1] <= n_field(c) || throw(BoundsError(c, I))
+    setindex!(_leaf_field(c, I[1]), value, Base.tail(I)...)
 end
 
 Base.setindex!(c::FieldCollection, value, I::CartesianIndex) =
@@ -279,24 +293,30 @@ Base.setindex!(c::FieldCollection, value, I::CartesianIndex) =
 @inline _reshape_field_container(::NamedTuple, new_shape, prototype, build) =
     throw(DimensionMismatch("cannot change the field count of a named collection (MultiHaloArray) via similar"))
 
-function Base.similar(c::FieldCollection{AA,D,S}, ::Type{T}, dims::Dims{M}) where {AA,D,S,T,M}
+function Base.similar(c::FieldCollection{AA,D}, ::Type{T}, dims::Dims{M}) where {AA,D,T,M}
     M == D ||
         throw(DimensionMismatch("collection similar dims must have $D dimensions"))
-    # The container's own axes come first; the rest (inner field axes of a
-    # nested field, then spatial) are the dims of each field.
+    return _similar(c, T, dims)
+end
+# The container's own axes come first; the rest (inner field axes of a nested
+# field, then spatial) are the dims of each field.
+function _similar(c::FieldCollection{AA,D,S,C,Stacked}, ::Type{T}, dims) where {AA,D,S,C,T}
     cn = _container_ndims(c)
     new_container_shape = ntuple(d -> Int(dims[d]), cn)
     field_dims = ntuple(d -> Int(dims[cn + d]), D - cn)
-
-    if new_container_shape == _container_shape(c)
+    new_container_shape == _container_shape(c) &&
         return _map_fields(a -> similar(a, T, field_dims), c)
-    else
-        ref = _first_field(c)
-        prototype = similar(ref, T, field_dims)
-        arrs = _reshape_field_container(getfield(c, :arrays), new_container_shape,
-            prototype, () -> similar(ref, T, field_dims))
-        return _rebuild_collection(arrs)
-    end
+    ref = _first_field(c)
+    arrs = _reshape_field_container(getfield(c, :arrays), new_container_shape,
+        similar(ref, T, field_dims), () -> similar(ref, T, field_dims))
+    return _rebuild_collection(arrs)
+end
+# The leaf count is fixed by the named fields.
+function _similar(c::FieldCollection{AA,D,S,C,LeafAxis}, ::Type{T}, dims) where {AA,D,S,C,T}
+    Int(dims[1]) == n_field(c) || throw(DimensionMismatch(
+        "cannot change the field count of a named collection (MultiHaloArray) via similar"))
+    spatial = ntuple(d -> Int(dims[1 + d]), D - 1)
+    return _map_fields(a -> similar(a, T, (field_shape(a)..., spatial...)), c)
 end
 
 # Non-Int dims are normalized to Dims by Base's generic similar fallbacks.

@@ -74,6 +74,11 @@ an `AbstractArray`, accessed by index).
 """
 abstract type AbstractHaloCollection{T,N,S} <: AbstractHaloArray{T,N} end
 
+# Field layouts carried by FieldCollection's L parameter: stacked field axes,
+# or one leaf axis over all leaves.
+struct Stacked end
+struct LeafAxis end
+
 """
     AbstractHaloBackend
 
@@ -216,7 +221,9 @@ the idiomatic way to set an initial condition. Returns `u`.
 
 For a collection, `f(I)` gives the values of all fields at the site: a scalar
 (the same for every field) or a tuple / `SVector` / array with one entry per
-leaf field in column-major [`field_shape`](@ref) order.
+leaf field, in the order of the field axes (column-major [`field_shape`](@ref)
+order; declaration order for a `MultiHaloArray` whose fields differ in field
+shape).
 
 # Example
 ```julia
@@ -252,12 +259,37 @@ end
 @inline _field_value(v::Number, k) = v
 @inline _field_value(v, k) = v[k]
 
-# Leaf `k` of a (possibly nested) collection, in column-major order of
-# `field_shape`: the outer container index varies fastest.
+# Leaf `k` of a collection — the one leaf lookup of the package (site views,
+# scalar indexing, fill_from_global_indices!, field_storages!). Two orders:
+#   - stacked fields (equal field shapes): column-major over `field_shape`, the
+#     outer container index fastest; flat collections take one direct lookup
+#     (the path Julia 1.10 keeps allocation-free);
+#   - a leaf axis (named fields of different field shapes): every field's
+#     leaves concatenated in declaration order (method in field_collection.jl).
 @inline _leaf_field(a::AbstractSingleHaloArray, k) = a
-@inline function _leaf_field(c::AbstractHaloCollection, k)
-    n = prod(_container_shape(c))
-    return _leaf_field(_fields(c)[(k - 1) % n + 1], (k - 1) ÷ n + 1)
+@inline _leaf_field(c::AbstractHaloCollection, k) = _leaf_in(_fields(c), k)
+@inline _leaf_in(fields::Tuple{Vararg{AbstractSingleHaloArray}}, k) = _nth_field(fields, k)
+@inline _leaf_in(fields::AbstractArray{<:AbstractSingleHaloArray}, k) = _nth_field(fields, k)
+@inline function _leaf_in(fields, k)
+    n = length(fields)
+    return _leaf_field(_nth_field(fields, (k - 1) % n + 1), (k - 1) ÷ n + 1)
+end
+_concat_leaf(::Tuple{}, k) = throw(BoundsError((), k))
+@inline function _concat_leaf(fields::Tuple, k)
+    n = _leaf_count(first(fields))
+    return k <= n ? _leaf_field(first(fields), k) : _concat_leaf(Base.tail(fields), k - n)
+end
+
+# Field `k` of a field container in column-major order. Ordinary arrays and
+# tuples index directly; the general path also handles containers whose axes
+# do not start at 1.
+@inline _nth_field(fields::Tuple, k::Int) = fields[k]
+@inline _nth_field(fields::Array, k::Int) = fields[k]
+@inline function _nth_field(fields::AbstractArray, k::Int)
+    ordinal = CartesianIndices(size(fields))[k]
+    index = CartesianIndex(ntuple(d -> ordinal[d] + first(axes(fields, d)) - 1,
+        Val(ndims(fields))))
+    return fields[index]
 end
 function global_to_storage_index end
 function is_root end
@@ -371,6 +403,16 @@ end
 # but the global size and per-tile interior extents must match (equal extents
 # with equal global size pins the tile layout too). Kernels that index the
 # padded parents (copyto!, BLAS-1, dot) need the strict storage check above.
+# Check every array of a tuple against `ref`. A plain recursion, not
+# `foreach(closure, tuple)`: on Julia 1.12 Base runs `foreach` on a tuple
+# through a shared `foldl` instance, and inference reaching it through a deep
+# recursion (a `mapreduce` over fields of different collection types) caches
+# a less precise version that later plain calls reuse — measured as 16 bytes
+# per `mapreduce` on a single array. A single array hits the empty method.
+@inline _check_interiors(ref, ::Tuple{}, what::String) = nothing
+@inline _check_interiors(ref, rest::Tuple, what::String) =
+    (_check_same_interior(ref, first(rest), what); _check_interiors(ref, Base.tail(rest), what))
+
 @inline function _check_same_interior(x, y, what::String)
     (size(x) == size(y) && tile_count(x) == tile_count(y) &&
      map(length, interior_range(x)) == map(length, interior_range(y))) ||
@@ -440,7 +482,7 @@ Base.reverse!(::AbstractSingleHaloArray; dims=:) =
 function Base.map!(f, dest::AbstractSingleHaloArray, src::Vararg{AbstractSingleHaloArray,Nsrc}) where {Nsrc}
     # Base's map! zips the views and silently stops at the shortest — guard
     # like the other multi-array kernels (interior check: halo widths may differ).
-    foreach(s -> _check_same_interior(dest, s, "map!"), src)
+    _check_interiors(dest, src, "map!")
     @views map!(f, interior_view(dest), map(interior_view, src)...)
     return dest
 end

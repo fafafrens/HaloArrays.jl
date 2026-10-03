@@ -472,8 +472,11 @@ function _check_nested_multihaloarray_broadcast()
         end
     end
 
-    # a leaf beside a collection is rejected; nest rectangularly instead
-    @test_throws DimensionMismatch MultiHaloArray((; rho, q=ArrayOfHaloArray(q_arrays)))
+    # a leaf beside a collection gets one axis over its 3 leaves
+    mixed = MultiHaloArray((; rho, q=ArrayOfHaloArray(q_arrays)))
+    @test size(mixed) == (3, size(rho, 1))
+    rs = mixed .+ 1
+    @test collect(interior_view(rs.arrays.q[2])) == [200 + rank + i + 1 for i in 1:4]
     fields = MultiHaloArray((; p=ArrayOfHaloArray([rho, copy(rho)]), q=ArrayOfHaloArray(q_arrays)))
     @test size(fields) == (2, 2, size(rho, 1))
     shifted = fields .+ 4
