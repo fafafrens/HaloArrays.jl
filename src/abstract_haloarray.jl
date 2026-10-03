@@ -381,6 +381,16 @@ end
 # but the global size and per-tile interior extents must match (equal extents
 # with equal global size pins the tile layout too). Kernels that index the
 # padded parents (copyto!, BLAS-1, dot) need the strict storage check above.
+# Check every array of a tuple against `ref`. A plain recursion, not
+# `foreach(closure, tuple)`: on Julia 1.12 Base runs `foreach` on a tuple
+# through a shared `foldl` instance, and inference reaching it through a deep
+# recursion (a `mapreduce` over fields of different collection types) caches
+# a less precise version that later plain calls reuse — measured as 16 bytes
+# per `mapreduce` on a single array. A single array hits the empty method.
+@inline _check_interiors(ref, ::Tuple{}, what::String) = nothing
+@inline _check_interiors(ref, rest::Tuple, what::String) =
+    (_check_same_interior(ref, first(rest), what); _check_interiors(ref, Base.tail(rest), what))
+
 @inline function _check_same_interior(x, y, what::String)
     (size(x) == size(y) && tile_count(x) == tile_count(y) &&
      map(length, interior_range(x)) == map(length, interior_range(y))) ||
@@ -450,7 +460,7 @@ Base.reverse!(::AbstractSingleHaloArray; dims=:) =
 function Base.map!(f, dest::AbstractSingleHaloArray, src::Vararg{AbstractSingleHaloArray,Nsrc}) where {Nsrc}
     # Base's map! zips the views and silently stops at the shortest — guard
     # like the other multi-array kernels (interior check: halo widths may differ).
-    foreach(s -> _check_same_interior(dest, s, "map!"), src)
+    _check_interiors(dest, src, "map!")
     @views map!(f, interior_view(dest), map(interior_view, src)...)
     return dest
 end

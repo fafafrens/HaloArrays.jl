@@ -96,8 +96,7 @@ function _local_mapreduce(reducer::R, f::F, op::OP, arrays::Tuple; kws...) where
     # result instead of Base's DimensionMismatch. Guard once, up front. The
     # INTERIOR check: this path never touches the padding, so equal interiors
     # with different halo widths are fine (they were in 0.4.x).
-    foreach(a -> _check_same_interior(first(arrays), a, "multi-array reduction"),
-        Base.tail(arrays))
+    _check_interiors(first(arrays), Base.tail(arrays), "multi-array reduction")
     return _mapreduce_tile(t -> _reduce_views(reducer, f, op,
         map(h -> interior_view(h, t), arrays); kws...), op, first(arrays))
 end

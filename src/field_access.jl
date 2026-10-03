@@ -134,12 +134,12 @@ Base.@propagate_inbounds _site_get(state, k::Int, tile, I) = _is_record(state) ?
     _record_get(_site_fields(state), k, tile, I) : _cell_storage(_site_leaf(state, k), tile)[I]
 Base.@propagate_inbounds _site_set!(state, v, k::Int, tile, I) = _is_record(state) ?
     _record_set!(_site_fields(state), v, k, tile, I) : (_cell_storage(_site_leaf(state, k), tile)[I] = v; nothing)
-_record_get(::Tuple{}, k, tile, I) = throw(BoundsError((), k))
+_record_get(::Tuple{}, k::Int, tile, I) = throw(BoundsError((), k))
 Base.@propagate_inbounds function _record_get(fields::Tuple, k::Int, tile, I)
     f = first(fields); n = _leaf_count(f)
     return k <= n ? _site_get(f, k, tile, I) : _record_get(Base.tail(fields), k - n, tile, I)
 end
-_record_set!(::Tuple{}, v, k, tile, I) = throw(BoundsError((), k))
+_record_set!(::Tuple{}, v, k::Int, tile, I) = throw(BoundsError((), k))
 Base.@propagate_inbounds function _record_set!(fields::Tuple, v, k::Int, tile, I)
     f = first(fields); n = _leaf_count(f)
     return k <= n ? _site_set!(f, v, k, tile, I) : _record_set!(Base.tail(fields), v, k - n, tile, I)
