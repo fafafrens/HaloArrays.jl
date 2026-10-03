@@ -18,6 +18,25 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   order), `field_storages!`, gather, HDF5 output and `cell_geometry` all work.
   Fields of equal field shape keep the outer-then-inner axes of 0.10.1, and an
   `ArrayOfHaloArray` still requires equal field shapes.
+- `mapreduce` and `map!` on a single halo array stay allocation-free whatever
+  was compiled before them. Their check that the other arrays have the same
+  interior went through a shared `foreach`/`foldl` instance, which a reduction
+  over collections with fields of different types could leave less precisely
+  inferred; later single-array calls then allocated 16 bytes each.
+
+### Changed
+- `FieldCollection` has a fifth type parameter, the field layout `L`
+  (`Stacked`, or `LeafAxis` for named fields of different field shapes),
+  chosen by the constructor; the `MultiHaloArray` and `ArrayOfHaloArray`
+  aliases carry it too. Type checks and method signatures written with four
+  parameters (`x isa MultiHaloArray{T,D,S,C}`, `f(x::MultiHaloArray{T,D,S})`)
+  still match every layout. Calling `FieldCollection{T,D,S,C}(arrays)` directly
+  no longer works; construct through `MultiHaloArray(...)` /
+  `ArrayOfHaloArray(...)`, as documented.
+- Internal: one leaf lookup serves site views, scalar indexing,
+  `fill_from_global_indices!` and `field_storages!`, so all of them handle field
+  containers whose axes do not start at 1; layout-dependent methods dispatch on
+  `L` instead of branching.
 
 ## [0.10.1] — 2026-10-02
 
