@@ -58,7 +58,7 @@ function shock_from_mass(u, g, ref; cut=0.03)
     U = parent(u)
     mass = 0.0
     for I in CartesianIndices(interior_range(u))
-        c, h = cell_center(Cartesian(), g, I)[1], cell_width(Cartesian(), g, I)[1]
+        c, h = cell_center(g, I)[1], cell_width(g, I)[1]
         c < cut || continue
         mass += h * element_average(ref, U[I])
     end
@@ -71,7 +71,7 @@ function shock_from_crossing(u, g, ref)
     U = parent(u)
     level = U_L / 2
     for I in CartesianIndices(interior_range(u))
-        c, h = cell_center(Cartesian(), g, I)[1], cell_width(Cartesian(), g, I)[1]
+        c, h = cell_center(g, I)[1], cell_width(g, I)[1]
         x, v = node_positions(ref, c, h), U[I]
         for i in 1:length(v)-1
             if v[i] >= level > v[i + 1]
@@ -99,7 +99,7 @@ function run_riemann(; K=400, N=3, t_end=3.0, cfl=0.5, report_at=(0.5, 1.0, 2.0,
     # sampling the jump at a shared face node would misplace h/12 of mass
     K % 80 == 0 || throw(ArgumentError("K must be a multiple of 80 so the jumps fall on element edges"))
     fill_from_global_indices!(u) do I
-        c = cell_center(Cartesian(), g, CartesianIndex(I[1] + 1))[1]   # storage index = global + halo
+        c = cell_center(g, CartesianIndex(I[1] + 1))[1]   # storage index = global + halo
         SVector{P}(fill(u_initial(c), P))
     end
     work = (similar(u), similar(u), similar(u))

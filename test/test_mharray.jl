@@ -327,7 +327,7 @@ end
     sq .= sq .+ 1                               # broadcast with alias preprocessing
     @test sq[1, 1] == q[1][1, 1]
     geo = cell_geometry(nested_fields, UniformAxis(0, 1), UniformAxis(0, 1))
-    @test size(geo) == (4, 3, 2)
+    @test size(parent(geo)) == (4, 3, 2)
 
     copied = copy(fields)
     interior_view(copied.arrays.u)[1, 1] = -1
@@ -449,7 +449,7 @@ end
         synchronize_halo!(r)
         g = gather_haloarray(r)
         @test keys(g) == (:rho, :v, :w) && size(g.w) == (6, 6, 4)
-        @test size(cell_geometry(r, UniformAxis(0, 1), UniformAxis(0, 1))) == (4, 6, 4)
+        @test size(parent(cell_geometry(r, UniformAxis(0, 1), UniformAxis(0, 1)))) == (4, 6, 4)
         if backend === :local
             cache = Vector{Matrix{Float64}}(undef, 11)
             field_storages!(cache, r)
