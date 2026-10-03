@@ -73,7 +73,7 @@ Base.getindex(mha::MultiHaloArray, name::Symbol) = mha.arrays[name]
     name === :arrays ? getfield(mha, :arrays) : getfield(mha, :arrays)[name]
 Base.propertynames(mha::MultiHaloArray) = keys(getfield(mha, :arrays))
 
-# eltype/ndims come from AbstractArray{T,D} via FieldCollection{T,D,S,C}.
+# eltype/ndims come from AbstractArray{T,D} via FieldCollection{T,D,S,C,L}.
 
 # size/axes/eachindex/length, n_field, interior/global/storage size, and
 # interior_axes come from AbstractHaloCollection (field_shape prefix + _spatial_*).
@@ -89,9 +89,10 @@ the fields' own field shape; a `MultiHaloArray` whose fields differ in field
 shape has the single axis `(number of leaves,)`. `prod(field_shape(c))` is the
 number of leaf fields; a single halo array has field shape `()`.
 """
-@inline field_shape(c::AbstractHaloCollection) = _field_shape(_layout(c), c)
-@inline _field_shape(::Stacked, c)  = (_container_shape(c)..., field_shape(_first_field(c))...)
-@inline _field_shape(::LeafAxis, c) = (sum(_leaf_count, _fields(c)),)
+@inline field_shape(c::AbstractHaloCollection) =
+    (_container_shape(c)..., field_shape(_first_field(c))...)
+@inline field_shape(c::FieldCollection{T,D,S,C,LeafAxis}) where {T,D,S,C} =
+    (sum(_leaf_count, _fields(c)),)
 @inline field_shape(::AbstractSingleHaloArray) = ()
 @inline _container_shape(mha::MultiHaloArray) = (length(getfield(mha, :arrays)),)
 # parent (the field NamedTuple) and field_storages (the storage NamedTuple) are

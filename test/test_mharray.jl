@@ -355,6 +355,38 @@ end
     @test any(x -> x == 22, fields)
 end
 
+@testset "MultiHaloArray with zero-dimensional field containers" begin
+    u = LocalHaloArray(Float64, (4,), 1)
+    fill_from_global_indices!(I -> Float64(I[1]), u)
+    z = ArrayOfHaloArray(fill(u))
+    c = MultiHaloArray((; z))
+
+    # A nested container with no field axes still stacks. Short indexing must
+    # preserve that container, while full indexing and siteview reach its leaf.
+    @test field_shape(c) == (1,) && size(c) == (1, 4)
+    @test c[1] === z
+    @test c[1, 3] == u[3] == 3.0
+    c[1, 3] = 7.0
+    @test u[3] == 7.0
+    q = siteview(c, CartesianIndex(4))
+    @test collect(q) == [7.0]
+    q[1] = 9.0
+    @test u[3] == 9.0
+
+    mixed = MultiHaloArray((; u, z))
+    @test field_shape(mixed) == (2,)
+    @test mixed[1] === u && mixed[2] === z
+    @test mixed[2, 3] == 9.0
+
+    copied = copy(c)
+    @test copied[1] === copied.z
+    @test copied[1] isa ArrayOfHaloArray
+    @test copied[1, 3] == 9.0
+    resized = similar(c, Float32, (1, 6))
+    @test size(resized) == (1, 6) && eltype(resized) == Float32
+    @test resized[1] === resized.z
+end
+
 @testset "MultiHaloArray of fields with different field shapes (one leaf axis)" begin
     _calls(f::F, n, args::Tuple) where {F} = (s = 0.0; for _ in 1:n; s += f(args...); end; s)
     _allocation_free(f::F, args...) where {F} =

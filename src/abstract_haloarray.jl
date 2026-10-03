@@ -74,8 +74,8 @@ an `AbstractArray`, accessed by index).
 """
 abstract type AbstractHaloCollection{T,N,S} <: AbstractHaloArray{T,N} end
 
-# Field layout of a collection (a Holy trait, chosen by `_layout` in
-# field_collection.jl): `Stacked` field axes, or one `LeafAxis` over all leaves.
+# Field layouts carried by FieldCollection's L parameter: stacked field axes,
+# or one leaf axis over all leaves.
 struct Stacked end
 struct LeafAxis end
 
@@ -264,12 +264,10 @@ end
 #   - stacked fields (equal field shapes): column-major over `field_shape`, the
 #     outer container index fastest; flat collections take one direct lookup
 #     (the path Julia 1.10 keeps allocation-free);
-#   - a leaf axis (named fields of different field shapes, `_layout`):
-#     every field's leaves concatenated in declaration order.
+#   - a leaf axis (named fields of different field shapes): every field's
+#     leaves concatenated in declaration order (method in field_collection.jl).
 @inline _leaf_field(a::AbstractSingleHaloArray, k) = a
-@inline _leaf_field(c::AbstractHaloCollection, k) = _leaf_field(_layout(c), c, k)
-@inline _leaf_field(::Stacked, c, k)  = _leaf_in(_fields(c), k)
-@inline _leaf_field(::LeafAxis, c, k) = _concat_leaf(Tuple(_fields(c)), k)
+@inline _leaf_field(c::AbstractHaloCollection, k) = _leaf_in(_fields(c), k)
 @inline _leaf_in(fields::Tuple{Vararg{AbstractSingleHaloArray}}, k) = _nth_field(fields, k)
 @inline _leaf_in(fields::AbstractArray{<:AbstractSingleHaloArray}, k) = _nth_field(fields, k)
 @inline function _leaf_in(fields, k)
