@@ -95,3 +95,24 @@ using Polyester  # loads HaloArraysPolyesterExt so PolyesterBackend works
     end
     @test sl == 10
 end
+
+@testset "Polyester reductions: parallel, ordered, typed" begin
+    P = PolyesterBackend()
+    # ordered combine for a non-commutative op, uneven chunking, any length
+    for n in 1:7
+        @test tile_mapreduce(P, i -> [i], vcat, 1:n) == collect(1:n)
+        @test tile_mapreduce(P, i -> string(i), *, 1:n) == join(1:n)
+    end
+    # the chunk result type follows `op`, not just `f` (Bool + Bool is Int)
+    @test tile_mapreduce(P, isodd, +, 1:6) === 3
+    # a non-indexable iterator takes the fallback path and still agrees
+    @test tile_mapreduce(P, identity, +, (i for i in 1:5)) == 15
+    # with more than one thread, the chunks run on more than one thread (the
+    # first chunk used to be reduced on the calling thread before the others)
+    if Threads.nthreads() > 1
+        n = Threads.nthreads()
+        ids = zeros(Int, n)
+        tile_mapreduce(P, i -> (ids[i] = Threads.threadid(); 1), +, 1:n)
+        @test length(unique(ids)) > 1
+    end
+end
