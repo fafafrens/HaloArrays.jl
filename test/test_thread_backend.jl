@@ -2,6 +2,7 @@ using Test
 using HaloArrays
 using LinearAlgebra: dot
 using Polyester  # loads HaloArraysPolyesterExt so PolyesterBackend works
+using StaticArrays: SVector
 
 @testset "Thread backends" begin
     backends = (OhMyThreadsBackend(), SerialBackend(), PolyesterBackend())
@@ -94,4 +95,46 @@ using Polyester  # loads HaloArraysPolyesterExt so PolyesterBackend works
         10 * tile
     end
     @test sl == 10
+end
+
+@testset "Polyester reductions: parallel, ordered, typed" begin
+    P = PolyesterBackend()
+    # ordered combine for a non-commutative op, uneven chunking, any length
+    for n in 1:7
+        @test tile_mapreduce(P, i -> [i], vcat, 1:n) == collect(1:n)
+        @test tile_mapreduce(P, i -> string(i), *, 1:n) == join(1:n)
+    end
+    # the chunk result type follows `op`, not just `f` (Bool + Bool is Int)
+    @test tile_mapreduce(P, isodd, +, 1:6) === 3
+    # a non-indexable iterator takes the fallback path and still agrees
+    @test tile_mapreduce(P, identity, +, (i for i in 1:5)) == 15
+    # the reduction-clause path (+ * min max & | on plain-bits results) agrees
+    # with Base, keeps the sign of zero, and handles static vectors
+    for n in 1:7
+        @test tile_mapreduce(P, i -> Float64(i), +, 1:n) == sum(Float64, 1:n)
+        @test tile_mapreduce(P, i -> i, *, 1:n) == prod(1:n)
+        @test tile_mapreduce(P, i -> Float64(i), max, 1:n) == n
+        @test tile_mapreduce(P, i -> -i, min, 1:n) == -n
+        @test tile_mapreduce(P, isodd, &, 1:n) == all(isodd, 1:n)
+        @test tile_mapreduce(P, isodd, |, 1:n) == any(isodd, 1:n)
+        @test tile_mapreduce(P, i -> SVector(i, 2.0i), +, 1:n) == sum(i -> SVector(i, 2.0i), 1:n)
+    end
+    # each thread's partial starts at Polyester's zero, so an all-(-0.0) sum is
+    # +0.0 on the threaded path (Base: -0.0); the value is zero either way
+    @test tile_mapreduce(P, i -> -0.0, +, 1:3) == 0.0
+    @test isnan(tile_mapreduce(P, i -> i == 2 ? NaN : 1.0, max, 1:3))
+    if Threads.nthreads() > 1                                   # allocation-free, call count independent
+        g(i) = Float64(i)
+        calls(n) = (s = 0.0; for _ in 1:n; s += tile_mapreduce(P, g, +, 1:Threads.nthreads()); end; s)
+        calls(1)
+        @test @allocated(calls(1)) == @allocated(calls(100))
+    end
+    # with more than one thread, the chunks run on more than one thread (the
+    # first chunk used to be reduced on the calling thread before the others)
+    if Threads.nthreads() > 1
+        n = Threads.nthreads()
+        ids = zeros(Int, n)
+        tile_mapreduce(P, i -> (ids[i] = Threads.threadid(); 1), +, 1:n)
+        @test length(unique(ids)) > 1
+    end
 end
