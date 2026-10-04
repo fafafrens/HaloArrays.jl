@@ -157,6 +157,10 @@ _read(path, dset) = h5open(path, "r") do fid; read(fid[dset]); end
         @test size(q) == (1, 2, 2)
         @test vec(q[1, 1, :]) == [1, 2]
         @test vec(q[1, 2, :]) == [3, 4]
+        # a cell geometry is written as its MultiHaloArray (one dataset per coordinate)
+        geo = cell_geometry(q1, UniformAxis(0, 1); system=Spherical())
+        append_haloarray!(path, "geo", geo)
+        @test vec(_read(path, "geo/r")[1, :]) ≈ [0.25, 0.75]
         # an ArrayOfHaloArray of ArrayOfHaloArrays is one dataset, outer axis first
         aa = ArrayOfHaloArray([p, ArrayOfHaloArray([q1, q2])])
         append_haloarray!(path, "aa", aa)

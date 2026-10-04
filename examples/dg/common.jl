@@ -127,7 +127,7 @@ function dg_rhs!(du, u, g, ref::ReferenceElement{P}, f::F, df::G, t) where {P,F,
     e = unit_vector(Val(1), 1)
     @inbounds for I in CartesianIndices(interior_range(u))
         uk, ul, ur = U[I], U[I - e], U[I + e]
-        h  = cell_width(Cartesian(), g, I)[1]
+        h  = cell_width(g, I)[1]
         fk = f.(t, uk)
         fL = lax_friedrichs(f, df, t, ul[P], uk[1])        # face shared with the left neighbour
         fR = lax_friedrichs(f, df, t, uk[P], ur[1])        # face shared with the right neighbour
@@ -156,6 +156,6 @@ end
 
 "Explicit time step from the CFL condition: `cfl · h_min / (λ_max (2N + 1))`."
 function dg_stable_dt(u, g, ref::ReferenceElement{P}, λmax; cfl=0.5) where {P}
-    hmin = minimum(cell_width(Cartesian(), g, I)[1] for I in CartesianIndices(interior_range(u)))
+    hmin = minimum(cell_width(g, I)[1] for I in CartesianIndices(interior_range(u)))
     return cfl * hmin / (λmax * (2P - 1))
 end

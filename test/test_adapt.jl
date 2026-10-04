@@ -74,6 +74,16 @@ MPI.Initialized() || MPI.Init()
         @test field_shape(aod) == (2, 2)
         @test parent(aod[1, 1]) isa JLArray
 
+        # a cell geometry keeps its coordinate system and lands on the device
+        g  = cell_geometry(mk(), UniformAxis(0, 1), UniformAxis(0, 2π); system=Polar())
+        gd = adapt(JLArray, g)
+        @test gd isa CellGeometry{Polar} && coordinate_system(gd) === Polar()
+        @test parent(gd.r) isa JLArray && parent(gd.hθ) isa JLArray
+        @test Array(parent(gd.r)) == parent(g.r)
+        gh = adapt(Array, gd)                    # and back to the host
+        @test gh isa CellGeometry{Polar} && parent(gh.r) isa Array
+        @test cell_volume(gh, CartesianIndex(2, 2)) == cell_volume(g, CartesianIndex(2, 2))
+
         mb = MaybeHaloArray(mk())
         mbd = adapt(JLArray, mb)
         @test mbd isa MaybeHaloArray

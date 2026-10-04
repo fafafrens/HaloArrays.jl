@@ -37,3 +37,9 @@ Adapt.adapt_structure(to, c::FieldCollection) =
 # change whether a rank's value is active.
 Adapt.adapt_structure(to, m::MaybeHaloArray) =
     MaybeHaloArray(Adapt.adapt(to, m.data), m.active)
+
+# A cell geometry moves with its coordinate system: adapt the fields (through
+# the collection rule above) and rewrap. Without this, Adapt's generic fallback
+# returns the wrapper unchanged — still on host arrays, with no error.
+Adapt.adapt_structure(to, g::CellGeometry) =
+    CellGeometry(coordinate_system(g), Adapt.adapt(to, parent(g)))
