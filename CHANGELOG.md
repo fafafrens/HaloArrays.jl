@@ -19,7 +19,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   property access (`g.r`, `g.hθ`), `field_storages`, `siteview`, `tile_parent`,
   `tile_count`, `synchronize_halo!`, `gather_haloarray` and `append_haloarray!`.
   `parent(g)` is the `MultiHaloArray`, for broadcasting or passing it where a
-  collection is expected.
+  collection is expected. `adapt(CuArray, g)` (any Adapt target) moves the
+  geometry to the device and keeps its coordinate system.
 
 ### Deprecated
 - The system-first helpers, `cell_volume(system, g, I[, tile])` and the

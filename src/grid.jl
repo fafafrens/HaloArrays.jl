@@ -193,7 +193,8 @@ system.
 `parent(g)` is the `MultiHaloArray`. Property access (`g.r`, `g.hθ`),
 [`field_storages`](@ref), [`siteview`](@ref), `tile_parent`, `tile_count`,
 [`synchronize_halo!`](@ref), `gather_haloarray` and `append_haloarray!` forward
-to it. [`coordinate_system`](@ref)`(g)` returns the system.
+to it. [`coordinate_system`](@ref)`(g)` returns the system. `adapt(CuArray, g)`
+(any Adapt target) moves the fields to the device and keeps the system.
 """
 struct CellGeometry{Sys<:CoordinateSystem,F<:MultiHaloArray}
     fields::F
