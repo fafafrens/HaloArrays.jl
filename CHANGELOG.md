@@ -22,6 +22,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   collection is expected. `adapt(CuArray, g)` (any Adapt target) moves the
   geometry to the device and keeps its coordinate system.
 
+### Fixed
+- Reductions on the Polyester thread backend (`sum`, `norm`, `dot`,
+  `mapreduce`, `maximum`, `minimum`, `any`, `all`, on threaded arrays and
+  collections) run in parallel: the first chunk of tiles used to be reduced on
+  the calling thread before the others started, which made them serial with
+  2 threads and never better than twice the ideal time with more. They are
+  about twice as fast with 2 threads and no longer allocate for `+ * min max &
+  |` on plain-bits results (Polyester's reduction clause). One difference from
+  Base on that path: a sum whose every term is `-0.0` returns `+0.0`.
+
 ### Deprecated
 - The system-first helpers, `cell_volume(system, g, I[, tile])` and the
   others, still work for one release with a deprecation warning. On a
