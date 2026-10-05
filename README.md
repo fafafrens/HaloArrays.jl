@@ -34,7 +34,7 @@ to fight.
 - **Global reductions** — `sum`/`maximum`/`dot`/`norm` Allreduce (MPI) or
   tile-reduce (threaded) automatically; plus `gather` and HDF5 output.
 - **GPU-ready** via KernelAbstractions and `Adapt` (`cu(halo)`); pluggable thread
-  backends (OhMyThreads / Serial / Polyester); composes as an OrdinaryDiffEq state
+  backends (Base threads / Serial / Polyester / OhMyThreads); composes as an OrdinaryDiffEq state
   and a matrix-free Krylov vector.
 
 ## Installation

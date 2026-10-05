@@ -73,7 +73,7 @@ array, or an array of fields sharing one topology.
 
 """
     ThreadedHaloArray(T, tile_size, halo; dims, boundary_condition=:repeating,
-                      thread_backend=OhMyThreadsBackend())
+                      thread_backend=ThreadsBackend())
 
 A shared-memory halo array: the global grid is split into a `dims` layout of
 rectangular tiles, each stored as its own padded array with `halo` ghost cells.
@@ -92,7 +92,7 @@ each tile can be updated independently on its own thread.
 - `boundary_condition`: applied at the physical domain edges (see
   [`LocalHaloArray`](@ref) for the accepted forms).
 - `thread_backend::`[`ThreadBackend`](@ref): how per-tile work is dispatched
-  ([`OhMyThreadsBackend`](@ref) default, [`SerialBackend`](@ref),
+  ([`ThreadsBackend`](@ref) default, [`SerialBackend`](@ref),
   [`PolyesterBackend`](@ref)). Retrieve it with [`thread_backend`](@ref).
 
 Work on a tile with [`tile_parent`](@ref)`(u, tile_id)` (a plain padded array)
@@ -131,7 +131,7 @@ The thread-execution backend that dispatches this array's per-tile work.
 function ThreadedHaloArray(::Type{T}, tile_size::NTuple{N,<:Integer}, halo::Integer;
         dims::NTuple{N,<:Integer} = ntuple(d -> d == N ? Threads.nthreads() : 1, Val(N)),
         boundary_condition=:repeating,
-        thread_backend::ThreadBackend=OhMyThreadsBackend()) where {T,N}
+        thread_backend::ThreadBackend=ThreadsBackend()) where {T,N}
     halo_int = Int(halo)
     halo_int >= 0 || throw(ArgumentError("halo width must be non-negative"))
 
@@ -192,7 +192,7 @@ function LocalHaloArray(u::ThreadedHaloArray{T,N,A,Halo}) where {T,N,A,Halo}
 end
 
 """
-    ThreadedHaloArray(u::LocalHaloArray; dims, thread_backend=OhMyThreadsBackend())
+    ThreadedHaloArray(u::LocalHaloArray; dims, thread_backend=ThreadsBackend())
 
 Split a single-block [`LocalHaloArray`](@ref) into a `dims` grid of tiles as a
 [`ThreadedHaloArray`](@ref) holding the same interior data (ghosts left for the
@@ -202,7 +202,7 @@ communication.
 """
 function ThreadedHaloArray(u::LocalHaloArray{T,N,A,Halo};
         dims::NTuple{N,<:Integer}=ntuple(d -> d == N ? Threads.nthreads() : 1, Val(N)),
-        thread_backend::ThreadBackend=OhMyThreadsBackend()) where {T,N,A,Halo}
+        thread_backend::ThreadBackend=ThreadsBackend()) where {T,N,A,Halo}
     isz = interior_size(u)
     all(d -> isz[d] % dims[d] == 0, 1:N) ||
         throw(ArgumentError("interior size $isz is not divisible by the tile layout $dims"))

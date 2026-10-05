@@ -2,10 +2,11 @@ using Test
 using HaloArrays
 using LinearAlgebra: dot
 using Polyester  # loads HaloArraysPolyesterExt so PolyesterBackend works
+using OhMyThreads  # loads HaloArraysOhMyThreadsExt so OhMyThreadsBackend works
 using StaticArrays: SVector
 
 @testset "Thread backends" begin
-    backends = (OhMyThreadsBackend(), SerialBackend(), PolyesterBackend())
+    backends = (ThreadsBackend(), OhMyThreadsBackend(), SerialBackend(), PolyesterBackend())
 
     function build(backend)
         u = ThreadedHaloArray(Float64, (8, 8), 1; dims=(2, 2),
@@ -80,9 +81,9 @@ using StaticArrays: SVector
     # backend is compile-time information: different backends → different types
     @test typeof(build(SerialBackend())) !== typeof(build(OhMyThreadsBackend()))
 
-    # default backend is OhMyThreads
+    # default backend is Base threads (no extra package)
     udefault = ThreadedHaloArray(Float64, (4,), 1; dims=(1,), boundary_condition=:periodic)
-    @test thread_backend(udefault) === OhMyThreadsBackend()
+    @test thread_backend(udefault) === ThreadsBackend()
 
     # array-level forms on a single-block array: one tile, run inline
     ul = LocalHaloArray(Float64, (4, 4), 1; boundary_condition=:periodic)
@@ -136,5 +137,43 @@ end
         ids = zeros(Int, n)
         tile_mapreduce(P, i -> (ids[i] = Threads.threadid(); 1), +, 1:n)
         @test length(unique(ids)) > 1
+    end
+end
+
+@testset "Base-threads reductions and loops: parallel, ordered, typed" begin
+    B = ThreadsBackend()
+    for n in 1:7
+        @test tile_mapreduce(B, i -> [i], vcat, 1:n) == collect(1:n)     # chunk order kept
+        @test tile_mapreduce(B, i -> string(i), *, 1:n) == join(1:n)
+        @test tile_mapreduce(B, i -> Float64(i), +, 1:n) == sum(Float64, 1:n)
+        @test tile_mapreduce(B, i -> SVector(i, 2.0i), +, 1:n) == sum(i -> SVector(i, 2.0i), 1:n)
+        seen = zeros(Int, n)
+        tile_foreach(B, i -> (seen[i] += 1), 1:n)
+        @test all(==(1), seen)                                          # every tile once
+    end
+    @test tile_mapreduce(B, isodd, +, 1:6) === 3                         # type follows `op`
+    @test tile_mapreduce(B, identity, +, (i for i in 1:5)) == 15         # non-indexable tiles
+    @test (@inferred tile_mapreduce(B, i -> Float64(i), +, 1:4)) == 10.0 # type-stable
+    if Threads.nthreads() > 1
+        # Every chunk waits (bounded) until all chunks have started: with
+        # trivial work the calling thread may otherwise run a queued task itself
+        # while it waits, so the thread ids would not prove concurrency.
+        n = Threads.nthreads()
+        function rendezvous!(started, ids, i)
+            Threads.atomic_add!(started, 1)
+            t0 = time()
+            while started[] < length(ids) && time() - t0 < 5
+                GC.safepoint()                    # let another thread's GC proceed
+                ccall(:jl_cpu_pause, Cvoid, ())
+            end
+            ids[i] = Threads.threadid()
+            return started[] == length(ids)
+        end
+        ids, started = zeros(Int, n), Threads.Atomic{Int}(0)
+        tile_foreach(B, i -> (rendezvous!(started, ids, i); nothing), 1:n)
+        @test started[] == n && length(unique(ids)) == n                 # really parallel
+        rids, rstarted = zeros(Int, n), Threads.Atomic{Int}(0)
+        @test tile_mapreduce(B, i -> rendezvous!(rstarted, rids, i), &, 1:n)
+        @test length(unique(rids)) == n
     end
 end

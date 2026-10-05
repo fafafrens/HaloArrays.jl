@@ -1,6 +1,7 @@
 include("common.jl")
 
 using Polyester              # enables PolyesterBackend (HaloArraysPolyesterExt)
+using OhMyThreads            # enables OhMyThreadsBackend (HaloArraysOhMyThreadsExt)
 using Base.Threads: nthreads
 
 # Compare the ThreadBackend implementations on the operations that route through
@@ -10,13 +11,14 @@ using Base.Threads: nthreads
 #   julia --project=. -t 4 benchmark/thread_backends.jl --tile-dims=4,1
 
 const _BACKENDS = Dict{Symbol,Any}(
+    :threads     => ThreadsBackend(),
     :ohmythreads => OhMyThreadsBackend(),
     :serial      => SerialBackend(),
     :polyester   => PolyesterBackend(),
 )
 
 function backend_names(options)
-    raw = option_string(options, "backends", "ohmythreads,serial,polyester")
+    raw = option_string(options, "backends", "threads,ohmythreads,serial,polyester")
     names = Symbol.(strip.(split(raw, ",")))
     unknown = setdiff(names, collect(keys(_BACKENDS)))
     isempty(unknown) ||
