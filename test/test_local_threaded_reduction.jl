@@ -1,6 +1,7 @@
 using Test
 using HaloArrays
 using LinearAlgebra: dot, norm
+using OhMyThreads  # OhMyThreadsBackend lives in the HaloArraysOhMyThreadsExt extension
 
 @testset "Local and threaded reductions" begin
     local_u = LocalHaloArray(Int, (4,), 1; boundary_condition=:repeating)
@@ -127,7 +128,7 @@ using LinearAlgebra: dot, norm
     @testset "tile_mapreduce (cross-tile combine)" begin
         # The per-tile results are combined with `op` via the backend's
         # tile_mapreduce; it must match a plain mapreduce for any backend.
-        for backend in (OhMyThreadsBackend(), SerialBackend())
+        for backend in (ThreadsBackend(), OhMyThreadsBackend(), SerialBackend())
             @test tile_mapreduce(backend, identity, +, [1, 2, 3]) == 6
             @test tile_mapreduce(backend, identity, *, [3, 4]) == 12
             @test tile_mapreduce(backend, identity, max, [3, 1, 4]) == 4

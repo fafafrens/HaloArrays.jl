@@ -165,8 +165,8 @@ julia --project=benchmark benchmark/threaded.jl --owned-size=128,128 --tile-dims
 
 ## Thread Backends
 
-Compares the `ThreadBackend` implementations — `OhMyThreadsBackend` (default),
-`SerialBackend`, and `PolyesterBackend` — on the operations that dispatch through
+Compares the `ThreadBackend` implementations — `ThreadsBackend` (default),
+`OhMyThreadsBackend`, `SerialBackend`, and `PolyesterBackend` — on the operations that dispatch through
 the trait (`tile_foreach` / `tile_mapreduce`): `synchronize_halo!(u; threads=true)`,
 `boundary_condition!(u; threads=true)`, `fill!`, `mapreduce`, and broadcast. Each case
 reports timing and per-call allocations. **Start Julia with `-t N`** or the
@@ -178,7 +178,7 @@ julia --project=benchmark -t 4 benchmark/thread_backends.jl --owned-size=256,256
 
 Useful options:
 
-- `--backends=ohmythreads,serial,polyester` (subset/order to run)
+- `--backends=threads,ohmythreads,serial,polyester` (subset/order to run)
 - `--tile-dims=4,1` (set `prod(tile_dims)` to the thread count for best parallelism)
 - `--owned-size=256,256`, `--samples=30`, `--warmups=5`
 - `--csv=/tmp/thread_backends.csv`
@@ -256,7 +256,8 @@ JULIA_NUM_THREADS=4 julia --project=benchmark benchmark/threaded_sync_variants.j
 ### Reference results (8 threads, Apple M-series; median, indicative only)
 
 `serial` is the production `synchronize_halo!`; `threads` is
-`synchronize_halo!(u; threads=true)` (an `OhMyThreads` `tforeach`).
+`synchronize_halo!(u; threads=true)` (an `OhMyThreads` `tforeach`; measured
+before `ThreadsBackend` became the default).
 
 | Config | tiles | serial | threads | winner |
 | --- | ---: | ---: | ---: | --- |

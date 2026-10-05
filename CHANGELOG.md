@@ -4,6 +4,23 @@ All notable changes to HaloArrays.jl are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `ThreadsBackend()`: per-tile work as Base tasks (`Threads.@spawn`), no extra
+  package. The tiles are split into one chunk per thread; all chunks but the
+  first are spawned and the calling thread works on the first meanwhile.
+  Reductions combine chunk results in order and are type-stable.
+
+### Changed
+- **Breaking:** `ThreadsBackend()` is the default thread backend of
+  `ThreadedHaloArray` (was `OhMyThreadsBackend()`), and OhMyThreads is no longer
+  a dependency: `OhMyThreadsBackend` moved to the `HaloArraysOhMyThreadsExt`
+  extension and needs `using OhMyThreads` (a clear error says so otherwise). The
+  new default has about a quarter of OhMyThreads' per-call overhead and
+  allocations; OhMyThreads remains the choice for its schedulers (dynamic load
+  balancing via `tile_foreach(...; scheduler=...)`).
+
 ## [0.11.0] — 2026-10-03
 
 ### Changed

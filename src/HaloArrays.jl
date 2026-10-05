@@ -2,7 +2,6 @@ module HaloArrays
 
 using MPI
 using LinearAlgebra
-using OhMyThreads: tforeach, tmapreduce
 using StaticArrays
 import Adapt
 
@@ -48,6 +47,7 @@ export HaloArray,
     LocalHaloBackend,
     ThreadedHaloBackend,
     ThreadBackend,
+    ThreadsBackend,
     OhMyThreadsBackend,
     SerialBackend,
     PolyesterBackend,

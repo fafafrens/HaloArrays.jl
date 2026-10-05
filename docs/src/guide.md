@@ -470,7 +470,7 @@ update!(::ThreadedHaloBackend, du, u, p) = threaded_update!(du, u, p)
 
 `halo_backend` describes *where* data lives; a [`ThreadBackend`](@ref) describes
 *how* a `ThreadedHaloArray`'s per-tile work is dispatched. Choose it at
-construction with the `thread_backend` keyword (default `OhMyThreadsBackend()`):
+construction with the `thread_backend` keyword (default `ThreadsBackend()`):
 
 ```julia
 u = ThreadedHaloArray(Float64, (32, 32), 1; dims=(2, 2),
@@ -480,41 +480,41 @@ thread_backend(u)   # SerialBackend()
 
 | Backend | Notes |
 |---|---|
-| [`OhMyThreadsBackend`](@ref) | Default. Task-based, supports schedulers, composes/nests. |
+| [`ThreadsBackend`](@ref)     | Default. Base tasks (`Threads.@spawn`), no extra package; composes and nests. |
+| [`PolyesterBackend`](@ref)   | Lowest overhead (`@batch`, persistent workers). Requires `using Polyester`. Does not nest. |
+| [`OhMyThreadsBackend`](@ref) | OhMyThreads tasks; honours the `scheduler` keyword (dynamic load balancing). Requires `using OhMyThreads`. |
 | [`SerialBackend`](@ref)      | Per-tile work on the calling thread — debugging races / deterministic runs. |
-| [`PolyesterBackend`](@ref)   | Low-overhead `@batch`. Requires `using Polyester` (the `HaloArraysPolyesterExt` extension). |
 
 The backend is part of the array's concrete type (compile-time dispatch) and
 propagates through `similar`, broadcast, and reductions. Add your own by defining
 [`tile_foreach`](@ref) and [`tile_mapreduce`](@ref) for a new `<:ThreadBackend`.
 
-### Choosing between OhMyThreads and Polyester
+### Choosing a backend
 
-Both parallelize the same per-tile work; they differ in the fixed cost paid per
-operation. `OhMyThreadsBackend` spawns tasks (a few KB and tens of microseconds
-per call) but composes freely — it nests inside other threaded regions and sits
-under schedulers. `PolyesterBackend`'s `@batch` draws from a persistent worker
-pool instead, so it allocates roughly an order of magnitude less and has lower
-per-call overhead — at the cost of not nesting (never put a `@batch` region
-inside another threaded region).
+All three parallel backends do the same per-tile work; they differ in the fixed
+cost paid per threaded call, which matters when each call does little work
+(`fill!`, broadcasts, boundary fills, the halo sync, Krylov dot products):
 
-Which one wins depends on how much work each threaded call does:
+- `ThreadsBackend` splits the tiles into one chunk per thread, spawns all but
+  the first as Base tasks and works on the first itself: about 1 µs per call
+  and ~6 allocations per spawned task. It nests inside other threaded code.
+- `PolyesterBackend` hands the work to persistent worker threads through
+  preallocated per-thread buffers: a few hundred nanoseconds per call and
+  (near) zero allocations, but a `@batch` region must not run inside another
+  threaded region.
+- `OhMyThreadsBackend` costs a few microseconds and ~30 allocations per call;
+  choose it when you want OhMyThreads' schedulers, e.g. dynamic load balancing
+  for your own uneven per-tile work through `tile_foreach(...; scheduler=...)`.
 
-- **Coarse-grained work** — a full stencil sweep, an RHS evaluation, anything
-  with real arithmetic per tile — amortizes the spawn cost either way, so the
-  default `OhMyThreadsBackend` is the right choice (and the only one that nests
-  and composes with GPU kernels).
-- **Many small per-tile operations** — `fill!`, broadcasts, boundary fills, the
-  halo sync — can spend more time spawning than computing. On these,
-  `PolyesterBackend` is measurably faster and near-allocation-free. If your
-  workload is dominated by thin BLAS-1-style updates (for example a Krylov
-  solver), it is worth trying `thread_backend=PolyesterBackend()`.
+For coarse-grained work — a full stencil sweep, an RHS evaluation — the spawn
+cost is amortised and the backends converge. `synchronize_halo!(u; threads=true)`
+copies only thin edge slabs, so whether it beats the serial default
+(`threads=false`) depends on the backend overhead: measure on your problem size.
 
-`benchmark/thread_backends.jl` measures both (and `SerialBackend`) on exactly
-these operations, so you can check the trade-off on your own machine and problem
-size. As a rule, though, no threaded backend helps a purely memory-bandwidth-
-bound kernel scale past the machine's memory bandwidth — the backend choice only
-changes the *fixed* per-call overhead, not the bandwidth ceiling.
+`benchmark/thread_backends.jl` measures the backends on exactly these operations.
+As a rule, no threaded backend helps a purely memory-bandwidth-bound kernel scale
+past the machine's memory bandwidth — the backend choice only changes the *fixed*
+per-call overhead, not the bandwidth ceiling.
 
 ## Face loops
 

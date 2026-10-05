@@ -5,7 +5,7 @@ module HaloArraysPolyesterExt
 # interface and the OhMyThreads/Serial backends.
 
 import HaloArrays
-using HaloArrays: PolyesterBackend
+using HaloArrays: PolyesterBackend, _single_thread, _chunking, _reduce_chunk
 using HaloArrays.StaticArrays: StaticArray
 using Polyester: @batch
 
@@ -72,24 +72,6 @@ function _reduce(::PartialsPath, f::F, op::OP, itr, ::Type{R}) where {F,OP,R}
     return reduce(op, partials)
 end
 _reduce(::EagerPath, f::F, op::OP, itr, ::Type) where {F,OP} = _eager_reduce(f, op, itr)
-
-# One thread, or one tile: nothing to split.
-@inline _single_thread(itr) = min(length(itr), Threads.nthreads()) <= 1
-
-# Tiles per chunk and number of chunks, every chunk non-empty.
-@inline function _chunking(itr)
-    n   = length(itr)
-    len = cld(n, min(n, Threads.nthreads()))
-    return len, cld(n, len)
-end
-
-# Reduce chunk `c` (tiles `(c-1)*len+1 : min(c*len, n)`) of an indexable `itr`;
-# a view of a range is a range, so this allocates nothing for `1:tile_count`.
-@inline function _reduce_chunk(f::F, op::OP, itr, c::Int, len::Int) where {F,OP}
-    lo = first(eachindex(itr)) + (c - 1) * len
-    hi = min(lo + len - 1, last(eachindex(itr)))
-    return mapreduce(f, op, view(itr, lo:hi))
-end
 
 # ClausePath: the clause takes its operator literally, hence one method each.
 for op in (:+, :*, :min, :max, :&, :|)
