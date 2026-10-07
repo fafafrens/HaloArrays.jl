@@ -47,6 +47,9 @@ common API isn't buried among the advanced kernel and threading internals.
 - [`siteview`](@ref) — a lazy, writable array of all fields at a local storage
   index, shaped like the fields (a 2×2 matrix for `(2, 2, nx, ny, nz)` fields);
   use `copyto!` and broadcasting to read, overwrite, or accumulate
+- [`sitevector`](@ref) — the same fields as an `SVector{N}`, `N` from the
+  type of the state; for static-array kernels that read a cell and write back
+  through `siteview`
 
 ## Distributed (MPI)
 

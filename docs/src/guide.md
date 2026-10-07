@@ -125,6 +125,25 @@ copyto!(buf, m)             # a flat buffer of length 4, column-major
 vec(m) .= buf               # flat view for broadcasting with flat buffers
 ```
 
+When a kernel works with static arrays, `sitevector(u, I[, tile])` reads the
+same fields as an `SVector{N}`, with `N` known at compile time from the type of
+`u` (a `MultiHaloArray`, nested or not, or a single halo array), so the field
+count is not repeated at every read:
+
+```julia
+u = MultiHaloArray(LocalHaloArray, Float64, (32, 32), 1;
+                   fields=(:E, :Mx, :My, :D), boundary_condition=:periodic)
+I = first(interior_cells(CellRanges(u)))
+q = sitevector(u, I)        # SVector{4,Float64}, a copy of the four fields
+siteview(u, I) .= 2 .* q    # write back through the view
+```
+
+It compiles to one load per field, like `SVector{4}(siteview(u, I))` written by
+hand. An `ArrayOfHaloArray` backed by an `Array` has a runtime field count, so
+on its own or nested inside a `MultiHaloArray` it is not supported: the call
+throws an `ArgumentError`, and the explicit `SVector{N}(siteview(...))` form
+stays the one to use there.
+
 Single halo arrays are also supported, yielding a one-component vector:
 
 ```julia
