@@ -157,22 +157,22 @@ Base.mightalias(q::SiteView, r::SiteView) = _storage_mightalias(q.state, q.tile,
 # The number of leaf fields of a state whose field containers are tuples or
 # NamedTuples all the way down to the single arrays (a MultiHaloArray, nested
 # or not): every container is a type parameter, so the count is a property of
-# the type. `_n_leaf_type` walks the type tree at the Julia level; the
-# @generated wrapper runs it once per type and returns the literal, so `SVector`
-# gets a static length and inference never has to follow the recursion itself
-# (it hits the recursion limit on nested collections). A collection with an
-# Array-backed field container anywhere in the tree has a runtime field count:
-# the walk reaches that container and throws a clear ArgumentError, from the
-# generated function, so the call site fails at compile time with the reason.
-_n_leaf_type(::Type{<:AbstractSingleHaloArray}) = 1
-_n_leaf_type(::Type{<:FieldCollection{T,D,S,C}}) where {T,D,S,C<:Union{Tuple,NamedTuple}} =
+# the type. `_n_leaf_type` walks the type tree; `:foldable` lets the compiler
+# evaluate the call on the concrete type at compile time, so `SVector` gets a
+# static length. Without it, inference follows the recursion itself and gives
+# up on nested collections (recursion limit), leaving the length dynamic. A
+# collection with an Array-backed field container anywhere in the tree has a
+# runtime field count: the walk reaches that container and throws a clear
+# ArgumentError, with the explicit form to use instead.
+Base.@assume_effects :foldable _n_leaf_type(::Type{<:AbstractSingleHaloArray}) = 1
+Base.@assume_effects :foldable _n_leaf_type(::Type{<:FieldCollection{T,D,S,C}}) where
+        {T,D,S,C<:Union{Tuple,NamedTuple}} =
     sum(_n_leaf_type, fieldtypes(C); init = 0)
 _n_leaf_type(::Type{S}) where {S<:FieldCollection} = throw(ArgumentError(
     "sitevector needs the field count in the type: `$(nameof(S))` with field container " *
     "`$(nameof(fieldtype(S, :arrays)))` has a runtime number of fields (an Array-backed " *
     "ArrayOfHaloArray, possibly nested inside a MultiHaloArray). Use " *
     "`SVector{N}(siteview(state, I))` with an explicit N."))
-@generated _static_n_leaf(::Type{S}) where {S<:AbstractHaloArray} = _n_leaf_type(S)
 
 """
     sitevector(state, I::CartesianIndex[, tile]) -> SVector{N}
@@ -206,4 +206,4 @@ siteview(du, I) .-= F          # write back through the view
 """
 Base.@propagate_inbounds sitevector(state::AbstractHaloArray, I::CartesianIndex,
         tile::Union{Nothing,Integer}=nothing) =
-    SVector{_static_n_leaf(typeof(state))}(siteview(state, I, tile))
+    SVector{_n_leaf_type(typeof(state))}(siteview(state, I, tile))

@@ -58,6 +58,8 @@ end
         @test qu isa SVector{10,Float64}
         @test qu == vcat(sitevector(c, I), sitevector(w, I))
         @test qu == collect(siteview(u, I))
+        uu = MultiHaloArray((; u, c))                        # two levels deep: 10 + 4
+        @test (@inferred sitevector(uu, I)) isa SVector{14,Float64}
 
         # Single halo array: one-element vector.
         s = LocalHaloArray(Float64, (6, 5), 1; boundary_condition=:periodic)
