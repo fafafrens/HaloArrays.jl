@@ -154,17 +154,24 @@ Base.mightalias(a::AbstractArray, q::SiteView) = Base.mightalias(q, a)
 Base.mightalias(q::SiteView, r::SiteView) = _storage_mightalias(q.state, q.tile, r)
 
 # ─── Static site vectors ─────────────────────────────────────────────────────
-# The number of leaf fields of a collection whose field container is a tuple or
-# NamedTuple (MultiHaloArray, nested or not): the container is a type parameter,
-# so the count is a property of the type. `_n_leaf_type` walks the type tree at
-# the Julia level; the @generated wrapper runs it once per type and returns the
-# literal, so `SVector` gets a static length and inference never has to follow
-# the recursion itself (it hits the recursion limit on nested collections). An
-# `ArrayOfHaloArray` backed by an `Array` has a runtime field count and is
-# deliberately not covered.
+# The number of leaf fields of a state whose field containers are tuples or
+# NamedTuples all the way down to the single arrays (a MultiHaloArray, nested
+# or not): every container is a type parameter, so the count is a property of
+# the type. `_n_leaf_type` walks the type tree at the Julia level; the
+# @generated wrapper runs it once per type and returns the literal, so `SVector`
+# gets a static length and inference never has to follow the recursion itself
+# (it hits the recursion limit on nested collections). A collection with an
+# Array-backed field container anywhere in the tree has a runtime field count:
+# the walk reaches that container and throws a clear ArgumentError, from the
+# generated function, so the call site fails at compile time with the reason.
 _n_leaf_type(::Type{<:AbstractSingleHaloArray}) = 1
 _n_leaf_type(::Type{<:FieldCollection{T,D,S,C}}) where {T,D,S,C<:Union{Tuple,NamedTuple}} =
     sum(_n_leaf_type, fieldtypes(C); init = 0)
+_n_leaf_type(::Type{S}) where {S<:FieldCollection} = throw(ArgumentError(
+    "sitevector needs the field count in the type: `$(nameof(S))` with field container " *
+    "`$(nameof(fieldtype(S, :arrays)))` has a runtime number of fields (an Array-backed " *
+    "ArrayOfHaloArray, possibly nested inside a MultiHaloArray). Use " *
+    "`SVector{N}(siteview(state, I))` with an explicit N."))
 @generated _static_n_leaf(::Type{S}) where {S<:AbstractHaloArray} = _n_leaf_type(S)
 
 """
@@ -174,14 +181,17 @@ The `N` leaf fields of `state` at local padded-storage index `I` as a **static
 vector**, in the order of [`siteview`](@ref). `N` is read off the type of
 `state`, so it is a compile-time constant: a `MultiHaloArray` with fields
 `(:E, :Mx, :My, :D)` gives an `SVector{4}`, a nested `MultiHaloArray((; c, w))`
-with 4 + 6 fields an `SVector{10}`, and a single halo array an `SVector{1}`.
-The result is a copy of the values, not a view; write back through
-`siteview(state, I) .= v`.
+of two such collections with 4 + 6 fields an `SVector{10}`, and a single halo
+array an `SVector{1}`. The result is a copy of the values, not a view; write
+back through `siteview(state, I) .= v`.
 
-Defined for single arrays and for collections whose field container is a tuple
-or `NamedTuple` (every `MultiHaloArray`, nested or not). An `ArrayOfHaloArray`
-backed by an `Array` has a runtime field count and has no method; use
-`SVector{N}(siteview(state, I))` with an explicit `N` there.
+Supported: single halo arrays, and collections whose field containers are
+tuples or `NamedTuple`s down to the single arrays, i.e. a `MultiHaloArray`
+whose fields are single arrays or again such collections. An `ArrayOfHaloArray`
+backed by an `Array` has a runtime field count, so it is not supported, whether
+on its own or nested inside a `MultiHaloArray`; the call throws an
+`ArgumentError` saying so, and `SVector{N}(siteview(state, I))` with an
+explicit `N` is the form to use there.
 
 Compiles to one load per field, no allocation, the same code as writing
 `SVector{N}(siteview(state, I))` by hand. Index and tile conventions are those

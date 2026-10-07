@@ -76,10 +76,15 @@ end
         @test (@inferred sitevector(t, It, 1)) === SVector(1.0, 2.0, 3.0)
         @test_throws ArgumentError sitevector(t, It)
 
-        # Array-backed field containers have a runtime field count: no method.
+        # Array-backed field containers have a runtime field count: a clear error,
+        # on their own and nested inside a MultiHaloArray (which is a valid state).
         arr = ArrayOfHaloArray(LocalHaloArray, Float64, (4,), (6, 5), 1; boundary_condition=:periodic)
-        @test_throws MethodError sitevector(arr, I)
-        # ...unless the container is a tuple, which the nested case covers.
+        @test_throws ArgumentError sitevector(arr, I)
+        nested_arr = MultiHaloArray((; q = ArrayOfHaloArray([copy(c.E), copy(c.Mx)]), p = arr))
+        @test siteview(nested_arr, I) isa AbstractArray          # siteview itself is fine
+        @test_throws ArgumentError sitevector(nested_arr, I)
+        err = try sitevector(nested_arr, I); nothing catch e; e end
+        @test occursin("runtime number of fields", err.msg)
     end
 
     @testset "allocation" begin

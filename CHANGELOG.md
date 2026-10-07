@@ -11,7 +11,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   with `N` taken from the type of `state` (a `MultiHaloArray`, nested or not,
   or a single halo array). It compiles to the same code as
   `SVector{N}(siteview(state, I))` but removes the hand-written `N`. An
-  `ArrayOfHaloArray` backed by an `Array` has a runtime field count and keeps
+  `ArrayOfHaloArray` backed by an `Array` has a runtime field count, so on its
+  own or nested in a `MultiHaloArray` it throws an `ArgumentError` and keeps
   the explicit form.
 
 ## [0.12.0] — 2026-10-05

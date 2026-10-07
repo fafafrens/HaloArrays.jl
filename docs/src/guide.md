@@ -139,8 +139,10 @@ siteview(u, I) .= 2 .* q    # write back through the view
 ```
 
 It compiles to one load per field, like `SVector{4}(siteview(u, I))` written by
-hand. An `ArrayOfHaloArray` backed by an `Array` has a runtime field count and
-keeps the explicit `SVector{N}(siteview(...))` form.
+hand. An `ArrayOfHaloArray` backed by an `Array` has a runtime field count, so
+on its own or nested inside a `MultiHaloArray` it is not supported: the call
+throws an `ArgumentError`, and the explicit `SVector{N}(siteview(...))` form
+stays the one to use there.
 
 Single halo arrays are also supported, yielding a one-component vector:
 
