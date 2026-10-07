@@ -152,3 +152,48 @@ _storage_mightalias(c::AbstractHaloCollection, tile, a) =
 Base.mightalias(q::SiteView, a::AbstractArray) = _storage_mightalias(q.state, q.tile, a)
 Base.mightalias(a::AbstractArray, q::SiteView) = Base.mightalias(q, a)
 Base.mightalias(q::SiteView, r::SiteView) = _storage_mightalias(q.state, q.tile, r)
+
+# ─── Static site vectors ─────────────────────────────────────────────────────
+# The number of leaf fields of a collection whose field container is a tuple or
+# NamedTuple (MultiHaloArray, nested or not): the container is a type parameter,
+# so the count is a property of the type. `_n_leaf_type` walks the type tree at
+# the Julia level; the @generated wrapper runs it once per type and returns the
+# literal, so `SVector` gets a static length and inference never has to follow
+# the recursion itself (it hits the recursion limit on nested collections). An
+# `ArrayOfHaloArray` backed by an `Array` has a runtime field count and is
+# deliberately not covered.
+_n_leaf_type(::Type{<:AbstractSingleHaloArray}) = 1
+_n_leaf_type(::Type{<:FieldCollection{T,D,S,C}}) where {T,D,S,C<:Union{Tuple,NamedTuple}} =
+    sum(_n_leaf_type, fieldtypes(C); init = 0)
+@generated _static_n_leaf(::Type{S}) where {S<:AbstractHaloArray} = _n_leaf_type(S)
+
+"""
+    sitevector(state, I::CartesianIndex[, tile]) -> SVector{N}
+
+The `N` leaf fields of `state` at local padded-storage index `I` as a **static
+vector**, in the order of [`siteview`](@ref). `N` is read off the type of
+`state`, so it is a compile-time constant: a `MultiHaloArray` with fields
+`(:E, :Mx, :My, :D)` gives an `SVector{4}`, a nested `MultiHaloArray((; c, w))`
+with 4 + 6 fields an `SVector{10}`, and a single halo array an `SVector{1}`.
+The result is a copy of the values, not a view; write back through
+`siteview(state, I) .= v`.
+
+Defined for single arrays and for collections whose field container is a tuple
+or `NamedTuple` (every `MultiHaloArray`, nested or not). An `ArrayOfHaloArray`
+backed by an `Array` has a runtime field count and has no method; use
+`SVector{N}(siteview(state, I))` with an explicit `N` there.
+
+Compiles to one load per field, no allocation, the same code as writing
+`SVector{N}(siteview(state, I))` by hand. Index and tile conventions are those
+of [`siteview`](@ref); `@inbounds` at the call site elides the storage bounds
+checks.
+
+```julia
+q = sitevector(u, I)           # SVector{4,Float64} for a four-field u
+F = flux(q)                    # static-array arithmetic, no allocation
+siteview(du, I) .-= F          # write back through the view
+```
+"""
+Base.@propagate_inbounds sitevector(state::AbstractHaloArray, I::CartesianIndex,
+        tile::Union{Nothing,Integer}=nothing) =
+    SVector{_static_n_leaf(typeof(state))}(siteview(state, I, tile))

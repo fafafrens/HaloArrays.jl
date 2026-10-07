@@ -4,6 +4,16 @@ All notable changes to HaloArrays.jl are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `sitevector(state, I[, tile])`: the leaf fields at a site as an `SVector{N}`,
+  with `N` taken from the type of `state` (a `MultiHaloArray`, nested or not,
+  or a single halo array). It compiles to the same code as
+  `SVector{N}(siteview(state, I))` but removes the hand-written `N`. An
+  `ArrayOfHaloArray` backed by an `Array` has a runtime field count and keeps
+  the explicit form.
+
 ## [0.12.0] — 2026-10-05
 
 ### Added
