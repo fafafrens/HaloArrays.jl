@@ -2,26 +2,29 @@ using Test, HaloArrays, MPI
 using StaticArrays: SVector
 MPI.Initialized() || MPI.Init()
 
-# Minimum time over `reps` evaluations of f(args...), in ns. Enough repetitions
-# to be stable to a few percent; the comparisons below use generous factors so
-# a loaded CI machine does not fail them.
-function min_ns(f, args...; reps = 200, inner = 1000)
-    best = Inf
-    for _ in 1:reps
-        t = time_ns()
-        for _ in 1:inner
-            f(args...)
-        end
-        best = min(best, (time_ns() - t) / inner)
-    end
-    return best
-end
+# Measurement helpers. Every measured function returns `nothing`: on Julia 1.10
+# a static vector returned through the `@allocated` / timing boundary is boxed
+# (48 bytes for an SVector{4,Float64}), which is not an allocation of the read.
+# Each helper sweeps the interior cells, so the read is not loop-invariant and
+# cannot be hoisted, and accumulates into `acc`, allocated once outside.
+const acc = Ref(0.0)
 
 # Hand-written reference: the form `sitevector` replaces.
-read_hand(c, I) = @inbounds SVector{4}(siteview(c, I))
-read_static(c, I) = @inbounds sitevector(c, I)
-read_static_tile(c, I, tile) = @inbounds sitevector(c, I, tile)
-read_nested(u, I) = @inbounds sitevector(u, I)
+function read_hand!(acc, c, tile = nothing)
+    s = 0.0
+    @inbounds for I in interior_cells(CellRanges(c)); s += sum(SVector{4}(siteview(c, I, tile))); end
+    acc[] = s; nothing
+end
+function read_static!(acc, c, tile = nothing)
+    s = 0.0
+    @inbounds for I in interior_cells(CellRanges(c)); s += sum(sitevector(c, I, tile)); end
+    acc[] = s; nothing
+end
+function read_vector!(acc, c, tile = nothing)   # materialising a Vector, for the timing contrast
+    s = 0.0
+    @inbounds for I in interior_cells(CellRanges(c)); s += sum(collect(siteview(c, I, tile))); end
+    acc[] = s; nothing
+end
 # A kernel in the intended style: read a static vector, write back through the view.
 function kernel!(du, u, I)
     @inbounds begin
@@ -29,6 +32,22 @@ function kernel!(du, u, I)
         siteview(du, I) .-= 2 .* q
     end
     return nothing
+end
+
+# Minimum time of f(args...) over `reps` evaluations, in ns per site read (the
+# helpers read every interior cell). Stable to a few percent; the comparisons
+# below use generous factors so a loaded CI machine does not fail them.
+function min_ns_per_read(f, c, args...; reps = 200, inner = 20)
+    n = length(interior_cells(CellRanges(c)))
+    best = Inf
+    for _ in 1:reps
+        t = time_ns()
+        for _ in 1:inner
+            f(acc, c, args...)
+        end
+        best = min(best, (time_ns() - t) / (inner * n))
+    end
+    return best
 end
 
 @testset "sitevector" begin
@@ -90,27 +109,26 @@ end
     end
 
     @testset "allocation" begin
-        read_static(c, I); read_hand(c, I)
-        @test @allocated(read_static(c, I)) == 0
-        u = MultiHaloArray((; c, w)); read_nested(u, I)
-        @test @allocated(read_nested(u, I)) == 0
+        u = MultiHaloArray((; c, w))
         t = MultiHaloArray(ThreadedHaloArray, Float64, (6, 5), 1; dims=(1, 1),
                            fields=(:a, :b, :c), boundary_condition=:periodic)
-        It = first(interior_cells(CellRanges(t))); read_static_tile(t, It, 1)
-        @test @allocated(read_static_tile(t, It, 1)) == 0
-        du = similar(c); fill!(du, 0.0); kernel!(du, c, I)
+        du = similar(c); fill!(du, 0.0)
+        read_static!(acc, c); read_static!(acc, u); read_static!(acc, t, 1); kernel!(du, c, I)
+        @test @allocated(read_static!(acc, c)) == 0
+        @test @allocated(read_static!(acc, u)) == 0                    # nested 4 + 6
+        @test @allocated(read_static!(acc, t, 1)) == 0                 # threaded, with tile
         @test @allocated(kernel!(du, c, I)) == 0
         @test siteview(du, I) == -4 .* siteview(c, I)
     end
 
     @testset "timing: no slower than the hand-written SVector{N}(siteview)" begin
         # Both should compile to N loads; allow a factor 3 for measurement noise.
-        hand   = min_ns(read_hand, c, I)
-        static = min_ns(read_static, c, I)
+        read_hand!(acc, c); read_static!(acc, c); read_vector!(acc, c)
+        hand   = min_ns_per_read(read_hand!, c)
+        static = min_ns_per_read(read_static!, c)
         @test static <= 3 * hand + 2.0           # +2 ns absolute slack at the ns scale
         # And well under the cost of materialising a Vector from the view.
-        read_vector(c, I) = @inbounds collect(siteview(c, I))
-        @test static < min_ns(read_vector, c, I)
+        @test static < min_ns_per_read(read_vector!, c)
         @info "sitevector timing" hand_ns = hand sitevector_ns = static
     end
 end
