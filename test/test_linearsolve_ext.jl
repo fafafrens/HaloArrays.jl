@@ -43,6 +43,18 @@ using LinearSolve.SciMLOperators: FunctionOperator
         @test maximum(abs, sol.u[end] - ref.u[end]) < 1e-5
     end
     @test solves(HaloKrylovKit()).retcode == ReturnCode.Success           # default :gmres
+    # Tiled state: KrylovKit's VectorInterface fallbacks `map`/`eachindex` a
+    # ThreadedHaloArray (no tile-less interior → MethodError); the extension's
+    # VectorInterface methods route through the interior broadcasts instead.
+    ntiles = Threads.nthreads()        # per-tile size × tile count = the same 64-cell grid
+    @test nx % ntiles == 0
+    t0 = ThreadedHaloArray(Float64, (nx ÷ ntiles,), 1; dims = (ntiles,), boundary_condition = :periodic)
+    fill_from_global_indices!(I -> ic((I[1] - 0.5) / nx), t0)
+    tsol = solve(ODEProblem(rhs!, t0, (0.0, 0.2), inv((1.0 / nx)^2)), FBDF(linsolve = HaloKrylovKit(:gmres), concrete_jac = false);
+                 reltol = 1e-7, abstol = 1e-7, save_everystep = false)
+    @test tsol.retcode == ReturnCode.Success
+    @test tsol.u[end] isa ThreadedHaloArray
+    @test maximum(abs, Array(tsol.u[end]) .- Array(ref.u[end])) < 1e-5
     # Forwarded kwargs reach the KrylovKit algorithm.
     @test solves(HaloKrylovKit(:gmres; krylovdim = 10)).retcode == ReturnCode.Success
     @test_throws ArgumentError HaloKrylovKit(:minres)

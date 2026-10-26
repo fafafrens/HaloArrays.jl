@@ -14,11 +14,39 @@ module HaloArraysKrylovKitExt
 using HaloArrays
 using LinearSolve
 using KrylovKit
-using LinearAlgebra: mul!, norm, UniformScaling
+using KrylovKit: VectorInterface
+using LinearAlgebra: mul!, norm, dot, rmul!, axpby!, UniformScaling
 
 const SciMLBase = LinearSolve.SciMLBase
 const _IdentityOp = LinearSolve.SciMLOperators.IdentityOperator
 
+# ---- VectorInterface on halo arrays ------------------------------------------
+# VectorInterface's generic `AbstractArray` fallbacks go through `map`/`eachindex`
+# (`scale`, `add`, `zerovector!`) and a two-argument `mapreduce` (`inner`). On a
+# tiled ThreadedHaloArray `eachindex` has no tile-less interior, so `map` throws;
+# everywhere else those paths scalar-index the interior and allocate O(N) per
+# inner product. Route them to the halo array's own vector-space kernels instead:
+# interior-only broadcasts, the fused BLAS-1 updates, and the global `dot`/`norm`.
+const VI = VectorInterface
+VI.zerovector(x::AbstractHaloArray, ::Type{S}) where {S<:Number} = fill!(similar(x, S), zero(S))
+VI.zerovector!(x::AbstractHaloArray) = fill!(x, zero(eltype(x)))
+VI.scale(x::AbstractHaloArray, α::Number) = x .* α
+VI.scale!(x::AbstractHaloArray, α::Number) = α === VI.One() ? x : rmul!(x, α)
+VI.scale!(y::AbstractHaloArray, x::AbstractHaloArray, α::Number) = (y .= x .* α; y)
+VI.scale!!(x::AbstractHaloArray, α::Number) =
+    VI.promote_scale(x, α) <: VI.scalartype(x) ? VI.scale!(x, α) : VI.scale(x, α)
+VI.scale!!(y::AbstractHaloArray, x::AbstractHaloArray, α::Number) =
+    VI.promote_scale(y, x, α) <: VI.scalartype(y) ? VI.scale!(y, x, α) : VI.scale(x, α)
+VI.add(y::AbstractHaloArray, x::AbstractHaloArray, α::Number, β::Number) = α .* x .+ β .* y
+function VI.add!(y::AbstractHaloArray, x::AbstractHaloArray, α::Number, β::Number)
+    T = VI.scalartype(y)
+    return axpby!(convert(T, α), x, convert(T, β), y)
+end
+VI.add!!(y::AbstractHaloArray, x::AbstractHaloArray, α::Number, β::Number) =
+    VI.promote_add(y, x, α, β) <: VI.scalartype(y) ? VI.add!(y, x, α, β) : VI.add(y, x, α, β)
+VI.inner(x::AbstractHaloArray, y::AbstractHaloArray) = dot(x, y)
+
+# ---- the LinearSolve algorithm -------------------------------------------------
 const _KRYLOVKIT_METHODS = (:gmres, :cg, :bicgstab)
 
 struct HaloKrylovKitAlg{K<:NamedTuple} <: LinearSolve.AbstractKrylovSubspaceMethod
