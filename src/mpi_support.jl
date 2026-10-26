@@ -307,6 +307,12 @@ Base.:+(a::_MPICell, b::_MPICell) = _MPICell(a.x + b.x)
 
 @inline _allreduce(x, op, comm; iscommutative) =
     MPI.Allreduce(x, MPI.Op(op, typeof(x); iscommutative), comm)
+# A contiguous vector of partial results (e.g. the `j` coefficients of `dots!`):
+# reduced in place, elementwise, with MPI's built-in `+` — no custom op, no
+# allocation. `StridedVector` (not `AbstractVector`) so a static vector keeps
+# taking the cell path below.
+@inline _allreduce(x::StridedVector, ::typeof(+), comm; iscommutative) =
+    MPI.Allreduce!(x, +, comm)
 function _allreduce(x::StaticArray, op, comm; iscommutative)
     _normalize_reduction_op(op) === (+) || throw(ArgumentError(
         "only `+` reductions of static-array cells are supported over MPI (got `$op`)"))
@@ -365,6 +371,14 @@ end
 # reduction and the single collective matter.
 LinearAlgebra.dot(x::HaloArray, y::HaloArray) =
     MPI.Allreduce(_local_dot(x, y), +, communicator(x))
+# `dots!`: the j local products, then ONE Allreduce of the j numbers.
+function _dots!(h, V, w, j, comm::MPI.Comm)
+    for i in 1:j
+        h[i] = _local_dot(V[i], w)
+    end
+    _allreduce(view(h, 1:j), +, comm; iscommutative = true)
+    return h
+end
 LinearAlgebra.norm(u::HaloArray) =
     sqrt(MPI.Allreduce(_local_sum(_elt_abs2, u), +, communicator(u)))
 Base.sum(u::HaloArray) =

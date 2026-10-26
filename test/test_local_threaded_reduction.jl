@@ -267,6 +267,43 @@ using OhMyThreads  # OhMyThreadsBackend lives in the HaloArraysOhMyThreadsExt ex
         end
     end
 
+    @testset "dots!: j inner products, one reduction" begin
+        # Must equal j separate dot calls on every backend, and leave h[j+1:end] alone.
+        nthreads = max(1, Threads.nthreads())
+        for (T, dims) in ((Float64, (12, 7)), (ComplexF64, (9, 8)))
+            for u in Any[LocalHaloArray(T, dims, 1; boundary_condition=:periodic),
+                         ThreadedHaloArray(T, (dims[1], dims[2] ÷ 1), 1; dims=(1, 1), boundary_condition=:periodic),
+                         ThreadedHaloArray(T, (dims[1], dims[2]), 1; dims=(nthreads, 1), boundary_condition=:periodic)]
+                j = 5
+                V = [similar(u) for _ in 1:j+1]
+                for v in V; fill_from_global_indices!(I -> rand(T), v); end
+                w = similar(u); fill_from_global_indices!(I -> rand(T), w)
+                h = fill(T(NaN), j + 2)
+                @test dots!(h, V, w, j) === h
+                @test h[1:j] ≈ [dot(V[i], w) for i in 1:j]
+                @test all(isnan, h[j+1:end])
+                # generic fallback (a collection) agrees too
+                m = MultiHaloArray(LocalHaloArray, T, dims, 1; fields=(:a, :b), boundary_condition=:periodic)
+                Vm = [copy(m) for _ in 1:j]
+                for v in Vm; for f in eachfield(v); fill_from_global_indices!(I -> rand(T), f); end; end
+                wm = copy(m); for f in eachfield(wm); fill_from_global_indices!(I -> rand(T), f); end
+                hm = zeros(T, j)
+                @test dots!(hm, Vm, wm, j) ≈ [dot(Vm[i], wm) for i in 1:j]
+                @test HaloArrays.communicator(m) === nothing
+                # field-count mismatch is rejected, as for dot (the tuple broadcast
+                # of the per-field products; a 1-field collection broadcasts, as in dot)
+                m3 = MultiHaloArray(LocalHaloArray, T, dims, 1; fields=(:a, :b, :c), boundary_condition=:periodic)
+                @test_throws DimensionMismatch dots!(hm, Vm, m3, j)
+            end
+        end
+        # allocation-free on the serial backends (one call vs many)
+        u = LocalHaloArray(Float64, (64,), 1; boundary_condition=:periodic)
+        V = [fill!(similar(u), 1.0) for _ in 1:4]; w = fill!(similar(u), 2.0); h = zeros(4)
+        dots_n(n) = (for _ in 1:n; dots!(h, V, w, 4); end; nothing)
+        dots_n(1)
+        @test @allocated(dots_n(100)) ≤ @allocated(dots_n(1)) + 16
+    end
+
     @testset "sum widens narrow ints like Base (no overflow)" begin
         # The fast accumulator reduces in the add_sum-promoted type, so a sum of
         # Int8/Bool cells widens to Int (matching sum(::Array)) instead of

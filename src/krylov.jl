@@ -10,8 +10,8 @@ global reductions and everything else is local.
     cg!(x, A, b, ws::CGWorkspace;             Pl = nothing,               abstol, reltol, maxiter)
     minres!(x, A, b, ws::MINRESWorkspace;                                 abstol, reltol, maxiter)
     bicgstab!(x, A, b, ws::BiCGStabWorkspace; Pl = nothing, Pr = nothing, abstol, reltol, maxiter)
-    gmres!(x, A, b, ws::GMRESWorkspace;       Pl = nothing, Pr = nothing, abstol, reltol, maxiter)
-    fgmres!(x, A, b, ws::FGMRESWorkspace;     Pl = nothing, Pr = nothing, abstol, reltol, maxiter)
+    gmres!(x, A, b, ws::GMRESWorkspace;       Pl = nothing, Pr = nothing, orth = :auto, abstol, reltol, maxiter)
+    fgmres!(x, A, b, ws::FGMRESWorkspace;     Pl = nothing, Pr = nothing, orth = :auto, abstol, reltol, maxiter)
 
 `x` holds the initial guess and is overwritten with the solution. `A` is
 anything with `mul!(y, A, v)`. A preconditioner is anything with `ldiv!(z, M, v)`
@@ -27,6 +27,7 @@ With LinearSolve loaded the same kernels are the `HaloCG()`, `HaloMINRES()`,
 module Krylov
 
 using LinearAlgebra: dot, norm, mul!, ldiv!
+using ..HaloArrays: AbstractSingleHaloArray, AbstractHaloCollection, communicator, dots!
 
 export Result,
        CGWorkspace, MINRESWorkspace, BiCGStabWorkspace, GMRESWorkspace, FGMRESWorkspace,
@@ -264,13 +265,14 @@ end
 [`gmres!`](@ref). Memory grows linearly with `restart`.
 """
 struct GMRESWorkspace{TV,TH,TG,TC,TW}
-    V::TV; H::TH; g::TG; cs::TC; sn::TG; w::TW; Ax::TW
+    V::TV; H::TH; g::TG; cs::TC; sn::TG; h1::TG; h2::TG; w::TW; Ax::TW
     function GMRESWorkspace(b; restart)
         restart ≥ 1 || throw(ArgumentError("GMRESWorkspace: restart must be ≥ 1, got $restart"))
         K = float(eltype(b)); T = real(K); m = restart     # Hessenberg/g/sn in the element field
         V = [similar(b) for _ in 1:m+1]; H = zeros(K, m + 1, m); g = zeros(K, m + 1)
         cs = zeros(T, m); w = similar(b)
-        new{typeof(V),typeof(H),typeof(g),typeof(cs),typeof(w)}(V, H, g, cs, zeros(K, m), w, similar(b))
+        new{typeof(V),typeof(H),typeof(g),typeof(cs),typeof(w)}(
+            V, H, g, cs, zeros(K, m), zeros(K, m), zeros(K, m), w, similar(b))
     end
 end
 
@@ -281,13 +283,14 @@ As [`GMRESWorkspace`](@ref) plus the `restart` preconditioned directions `Z`,
 for [`fgmres!`](@ref): twice the vectors of GMRES.
 """
 struct FGMRESWorkspace{TV,TH,TG,TC,TW}
-    V::TV; Z::TV; H::TH; g::TG; cs::TC; sn::TG; w::TW; Ax::TW
+    V::TV; Z::TV; H::TH; g::TG; cs::TC; sn::TG; h1::TG; h2::TG; w::TW; Ax::TW
     function FGMRESWorkspace(b; restart)
         restart ≥ 1 || throw(ArgumentError("FGMRESWorkspace: restart must be ≥ 1, got $restart"))
         K = float(eltype(b)); T = real(K); m = restart
         V = [similar(b) for _ in 1:m+1]; Z = [similar(b) for _ in 1:m]
         H = zeros(K, m + 1, m); g = zeros(K, m + 1); cs = zeros(T, m); w = similar(b)
-        new{typeof(V),typeof(H),typeof(g),typeof(cs),typeof(w)}(V, Z, H, g, cs, zeros(K, m), w, similar(b))
+        new{typeof(V),typeof(H),typeof(g),typeof(cs),typeof(w)}(
+            V, Z, H, g, cs, zeros(K, m), zeros(K, m), zeros(K, m), w, similar(b))
     end
 end
 
@@ -300,17 +303,57 @@ function givens(a, b)
     return (abs(a) / ρ, (a / abs(a)) * conj(b) / ρ)
 end
 
-# Arnoldi step j. On entry `w` is the new operator product; orthogonalise it
-# against V[1:j] (modified Gram–Schmidt), form V[j+1], and extend the Givens QR
-# of H so that |g[j+1]| is the residual norm of the current least-squares
-# solution. Returns (residual, happy_breakdown).
-function arnoldi_step!(ws, w, j)
-    (; V, H, g, cs, sn) = ws
-    T = real(eltype(g))
-    for i in 1:j                                      # modified Gram–Schmidt
+# ---- orthogonalisation of the new Arnoldi vector against V[1:j] ----
+# `orth = :auto` picks `:cgs2` where `dots!` turns the j inner products of a pass
+# into ONE collective — a distributed halo array or collection — and `:mgs`
+# otherwise, where CGS2's second pass is pure cost.
+const ORTH = (:auto, :mgs, :cgs2)
+function resolve_orth(orth, b)
+    orth in ORTH || throw(ArgumentError("orth must be one of $ORTH, got $(repr(orth))"))
+    orth === :auto || return orth
+    return fused_dots(b) ? :cgs2 : :mgs
+end
+fused_dots(b) = false
+fused_dots(b::Union{AbstractSingleHaloArray,AbstractHaloCollection}) = communicator(b) !== nothing
+
+# Modified Gram–Schmidt: j sequential inner products, each against the
+# already-updated w — robust, but j global reductions per step on MPI.
+function orthogonalize!(::Val{:mgs}, ws, w, j)
+    (; V, H) = ws
+    for i in 1:j
         H[i, j] = dot(V[i], w)                        # conjugate inner product
         w .-= H[i, j] .* V[i]
     end
+    return w
+end
+# Classical Gram–Schmidt, twice ("twice is enough": Giraud, Langou, Rozložník
+# 2005). The j inner products of a pass are independent, so `dots!` does them
+# with ONE global reduction; the second pass restores orthogonality to working
+# precision. Two reductions per step instead of j, at twice the local work.
+function orthogonalize!(::Val{:cgs2}, ws, w, j)
+    (; V, H, h1, h2) = ws
+    dots!(h1, V, w, j)                                # h1 = Vᵀ w
+    for i in 1:j
+        w .-= h1[i] .* V[i]
+    end
+    dots!(h2, V, w, j)                                # h2 = Vᵀ w  (what the first pass left)
+    for i in 1:j
+        w .-= h2[i] .* V[i]
+    end
+    for i in 1:j
+        H[i, j] = h1[i] + h2[i]
+    end
+    return w
+end
+
+# Arnoldi step j. On entry `w` is the new operator product; orthogonalise it
+# against V[1:j], form V[j+1], and extend the Givens QR of H so that |g[j+1]|
+# is the residual norm of the current least-squares solution.
+# Returns (residual, happy_breakdown).
+function arnoldi_step!(ws, w, j, orth::Val)
+    (; V, H, g, cs, sn) = ws
+    T = real(eltype(g))
+    orthogonalize!(orth, ws, w, j)                    # H[1:j, j], w ⟂ V[1:j]
     hnext = norm(w)
     H[j+1, j] = hnext
     happy = hnext ≤ eps(T)                            # the next basis vector can't be formed
@@ -349,10 +392,16 @@ matrix, a restart every `restart` steps with the true residual recomputed, and
 residual when `Pl` is `nothing`. The correction `Σ yᵢ vᵢ` is mapped back through
 `Pr⁻¹` once per cycle, which assumes `Pr` is one fixed linear operator; for a
 preconditioner that changes between steps use [`fgmres!`](@ref).
+
+`orth` selects the Gram–Schmidt variant: `:mgs` (modified, `j` sequential inner
+products at step `j`), `:cgs2` (classical, twice: two [`dots!`](@ref) calls, so
+two global reductions per step instead of `j`, at twice the local work), or
+`:auto` (`:cgs2` on a distributed `HaloArray`, `:mgs` otherwise).
 """
-function gmres!(x, A, b, ws::GMRESWorkspace; Pl = nothing, Pr = nothing, abstol, reltol, maxiter)
+function gmres!(x, A, b, ws::GMRESWorkspace; Pl = nothing, Pr = nothing, orth = :auto, abstol, reltol, maxiter)
     (; V, H, g, w, Ax) = ws
     m   = length(ws.cs)
+    o   = Val(resolve_orth(orth, b))
     thr = threshold(norm(precond(w, Pl, b)), abstol, reltol)       # ‖Pl⁻¹ b‖
     res = norm(b); total = 0
 
@@ -368,7 +417,7 @@ function gmres!(x, A, b, ws::GMRESWorkspace; Pl = nothing, Pr = nothing, abstol,
             k = j; total += 1
             zⱼ = precond(Ax, Pr, V[j])                # zⱼ = Pr⁻¹ vⱼ   (Ax is scratch here)
             mul!(w, A, zⱼ); precond!(Pl, w)           # w  = Pl⁻¹ A zⱼ
-            res, happy = arnoldi_step!(ws, w, j)
+            res, happy = arnoldi_step!(ws, w, j, o)
             (converged(res, thr) || happy) && break
         end
         hessenberg_solve!(H, g, k)                    # y = argmin ‖β e₁ - H̃ y‖
@@ -390,11 +439,13 @@ direction `zⱼ = Prⱼ⁻¹ vⱼ` is kept and the cycle update is `x += Σ yᵢ
 may differ at every step — a nested iterative solve with a few iterations,
 smoother sweeps, a multigrid cycle. `Pl` is applied as in GMRES and must be one
 fixed linear operator, since it defines the norm being minimised; the monitored
-residual is `Pl⁻¹(b - Ax)`, the true residual when `Pl` is `nothing`.
+residual is `Pl⁻¹(b - Ax)`, the true residual when `Pl` is `nothing`. `orth` as
+in [`gmres!`](@ref).
 """
-function fgmres!(x, A, b, ws::FGMRESWorkspace; Pl = nothing, Pr = nothing, abstol, reltol, maxiter)
+function fgmres!(x, A, b, ws::FGMRESWorkspace; Pl = nothing, Pr = nothing, orth = :auto, abstol, reltol, maxiter)
     (; V, Z, H, g, w, Ax) = ws
     m   = length(ws.cs)
+    o   = Val(resolve_orth(orth, b))
     thr = threshold(norm(precond(w, Pl, b)), abstol, reltol)       # ‖Pl⁻¹ b‖
     res = norm(b); total = 0
 
@@ -410,7 +461,7 @@ function fgmres!(x, A, b, ws::FGMRESWorkspace; Pl = nothing, Pr = nothing, absto
             k = j; total += 1
             precond_into!(Z[j], Pr, V[j])             # zⱼ = Prⱼ⁻¹ vⱼ, kept
             mul!(w, A, Z[j]); precond!(Pl, w)         # w  = Pl⁻¹ A zⱼ
-            res, happy = arnoldi_step!(ws, w, j)
+            res, happy = arnoldi_step!(ws, w, j, o)
             (converged(res, thr) || happy) && break
         end
         hessenberg_solve!(H, g, k)

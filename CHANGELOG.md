@@ -35,6 +35,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `Pl`. With `Pr` only the monitored residual is the true residual. `HaloCG`
   still takes `Pl` only and `HaloMINRES` neither; both throw on an unsupported
   preconditioner instead of ignoring it.
+- `gmres!`/`fgmres!` and `HaloGMRES`/`HaloFGMRES` take `orth = :auto | :mgs |
+  :cgs2`. `:cgs2` is classical Gram–Schmidt applied twice: the `j` inner products
+  of an Arnoldi step go through `dots!`, so a step costs three global reductions
+  instead of `j + 1`, at twice the local orthogonalisation work. `:auto` is
+  `:cgs2` on a distributed `HaloArray` and `:mgs` elsewhere.
+- `dots!(h, V, w, j)`: the inner products of `w` with `V[1:j]` in one global
+  reduction (one `Allreduce` of `j` numbers on a distributed `HaloArray`; the
+  local/threaded backends reduce locally as `dot` does). The primitive for
+  classical Gram–Schmidt in GMRES.
 - `HaloArrays.Krylov`: the matrix-free solvers behind `HaloCG`/`HaloMINRES`/
   `HaloBiCGStab`/`HaloGMRES`/`HaloFGMRES` now live in the package as
   `cg!`/`minres!`/`bicgstab!`/`gmres!`/`fgmres!` with explicit workspaces

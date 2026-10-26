@@ -115,6 +115,10 @@ function _local_dot(x, y)
     _check_same_geometry(x, y, "dot")
     return _mapreduce_tile(t -> _interior_dot(tile_parent(x, t), tile_parent(y, t), interior_range(x, t)), +, x)
 end
+# A collection's local product is the sum over fields; the tuple broadcast
+# rejects a field-count mismatch, as `dot` on collections does.
+_local_dot(x::AbstractHaloCollection, y::AbstractHaloCollection) =
+    sum(_local_dot.(eachfield(x), eachfield(y)))
 _local_any(f::F, u) where {F} = _mapreduce_tile(t -> any(f, interior_view(u, t)), |, u)
 _local_all(f::F, u) where {F} = _mapreduce_tile(t -> all(f, interior_view(u, t)), &, u)
 _local_equal(x, y) = _mapreduce_tile(t -> interior_view(x, t) == interior_view(y, t), &, x)

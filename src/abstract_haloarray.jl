@@ -609,6 +609,8 @@ end
 @inline is_root(mha::AbstractHaloCollection; root::Integer=0) =
     is_root(_first_field(mha); root=root)
 @inline is_active(mha::AbstractHaloCollection) = all(is_active, _fields(mha))
+# One topology per collection: the communicator is any field's.
+@inline communicator(mha::AbstractHaloCollection) = communicator(first(_fields(mha)))
 
 function foreach_field!(f!, mha::AbstractHaloCollection)
     foreach(f!, _fields(mha))
