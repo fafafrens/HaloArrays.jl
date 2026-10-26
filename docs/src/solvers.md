@@ -50,6 +50,21 @@ any halo array (single array or field collection), so the integrator's internal
 flattening around its matrix-free `W` operator never wraps the state in a
 `ReshapedArray`, and `rhs!` keeps seeing its named fields.
 
+To supply your own Jacobian-vector product instead of the automatic one, pass a
+matrix-free operator as `jac_prototype` (the `jvp` keyword of `ODEFunction` is
+not consulted on this path):
+
+```julia
+using LinearSolve.SciMLOperators: FunctionOperator
+jvp!(Jv, v, u, p, t) = ...            # Jv .= J(u) * v; call synchronize_halo!(v) as rhs! does on u
+J = FunctionOperator(jvp!, similar(u0), similar(u0); u = u0, p = p, t = 0.0, isinplace = true)
+prob = ODEProblem(ODEFunction{true}(rhs!; jac_prototype = J), u0, tspan, p)
+```
+
+The integrator keeps `u`, `p`, `t` in the operator up to date at every Newton
+iterate, and the halo array (or collection) reaches `jvp!` unflattened. This
+replaces the `rhs!` evaluations the automatic JVP would make.
+
 This works on **distributed states** too: OrdinaryDiffEq automatically wraps the
 iterative solver with error-weight preconditioners (`Diagonal(weight)` where
 `weight` is a halo array), and HaloArrays supplies elementwise `mul!`/`ldiv!`

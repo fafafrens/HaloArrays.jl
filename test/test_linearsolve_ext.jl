@@ -4,6 +4,7 @@ using LinearSolve
 using Krylov
 using OrdinaryDiffEq
 using LinearAlgebra
+using LinearSolve.SciMLOperators: FunctionOperator
 
 # Exercises HaloArraysLinearSolveExt: the `init_cacheval` override that lets
 # LinearSolve's KrylovJL build its workspace via `KrylovConstructor` on a halo
@@ -208,6 +209,44 @@ end
 # so even a 1-D-in-space collection is a 2-D array to the integrator and would be
 # `vec`-wrapped; the identity keeps the named fields reachable inside `rhs!`.
 # Two-species reaction–diffusion (nonsymmetric Jacobian → GMRES / BiCGStab).
+# A user-supplied Jacobian-vector product. OrdinaryDiffEq's matrix-free path
+# ignores `ODEFunction(; jvp)`; the route is `jac_prototype` as a SciMLOperators
+# `FunctionOperator` with `jvp!(Jv, v, u, p, t)` in place, and the halo array
+# flows through it unflattened. Linear 2-D heat: J is the Laplacian, so the
+# solution must match the autodiff path, while `rhs!` is called far less often.
+@testset "User Jacobian-vector product via jac_prototype on a 2-D halo array" begin
+    dims = (20, 16); p = Float64(dims[1]^2)
+    calls = Ref(0)
+    function heat!(du, u, p, t)
+        calls[] += 1
+        synchronize_halo!(u)
+        s = parent(u); d = parent(du)
+        @inbounds for I in CartesianIndices(interior_range(u))
+            acc = zero(eltype(s))
+            for v in HaloArrays.versors(u)
+                e = CartesianIndex(v); acc += s[I - e] - 2s[I] + s[I + e]
+            end
+            d[I] = acc * p
+        end
+        return nothing
+    end
+    jvp!(Jv, v, u, p, t) = (heat!(Jv, v, p, t); Jv)   # linear: J v = L v
+    u0 = LocalHaloArray(Float64, dims, 1; boundary_condition = :antireflecting)
+    fill_from_global_indices!(I -> exp(-sum(d -> (I[d] - dims[d] / 2)^2, 1:2) / 6), u0)
+    J = FunctionOperator(jvp!, similar(u0), similar(u0); u = u0, p = p, t = 0.0, isinplace = true, islinear = true)
+    tspan = (0.0, 0.05)
+    solve_with(f) = (calls[] = 0; sol = solve(ODEProblem(f, u0, tspan, p), FBDF(linsolve = HaloCG(), concrete_jac = false);
+                                               reltol = 1e-7, abstol = 1e-7, save_everystep = false); (sol, calls[]))
+    ref = solve(ODEProblem(heat!, u0, tspan, p), Tsit5(); reltol = 1e-10, abstol = 1e-10, save_everystep = false)
+    sol_ad, n_ad = solve_with(ODEFunction{true}(heat!))
+    sol_op, n_op = solve_with(ODEFunction{true}(heat!; jac_prototype = J))
+    @test sol_op.retcode == ReturnCode.Success
+    @test sol_op.u[end] isa LocalHaloArray{Float64,2}
+    @test maximum(abs, sol_op.u[end] - ref.u[end]) < 1e-6
+    @test sol_op.u[end] ≈ sol_ad.u[end] rtol = 1e-6
+    @test n_op < n_ad ÷ 2      # the operator replaced the autodiff JVP's rhs! evaluations
+end
+
 @testset "Implicit OrdinaryDiffEq on a MultiHaloArray state" begin
     function rd!(du, u, p, _t)
         DA, DB, k, inv_dx2 = p
