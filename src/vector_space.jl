@@ -267,6 +267,35 @@ function swap!(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray)
     return x, y
 end
 
+"""
+    dots!(h, V, w, j) -> h
+
+`h[i] = dot(V[i], w)` for `i in 1:j`: the inner products of one vector with
+`j` others, with a **single global reduction** where the backend has one. On a
+distributed [`HaloArray`](@ref) that is one `Allreduce` of `j` numbers instead
+of `j` separate ones; on the local and threaded backends there is nothing to
+reduce globally and the `j` local reductions run as for [`dot`](@ref). This is
+the primitive classical Gram–Schmidt needs (see `HaloArrays.Krylov`).
+
+`h` is a plain vector of length ≥ `j`; `V` is indexable (`V[i]`); `w` and every
+`V[i]` must share geometry. Collections and [`MaybeHaloArray`](@ref) fall back
+to `j` calls of `dot`, which are already global.
+"""
+function dots!(h, V, w, j)
+    for i in 1:j
+        h[i] = LinearAlgebra.dot(V[i], w)
+    end
+    return h
+end
+dots!(h, V, w::AbstractSingleHaloArray, j) = _dots!(h, V, w, j, communicator(w))
+# Serial backends: `_local_dot` is the whole reduction (tile-parallel on ThreadedHaloArray).
+function _dots!(h, V, w, j, ::Nothing)
+    for i in 1:j
+        h[i] = _local_dot(V[i], w)
+    end
+    return h
+end
+
 function LinearAlgebra.rotate!(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray, c, s)
     _check_same_geometry(x, y, "rotate!")
     _foreach_tile(t -> _rotate_tile!(tile_parent(x, t), tile_parent(y, t), interior_range(x, t), c, s), x)
