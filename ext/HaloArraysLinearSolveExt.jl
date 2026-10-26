@@ -2,66 +2,16 @@ module HaloArraysLinearSolveExt
 
 using HaloArrays
 using LinearSolve
-using Krylov
 using LinearAlgebra: dot, norm, mul!, ldiv!, UniformScaling
 
 const SciMLBase = LinearSolve.SciMLBase
 const _IdentityOp = LinearSolve.SciMLOperators.IdentityOperator
 
 # ============================================================
-# Path 1 — KrylovJL on a *1-D* halo array (Krylov.jl, mature, cached)
+# Coordinate-free solvers for halo arrays of any dimensionality
 #
-# `HaloKrylov(:method)` is a thin KrylovJL alias; the init_cacheval override
-# below builds Krylov's workspace via KrylovConstructor (similar-based) instead
-# of `S(undef, n)`, so the stock `KrylovJL_*` work on a halo array too — and are
-# cached by LinearSolve's solve!. Krylov.jl requires `b::AbstractVector`, so this
-# path only applies to 1-D halo-array states (an N-D halo array is not a vector).
-# For N-D states use the coordinate-free solvers in Path 2.
-# ============================================================
-
-const _HALOKRYLOV_METHODS = (:gmres, :cg, :bicgstab, :minres, :dqgmres, :diom,
-                             :fom, :cgs, :minares, :minres_qlp, :symmlq)
-
-function HaloArrays.HaloKrylov(method::Symbol; kwargs...)
-    method in _HALOKRYLOV_METHODS || throw(ArgumentError(string(
-        "HaloKrylov: unsupported method :", method, ". Supported (matrix-free, ",
-        "cached via LinearSolve's KrylovJL): ", join(_HALOKRYLOV_METHODS, ", "), ". ",
-        ":fgmres/:qmr/:bilq allocate via S(undef, n) mid-solve; :car/:cg_lanczos ",
-        "are not wrapped by LinearSolve's KrylovJL.")))
-    return KrylovJL(; KrylovAlg = getproperty(Krylov, Symbol(method, :!)), kwargs...)
-end
-
-function LinearSolve.init_cacheval(alg::KrylovJL, A, b::AbstractHaloArray, u, Pl, Pr,
-        maxiters::Int, abstol, reltol, verbose::Union{LinearSolve.LinearVerbosity, Bool},
-        assumptions::LinearSolve.OperatorAssumptions; zeroinit = true)
-    KS = LinearSolve.get_KrylovJL_solver(alg.KrylovAlg)
-    kc = Krylov.KrylovConstructor(b)
-    memory_methods = (Krylov.dqgmres!, Krylov.diom!, Krylov.gmres!, Krylov.fgmres!,
-                      Krylov.gpmr!, Krylov.fom!)
-    solver = if zeroinit
-        alg.KrylovAlg in memory_methods ? KS(kc; memory = 1) : KS(kc)
-    else
-        knt = NamedTuple(alg.kwargs)
-        memory = haskey(knt, :memory) ? knt[:memory] :
-                 (alg.gmres_restart == 0 ? min(20, size(A, 1)) : alg.gmres_restart)
-        if alg.KrylovAlg in memory_methods
-            KS(kc; memory)
-        elseif alg.KrylovAlg in (Krylov.minres!, Krylov.symmlq!, Krylov.lslq!,
-                                 Krylov.lsqr!, Krylov.lsmr!)
-            alg.window != 0 ? KS(kc; window = alg.window) : KS(kc)
-        else
-            KS(kc)
-        end
-    end
-    solver.x = u
-    return solver
-end
-
-# ============================================================
-# Path 2 — coordinate-free solvers for *N-D* halo arrays
-#
-# Krylov.jl / SimpleGMRES model the unknown as a flat `AbstractVector`, so they
-# can't take an N-D halo array. These solvers (standard algorithms, Saad)
+# LinearSolve's stock Krylov wrappers model the unknown as a flat `AbstractVector`,
+# so they can't take an N-D halo array. These solvers (standard algorithms, Saad)
 # touch the unknown only through similar/copy/broadcast/dot/norm/mul!, so they
 # run on a halo array of any dimensionality — and stay MPI-collective, since
 # HaloArrays defines dot/norm as global reductions. Each is wrapped as a
@@ -69,8 +19,12 @@ end
 # in `cache.cacheval`) and reused by `solve!`, which reports a proper retcode.
 # ============================================================
 
-@inline _threshold(b, abstol, reltol) =
-    max(abstol, reltol * max(norm(b), eps(float(real(eltype(b))))))
+# Stopping threshold. `reltol` is relative to `b` measured in the SAME norm the
+# loop monitors: with a left preconditioner that is ‖M⁻¹b‖ (BiCGStab, GMRES) or
+# √⟨b, M⁻¹b⟩ (CG), never the plain ‖b‖ — otherwise a scaled `Pl` shifts the
+# effective tolerance by ‖b‖/‖M⁻¹b‖. Each solver computes its own measure below.
+@inline _threshold(bnorm, abstol, reltol) =
+    max(abstol, reltol * max(bnorm, eps(typeof(bnorm))))
 
 # ---- left-preconditioning helpers ----
 # These solvers apply a LEFT preconditioner `Pl` (approximating A), the usual
@@ -109,11 +63,12 @@ _cg_workspace(b) = CGWorkspace(similar(b), similar(b), similar(b), similar(b))
 # stock CG — no extra communication when unpreconditioned.
 function _cg!(x, A, b, w::CGWorkspace, Pl; abstol, reltol, maxiter)
     Ap, r, p, z = w.Ap, w.r, w.p, w.z
+    _apply_precond!(Ap, Pl, b)                      # Ap = M⁻¹ b   (scratch for now)
+    thr = _threshold(sqrt(real(dot(b, Ap))), abstol, reltol)   # ‖b‖ in the CG norm
     mul!(Ap, A, x); copyto!(r, b); r .-= Ap        # r = b - A*x
     _apply_precond!(z, Pl, r)                       # z = M⁻¹ r
     copyto!(p, z)
     rz = real(dot(r, z))
-    thr = _threshold(b, abstol, reltol)
     res = sqrt(rz)
     res ≤ thr && return x, 0, res, true
     iters = 0
@@ -145,13 +100,14 @@ _bicgstab_workspace(b) =
 # (identical to the true residual when unpreconditioned).
 function _bicgstab!(x, A, b, w::BiCGStabWorkspace, Pl; abstol, reltol, maxiter)
     r, tmp, rhat, p, v, s, t = w.r, w.tmp, w.rhat, w.p, w.v, w.s, w.t
+    _apply_precond!(tmp, Pl, b)                     # tmp = M⁻¹ b  (scratch for now)
+    thr = _threshold(norm(tmp), abstol, reltol)
     copyto!(r, b); mul!(tmp, A, x); r .-= tmp       # r = b - A*x
     _apply_precond!(Pl, r)                          # r ← M⁻¹ r
     copyto!(rhat, r)
     fill!(p, 0); fill!(v, 0)
     Tr = real(eltype(b))
     ρ_old = α = ω = one(Tr)
-    thr = _threshold(b, abstol, reltol)
     res = norm(r)
     res ≤ thr && return x, 0, res, true
     iters = 0
@@ -204,7 +160,8 @@ end
 function _gmres!(x, A, b, work::GMRESWorkspace, Pl; abstol, reltol, maxiter)
     V, H, g, cs, sn, w, Ax = work.V, work.H, work.g, work.cs, work.sn, work.w, work.Ax
     T = real(float(eltype(b))); m = length(cs)
-    thr = _threshold(b, abstol, reltol)
+    _apply_precond!(w, Pl, b)                        # w = M⁻¹ b    (scratch for now)
+    thr = _threshold(norm(w), abstol, reltol)
     res = norm(b); total = 0
     while total < maxiter
         mul!(Ax, A, x)
@@ -269,7 +226,7 @@ function _minres!(x, A, b, work::MINRESWorkspace; abstol, reltol, maxiter)
     T = real(float(eltype(b)))
     mul!(y, A, x); r1 .= b .- y                 # r0 = b - A*x0
     β = norm(r1)
-    thr = _threshold(b, abstol, reltol)
+    thr = _threshold(norm(b), abstol, reltol)
     res = β
     β ≤ thr && return x, 0, res, true
     copyto!(y, r1); copyto!(r2, r1)
@@ -324,9 +281,16 @@ end
 # LinearSolve rejects an `AbstractMatrix` right-hand side for Krylov subspace
 # methods, reading extra columns as a batch of independent vectors. A 2-D halo
 # array is one N-D field, not a batch, and these solvers are coordinate-free —
-# they only ever touch `b` through broadcasts and `_hdot`. Opt out of the check.
-LinearSolve._check_batched_rhs_support(::LinearSolve.AbstractKrylovSubspaceMethod,
-    ::AbstractHaloArray) = nothing
+# they only ever touch `b` through broadcasts and `_hdot`. Opt out of the check
+# for THESE algorithms only (not every `AbstractKrylovSubspaceMethod`: a broader
+# method was ambiguous with LinearSolve's own `KrylovJL` method).
+const _HaloAlg = Union{HaloCGAlg, HaloBiCGStabAlg, HaloMINRESAlg, HaloGMRESAlg}
+LinearSolve._check_batched_rhs_support(::_HaloAlg, ::AbstractHaloArray) = nothing
+
+# OrdinaryDiffEq updates the per-step tolerances through `update_tolerances!`,
+# which sets `cache.abstol`/`cache.reltol` (read fresh by every `solve!` below)
+# and then calls this hook; the generic fallback only warns "not implemented".
+LinearSolve.update_tolerances_internal!(cache, ::_HaloAlg, abstol, reltol) = nothing
 
 LinearSolve.init_cacheval(::HaloCGAlg, A, b, u, Pl, Pr, maxiters, abstol, reltol, verbose, assump) =
     _cg_workspace(b)
@@ -339,33 +303,22 @@ LinearSolve.init_cacheval(alg::HaloGMRESAlg, A, b, u, Pl, Pr, maxiters, abstol, 
 
 _retcode(converged) = converged ? SciMLBase.ReturnCode.Success : SciMLBase.ReturnCode.MaxIters
 
-function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::HaloCGAlg; kwargs...)
-    _reject_right_precond(cache.Pr)
-    x, iters, _res, conv = _cg!(cache.u, cache.A, cache.b, cache.cacheval, cache.Pl;
-        abstol = cache.abstol, reltol = cache.reltol, maxiter = cache.maxiters)
-    return SciMLBase.build_linear_solution(alg, x, nothing, cache; retcode = _retcode(conv), iters = iters)
-end
-
-function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::HaloMINRESAlg; kwargs...)
-    # Preconditioned MINRES needs the SPD Lanczos rework; reject rather than
-    # silently ignore a supplied preconditioner (use HaloCG/HaloGMRES instead).
-    (_is_identity_precond(cache.Pl) && _is_identity_precond(cache.Pr)) || throw(ArgumentError(
+# Which preconditioners each algorithm accepts, and which kernel runs it. MINRES
+# would need the SPD Lanczos rework to precondition, so it rejects any `Pl`
+# rather than silently ignore it (use HaloCG/HaloGMRES instead).
+_check_precond(::_HaloAlg, Pl, Pr) = _reject_right_precond(Pr)
+_check_precond(::HaloMINRESAlg, Pl, Pr) =
+    (_is_identity_precond(Pl) && _is_identity_precond(Pr)) || throw(ArgumentError(
         "HaloMINRES does not support preconditioning; use HaloCG (SPD) or HaloGMRES with `Pl`."))
-    x, iters, _res, conv = _minres!(cache.u, cache.A, cache.b, cache.cacheval;
-        abstol = cache.abstol, reltol = cache.reltol, maxiter = cache.maxiters)
-    return SciMLBase.build_linear_solution(alg, x, nothing, cache; retcode = _retcode(conv), iters = iters)
-end
 
-function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::HaloBiCGStabAlg; kwargs...)
-    _reject_right_precond(cache.Pr)
-    x, iters, _res, conv = _bicgstab!(cache.u, cache.A, cache.b, cache.cacheval, cache.Pl;
-        abstol = cache.abstol, reltol = cache.reltol, maxiter = cache.maxiters)
-    return SciMLBase.build_linear_solution(alg, x, nothing, cache; retcode = _retcode(conv), iters = iters)
-end
+_kernel!(::HaloCGAlg,       x, A, b, w, Pl; kw...) = _cg!(x, A, b, w, Pl; kw...)
+_kernel!(::HaloBiCGStabAlg, x, A, b, w, Pl; kw...) = _bicgstab!(x, A, b, w, Pl; kw...)
+_kernel!(::HaloGMRESAlg,    x, A, b, w, Pl; kw...) = _gmres!(x, A, b, w, Pl; kw...)
+_kernel!(::HaloMINRESAlg,   x, A, b, w, Pl; kw...) = _minres!(x, A, b, w; kw...)
 
-function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::HaloGMRESAlg; kwargs...)
-    _reject_right_precond(cache.Pr)
-    x, iters, _res, conv = _gmres!(cache.u, cache.A, cache.b, cache.cacheval, cache.Pl;
+function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::_HaloAlg; kwargs...)
+    _check_precond(alg, cache.Pl, cache.Pr)
+    x, iters, _res, conv = _kernel!(alg, cache.u, cache.A, cache.b, cache.cacheval, cache.Pl;
         abstol = cache.abstol, reltol = cache.reltol, maxiter = cache.maxiters)
     return SciMLBase.build_linear_solution(alg, x, nothing, cache; retcode = _retcode(conv), iters = iters)
 end

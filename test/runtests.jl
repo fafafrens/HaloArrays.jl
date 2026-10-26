@@ -61,12 +61,12 @@ include_test(name) = include(joinpath(@__DIR__, name))
         else
             @info "Skipping Adapt tests (JLArrays not in this environment; run via Pkg.test)"
         end
-        # LinearSolve/Krylov extension: available under Pkg.test, skipped on a
+        # LinearSolve/KrylovKit extensions: available under Pkg.test, skipped on a
         # bare --project=. run (same as Aqua).
-        if all(p -> Base.find_package(p) !== nothing, ("LinearSolve", "Krylov", "OrdinaryDiffEq"))
+        if all(p -> Base.find_package(p) !== nothing, ("LinearSolve", "KrylovKit", "OrdinaryDiffEq"))
             include_test("test_linearsolve_ext.jl")
         else
-            @info "Skipping LinearSolve extension tests (LinearSolve/Krylov/OrdinaryDiffEq not in this environment; run via Pkg.test)"
+            @info "Skipping LinearSolve extension tests (LinearSolve/KrylovKit/OrdinaryDiffEq not in this environment; run via Pkg.test)"
         end
     else
         @info "Skipping unit tests (set HALOARRAYS_RUN_UNIT_TESTS=true to enable)"
@@ -85,11 +85,11 @@ include_test(name) = include(joinpath(@__DIR__, name))
             include_test("test_mpi_reduce_save.jl")
             include_test("test_mpi_reduction_plan.jl")
             include_test("test_mpi_grid.jl")
-            # Distributed implicit solve (HaloKrylov) — available under Pkg.test.
-            if all(p -> Base.find_package(p) !== nothing, ("LinearSolve", "Krylov", "OrdinaryDiffEq"))
+            # Distributed implicit solve (HaloKrylovKit) — available under Pkg.test.
+            if all(p -> Base.find_package(p) !== nothing, ("LinearSolve", "KrylovKit", "OrdinaryDiffEq"))
                 include_test("test_mpi_implicit.jl")
             else
-                @info "Skipping MPI implicit test (LinearSolve/Krylov/OrdinaryDiffEq not in this environment)"
+                @info "Skipping MPI implicit test (LinearSolve/KrylovKit/OrdinaryDiffEq not in this environment)"
             end
         end
     else

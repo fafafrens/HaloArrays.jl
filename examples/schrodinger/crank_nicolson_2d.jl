@@ -27,8 +27,7 @@
 # ============================================================
 
 using HaloArrays
-using LinearSolve
-using Krylov                 # loading it activates HaloArraysLinearSolveExt
+using LinearSolve            # loading it activates HaloArraysLinearSolveExt
 using LinearAlgebra: dot
 using Printf
 

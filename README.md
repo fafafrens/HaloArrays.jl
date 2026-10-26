@@ -117,7 +117,7 @@ alongside Julia's excellent parallel-arrays ecosystem:
 Where HaloArrays.jl focuses: *one* halo-array API that is identical across serial,
 threaded, and MPI backends (swap only the constructor), GPU-ready via
 KernelAbstractions and `Adapt`, with built-in global reductions and a vector-space
-interface so the same array drops straight into LinearSolve/Krylov and
+interface so the same array drops straight into LinearSolve/KrylovKit and
 OrdinaryDiffEq.
 
 ## License

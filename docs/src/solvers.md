@@ -6,33 +6,32 @@ step, or a `LinearProblem` — without ever marshalling its interior to a flat
 `dot`/`norm`, which HaloArrays defines as **global reductions** — so the same
 solve is automatically correct across MPI ranks and threaded tiles.
 
-These solvers live in a package **extension**, active only when `LinearSolve` and
-`Krylov` are loaded:
+These solvers live in package **extensions**: the coordinate-free
+[`HaloCG`](@ref)/[`HaloMINRES`](@ref)/[`HaloBiCGStab`](@ref)/[`HaloGMRES`](@ref)
+activate when `LinearSolve` is loaded, and [`HaloKrylovKit`](@ref) when
+`LinearSolve` and `KrylovKit` are:
 
 ```julia
-using HaloArrays, LinearSolve, Krylov
+using HaloArrays, LinearSolve            # HaloCG, HaloMINRES, HaloBiCGStab, HaloGMRES
+using KrylovKit                          # + HaloKrylovKit(:gmres | :cg | :bicgstab)
 ```
 
 ## Which solver to use
 
-The right choice depends on the **dimensionality** of the state, because
-Krylov.jl / LinearSolve's stock solvers model the unknown as a flat
-`AbstractVector`:
+Both families take a halo array of **any dimensionality**, or a field
+collection, as the unknown; both are matrix-free and MPI-collective.
 
-| state | solver | notes |
+| solver | for | notes |
 |---|---|---|
-| **1-D** halo array | [`HaloKrylov`](@ref)`(:method)`, or stock `KrylovJL_*` | a 1-D halo array *is* an `AbstractVector`; mature Krylov.jl methods, cached |
-| **2-D / 3-D** halo array | [`HaloCG`](@ref) / [`HaloBiCGStab`](@ref) / [`HaloGMRES`](@ref) | coordinate-free; the only option an N-D halo array can use |
+| [`HaloCG`](@ref) | symmetric positive-definite `A` | cheapest; left preconditioner `Pl`; workspace cached |
+| [`HaloMINRES`](@ref) | symmetric, possibly indefinite `A` | where CG would break down |
+| [`HaloBiCGStab`](@ref) | general `A` | fixed memory, two products per iteration |
+| [`HaloGMRES`](@ref)`(; restart)` | general `A` | most robust; memory grows with `restart` |
+| [`HaloKrylovKit`](@ref)`(:gmres | :cg | :bicgstab)` | same | KrylovKit.jl's implementations; no preconditioning, basis allocated per solve |
 
-[`HaloKrylov(:method)`](@ref) is a thin `KrylovJL` alias; the extension teaches
-`KrylovJL`'s workspace to allocate with `similar` (via `KrylovConstructor`)
-instead of `S(undef, n)`, so the **stock** `KrylovJL_GMRES()` etc. work on a 1-D
-halo array too — and are cached by LinearSolve. But Krylov.jl requires
-`b::AbstractVector`, so an `N≥2` halo array can't use it.
-
-[`HaloCG`](@ref)/[`HaloBiCGStab`](@ref)/[`HaloGMRES`](@ref) are **coordinate-free**
-(they touch the unknown only through `similar`/`copy`/broadcast/`dot`/`norm`/`mul!`),
-so they take a halo array of *any* dimensionality.
+LinearSolve's stock `KrylovJL_*` (Krylov.jl) and `SimpleGMRES` are **not**
+supported: they model the unknown as a flat `AbstractVector`, which a
+geometry-carrying halo array is not.
 
 ## Implicit ODEs (Jacobian-free Newton–Krylov)
 
@@ -41,8 +40,8 @@ To integrate a stiff problem with the halo array as the SciML state, pass an
 
 ```julia
 using OrdinaryDiffEq
-solve(prob, FBDF(linsolve = HaloKrylov(:gmres), concrete_jac = false))   # 1-D state
-solve(prob, FBDF(linsolve = HaloGMRES(),        concrete_jac = false))   # N-D state
+solve(prob, FBDF(linsolve = HaloGMRES(),             concrete_jac = false))
+solve(prob, FBDF(linsolve = HaloKrylovKit(:gmres),   concrete_jac = false))   # needs KrylovKit
 ```
 
 An N-D or multi-field state passes through untouched: `vec` is the identity on

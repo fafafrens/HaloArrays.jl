@@ -6,7 +6,38 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Breaking:** the Krylov.jl path is gone. `HaloKrylov(:method)` and the
+  `init_cacheval` hook that built Krylov.jl's workspace on a halo array are
+  removed, and `Krylov` is no longer a weak dependency; the LinearSolve
+  extension now activates on `LinearSolve` alone. The hook was a workaround for
+  Krylov.jl's `S(undef, n)` allocations, only ever worked for 1-D states, and
+  was ambiguous with LinearSolve's own `KrylovJL` methods on an N-D state.
+  Replace `HaloKrylov(:gmres)` with `HaloGMRES()` (or `HaloCG()`, …), or with
+  the new `HaloKrylovKit(:gmres)`.
+
+### Added
+- `HaloKrylovKit(method = :gmres; kwargs...)` (`:gmres`, `:cg`, `:bicgstab`): a
+  LinearSolve algorithm backed by KrylovKit.jl, in a new extension active with
+  `LinearSolve` + `KrylovKit`. KrylovKit is VectorInterface-generic, so a halo
+  array of any dimensionality or a field collection is its vector as-is; the
+  operator is applied through `mul!`, so OrdinaryDiffEq's matrix-free `W`
+  operator works (LinearSolve's own `KrylovKitJL` calls the operator, which `W`
+  is not). `kwargs` go to the KrylovKit algorithm; `tol`/`maxiter` come from
+  LinearSolve's tolerances. No preconditioning (a non-identity `Pl`/`Pr` throws).
+- The `_check_batched_rhs_support` opt-out is scoped to the package's own
+  algorithms (it was declared on every `AbstractKrylovSubspaceMethod`), and the
+  one-time "tolerance update not implemented" warning OrdinaryDiffEq logged for
+  them is silenced (tolerances were already honoured through the cache).
+
 ### Fixed
+- `HaloCG`/`HaloBiCGStab`/`HaloGMRES` with a left preconditioner: the stopping
+  test compared the *preconditioned* residual against `reltol * ‖b‖`, so the
+  effective tolerance was scaled by `‖b‖/‖M⁻¹b‖` — a strongly scaled `Pl`
+  reported `Success` at a true relative residual of ~1e-5 for `reltol = 1e-10`
+  (or over-solved). `reltol` is now relative to `b` in the same norm the loop
+  monitors (`‖M⁻¹b‖`, and `√⟨b, M⁻¹b⟩` for CG); unpreconditioned solves are
+  unchanged.
 - `dot`, `swap!`, `rotate!` and `reflect!` on two field collections with
   different field counts now throw `DimensionMismatch`. They combined the fields
   with `zip`/`foreach`, which stop at the shorter tuple, so a partial result was

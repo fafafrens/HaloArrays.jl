@@ -1,48 +1,37 @@
-# Entry point for the LinearSolve/Krylov extension. The method itself lives in
-# `ext/HaloArraysLinearSolveExt.jl` and is only defined once both `LinearSolve`
-# and `Krylov` are loaded (a package extension), so the heavy solver stack stays
-# an optional dependency.
+# Entry points for the LinearSolve extensions. The methods live in
+# `ext/HaloArraysLinearSolveExt.jl` (coordinate-free solvers, needs `LinearSolve`)
+# and `ext/HaloArraysKrylovKitExt.jl` (KrylovKit as a `linsolve`, needs
+# `LinearSolve` and `KrylovKit`), so the solver stack stays optional.
 
 """
-    HaloKrylov(method::Symbol; kwargs...) -> KrylovJL
+    HaloKrylovKit(method::Symbol = :gmres; kwargs...)
 
-A LinearSolve-compatible iterative solver that runs a Krylov.jl `method` directly
-on a halo array as the solution vector — matrix-free, no marshalling to a plain
-`Vector`. A thin, symbol-keyed alias for `LinearSolve.KrylovJL`, so it plugs in as
-the `linsolve` of an implicit SciML integrator or a `LinearProblem`:
+A LinearSolve algorithm that runs a KrylovKit.jl `method` (`:gmres`, `:cg`,
+`:bicgstab`) with a halo array — of any dimensionality, or a field collection —
+as the unknown, matrix-free. KrylovKit touches the unknown only through
+VectorInterface (`similar`, `add!!`, `scale!!`, `inner`, `norm`), which resolve
+to the halo array's own vector-space methods, so `dot`/`norm` stay global
+reductions and the solve is collective under MPI. Pass it as the `linsolve` of
+an implicit SciML integrator or of a `LinearProblem`:
 
 ```julia
-using HaloArrays, LinearSolve, Krylov, OrdinaryDiffEq
-solve(prob, FBDF(linsolve = HaloKrylov(:gmres), concrete_jac = false))
+using HaloArrays, LinearSolve, KrylovKit, OrdinaryDiffEq
+solve(prob, FBDF(linsolve = HaloKrylovKit(:gmres; krylovdim = 30), concrete_jac = false))
 ```
 
-The enabling piece is a method this extension adds to `LinearSolve.init_cacheval`
-for halo-array operands: it builds Krylov's workspace with
-`Krylov.KrylovConstructor` (i.e. via `similar`) instead of `S(undef, n)`, which is
-what a geometry-carrying halo array has no constructor for. Because it hooks
-LinearSolve's own cache path, **the stock `KrylovJL_*` algorithms work on a halo
-array too** — e.g. `linsolve = KrylovJL_GMRES()` — and the Krylov workspace is
-built once and **cached/reused** across solves by LinearSolve's `solve!`.
-`HaloKrylov(:method)` is just the convenient way to reach methods without a named
-`KrylovJL_*` wrapper.
-
-Supported `method`s (matrix-free, all work vectors allocated up front):
-
-    :gmres :dqgmres :diom :fom :cg :bicgstab :cgs
-    :minres :minres_qlp :symmlq :minares
-
-Unsupported, with a helpful error: `:fgmres`, `:qmr`, `:bilq` allocate extra
-vectors mid-solve via `S(undef, n)` (the geometry-array wall); `:car` and
-`:cg_lanczos` aren't wrapped by LinearSolve's `KrylovJL`. `kwargs` are forwarded
-to `KrylovJL` / the Krylov solver (e.g. `atol`, `rtol`, `itmax`, `gmres_restart`).
+`kwargs` are forwarded to the KrylovKit algorithm (`krylovdim`, `orth`,
+`verbosity`); `tol` and `maxiter` come from LinearSolve's `abstol`/`reltol`/
+`maxiters` (KrylovKit's absolute `tol` is set to `max(abstol, reltol * norm(b))`).
+The operator is applied through `mul!`, so OrdinaryDiffEq's matrix-free `W`
+operator works. KrylovKit has no preconditioning: a non-identity `Pl`/`Pr` throws;
+use [`HaloCG`](@ref)/[`HaloGMRES`](@ref)/… for a left preconditioner. KrylovKit
+allocates its Krylov basis per solve (no workspace caching).
 
 !!! note
-    Defined only when both `LinearSolve` and `Krylov` are loaded (a package
-    extension); without them this throws a `MethodError`. The solve relies on the
-    global reductions and BLAS-1 ops in `vector_space.jl` (`dot`, `norm`,
-    `axpy!`, …), which also make it correct and collective under MPI.
+    Defined only when both `LinearSolve` and `KrylovKit` are loaded (a package
+    extension); without them this throws a `MethodError`.
 """
-function HaloKrylov end
+function HaloKrylovKit end
 
 """
     HaloCG()
@@ -59,8 +48,8 @@ using HaloArrays, LinearSolve
 sol = solve(LinearProblem(A, b; u0 = zero(b)), HaloCG())   # b an N-D halo array
 ```
 
-Unlike [`HaloKrylov`](@ref)/`KrylovJL_*` (which require a 1-D `b::AbstractVector`
-and so only handle 1-D states), these are **coordinate-free**: they touch the
+Unlike LinearSolve's stock `KrylovJL_*` (which require a 1-D `b::AbstractVector`
+and so cannot take an N-D halo array), these are **coordinate-free**: they touch the
 unknown only through `similar`/`copy`/broadcast/`dot`/`norm`/`mul!`, so they run
 on a 2-D or 3-D halo array, and stay correct under MPI (`dot`/`norm` are global
 reductions). The Krylov workspace is built once and cached by LinearSolve.
@@ -75,8 +64,8 @@ For a `LinearProblem`, pass `u0` explicitly (e.g. `zero(b)`) — LinearSolve's
 default initial guess flattens `b` to a 1-D vector, which a halo array can't be.
 
 !!! note
-    Defined only when both `LinearSolve` and `Krylov` are loaded (a package
-    extension); without them this throws a `MethodError`.
+    Defined only when `LinearSolve` is loaded (a package extension); without it
+    this throws a `MethodError`.
 """
 function HaloCG end
 function HaloBiCGStab end

@@ -1,20 +1,18 @@
 using Test
 using HaloArrays
 using LinearSolve
-using Krylov
+using KrylovKit
 using OrdinaryDiffEq
 using LinearAlgebra
 using LinearSolve.SciMLOperators: FunctionOperator
 
-# Exercises HaloArraysLinearSolveExt: the `init_cacheval` override that lets
-# LinearSolve's KrylovJL build its workspace via `KrylovConstructor` on a halo
-# array (so the stock `KrylovJL_*` algorithms — and `HaloKrylov(:method)` — solve
-# matrix-free with the HaloArray itself as the ODE state). Stiff Fisher–KPP
-# reaction–diffusion; every supported method must match a high-accuracy explicit
-# reference.
-
-@testset "HaloKrylov / KrylovJL LinearSolve extension" begin
+# HaloArraysKrylovKitExt: KrylovKit as the `linsolve` of an implicit integrator,
+# the halo array itself as the ODE state (KrylovKit is VectorInterface-generic,
+# so no workspace hook is needed). Stiff Fisher–KPP reaction–diffusion; every
+# method must match a high-accuracy explicit reference.
+@testset "HaloKrylovKit LinearSolve extension" begin
     @test !isnothing(Base.get_extension(HaloArrays, :HaloArraysLinearSolveExt))
+    @test !isnothing(Base.get_extension(HaloArrays, :HaloArraysKrylovKitExt))
 
     Dc, Rc, E1 = 1.0, 8.0, CartesianIndex(1)
     ic(x) = 0.1 + 0.8 * exp(-50 * (x - 0.5)^2)
@@ -38,31 +36,36 @@ using LinearSolve.SciMLOperators: FunctionOperator
     solves(alg) = solve(prob, FBDF(linsolve = alg, concrete_jac = false);
                         reltol = 1e-7, abstol = 1e-7, save_everystep = false)
 
-    # Stock KrylovJL_* work directly on a halo array (via the init_cacheval override).
-    @testset "$(nameof(typeof(alg)))-$i" for (i, alg) in enumerate((
-            KrylovJL_GMRES(), KrylovJL_CG(), KrylovJL_BICGSTAB(), KrylovJL_MINRES()))
-        sol = solves(alg)
+    @testset "HaloKrylovKit(:$m)" for m in (:gmres, :cg, :bicgstab)
+        sol = solves(HaloKrylovKit(m))
         @test sol.retcode == ReturnCode.Success
+        @test sol.u[end] isa LocalHaloArray{Float64,1}
         @test maximum(abs, sol.u[end] - ref.u[end]) < 1e-5
     end
+    @test solves(HaloKrylovKit()).retcode == ReturnCode.Success           # default :gmres
+    # Tiled state: KrylovKit's VectorInterface fallbacks `map`/`eachindex` a
+    # ThreadedHaloArray (no tile-less interior → MethodError); the extension's
+    # VectorInterface methods route through the interior broadcasts instead.
+    ntiles = Threads.nthreads()        # per-tile size × tile count = the same 64-cell grid
+    @test nx % ntiles == 0
+    t0 = ThreadedHaloArray(Float64, (nx ÷ ntiles,), 1; dims = (ntiles,), boundary_condition = :periodic)
+    fill_from_global_indices!(I -> ic((I[1] - 0.5) / nx), t0)
+    tsol = solve(ODEProblem(rhs!, t0, (0.0, 0.2), inv((1.0 / nx)^2)), FBDF(linsolve = HaloKrylovKit(:gmres), concrete_jac = false);
+                 reltol = 1e-7, abstol = 1e-7, save_everystep = false)
+    @test tsol.retcode == ReturnCode.Success
+    @test tsol.u[end] isa ThreadedHaloArray
+    @test maximum(abs, Array(tsol.u[end]) .- Array(ref.u[end])) < 1e-5
+    # Forwarded kwargs reach the KrylovKit algorithm.
+    @test solves(HaloKrylovKit(:gmres; krylovdim = 10)).retcode == ReturnCode.Success
+    @test_throws ArgumentError HaloKrylovKit(:minres)
+    @test_throws ArgumentError HaloKrylovKit(:fgmres)
 
-    # HaloKrylov(:method) — symbol alias for KrylovJL, incl. methods without a
-    # named KrylovJL_* wrapper.
-    @testset "HaloKrylov(:$m)" for m in (:gmres, :cg, :bicgstab, :minres, :dqgmres,
-                                         :diom, :fom, :cgs, :minares, :minres_qlp, :symmlq)
-        @test HaloKrylov(m) isa KrylovJL
-        sol = solves(HaloKrylov(m))
-        @test sol.retcode == ReturnCode.Success
-        @test maximum(abs, sol.u[end] - ref.u[end]) < 1e-5
-    end
-
-    # Forwarded kwargs reach KrylovJL / the Krylov solver.
-    @test solves(HaloKrylov(:gmres; atol = 1e-10, rtol = 1e-8)).retcode == ReturnCode.Success
-
-    # Unsupported methods fail fast with a helpful error (not deep in the solve).
-    @test_throws ArgumentError HaloKrylov(:car)
-    @test_throws ArgumentError HaloKrylov(:fgmres)
-    @test_throws ArgumentError HaloKrylov(:cg_lanczos)
+    # LinearProblem on a dense system, with a nonzero initial guess; a
+    # preconditioner is refused rather than silently ignored.
+    n = 40; S = randn(n, n); A = S * S' + n * I; b = randn(n)
+    sol = solve(LinearProblem(A, b; u0 = randn(n)), HaloKrylovKit(:cg); reltol = 1e-10, abstol = 0.0)
+    @test sol.retcode == ReturnCode.Success && sol.u ≈ A \ b
+    @test_throws ArgumentError solve(LinearProblem(A, b; u0 = zeros(n)), HaloKrylovKit(:gmres); Pl = Diagonal(diag(A)))
 end
 
 # Matrix-free -∇² (SPD, homogeneous Dirichlet) on a 2-D halo array, as a
@@ -158,6 +161,23 @@ end
         @test exact.u ≈ Ad \ bd
     end
 
+    # The stopping test is relative to b in the PRECONDITIONED norm: a strongly
+    # scaled Pl (c·I, which leaves the iterates unchanged) must neither report
+    # convergence early (c = 1e6: true residual far above reltol) nor over-solve
+    # (c = 1e-6: many extra iterations). Both must match the unpreconditioned solve.
+    @testset "preconditioned stopping test is scale-invariant: $name" for (name, alg) in (
+            ("HaloCG", HaloCG()), ("HaloBiCGStab", HaloBiCGStab()), ("HaloGMRES", HaloGMRES(restart = 10)))
+        relres(sol) = norm(b - Aspd * sol.u) / norm(b)
+        base = solve(LinearProblem(Aspd, b; u0 = zeros(n)), alg; reltol = 1e-10, abstol = 0.0, maxiters = 500)
+        @test relres(base) < 1e-9
+        for c in (1e6, 1e-6)
+            sol = solve(LinearProblem(Aspd, b; u0 = zeros(n)), alg; Pl = Diagonal(fill(c, n)), reltol = 1e-10, abstol = 0.0, maxiters = 500)
+            @test sol.retcode == ReturnCode.Success
+            @test relres(sol) < 1e-9
+            @test abs(sol.iters - base.iters) ≤ 1
+        end
+    end
+
     # Unsupported preconditioner requests are rejected, not silently dropped.
     M = Diagonal(diag(Aspd))
     @test_throws ArgumentError solve(LinearProblem(Aspd, b), HaloCG(); Pr = M)
@@ -191,7 +211,8 @@ end
         return nothing
     end
     @testset "$(length(dims))-D, $name" for dims in ((24, 20), (10, 9, 8)),
-                                            (name, alg) in (("HaloCG", HaloCG()), ("HaloGMRES", HaloGMRES()))
+                                            (name, alg) in (("HaloCG", HaloCG()), ("HaloGMRES", HaloGMRES()),
+                                                            ("HaloKrylovKit(:cg)", HaloKrylovKit(:cg)))
         n = dims[1]
         u0 = LocalHaloArray(Float64, dims, 1; boundary_condition = :antireflecting)
         fill_from_global_indices!(I -> exp(-sum(d -> (I[d] - dims[d] / 2)^2, 1:length(dims)) / 6), u0)
@@ -266,7 +287,8 @@ end
         return du
     end
     @testset "$(length(n))-D, $name" for n in ((32,), (16, 12)),
-                                         (name, alg) in (("HaloGMRES", HaloGMRES()), ("HaloBiCGStab", HaloBiCGStab()))
+                                         (name, alg) in (("HaloGMRES", HaloGMRES()), ("HaloBiCGStab", HaloBiCGStab()),
+                                                         ("HaloKrylovKit(:gmres)", HaloKrylovKit(:gmres)))
         bc = ntuple(_ -> (Periodic(), Periodic()), length(n))
         u0 = MultiHaloArray(LocalHaloArray, Float64, n, 1; boundary_conditions = (A = bc, B = bc))
         fill_from_global_indices!(I -> 0.5 + 0.1sin(2π * I[1] / n[1]), u0.A)
@@ -288,4 +310,17 @@ end
     _, _, _, conv = ext._minres!(x, A, b, ext._minres_workspace(b);
                                  abstol = 0.0, reltol = 1e-10, maxiter = 5n)
     @test conv && x ≈ A \ b
+end
+
+@testset "LinearSolve algorithm interface contract" begin
+    # LinearSolve's own checker: a release that adds a required hook fails here
+    # instead of warning at solve time.
+    # (The checker arrived in LinearSolve 5.17; compat still allows older 5.x.)
+    for alg in (HaloCG(), HaloGMRES(), HaloBiCGStab(), HaloMINRES(), HaloKrylovKit())
+        if isdefined(LinearSolve, :algorithm_interface_issues)
+            @test isempty(LinearSolve.algorithm_interface_issues(alg))
+        else
+            @test_skip isempty(LinearSolve.algorithm_interface_issues(alg))
+        end
+    end
 end

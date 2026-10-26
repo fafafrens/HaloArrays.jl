@@ -16,7 +16,7 @@ using MPI
 using HaloArrays
 using OrdinaryDiffEq
 using LinearSolve
-using Krylov
+using KrylovKit
 using Printf
 
 MPI.Initialized() || MPI.Init()
@@ -44,7 +44,7 @@ function rhs!(du, u, p, t)
     return nothing
 end
 
-const ALG = FBDF(linsolve = HaloKrylov(:gmres), concrete_jac = false)
+const ALG = FBDF(linsolve = HaloKrylovKit(:gmres), concrete_jac = false)
 
 function run_mpi()
     NR == 1 || @assert GNX % NR == 0 "global grid ($GNX) must divide the rank count ($NR)"

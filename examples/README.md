@@ -129,9 +129,9 @@ julia --project=examples examples/finite_volume/advection_diffeq_1d.jl
 
 `stiff_reaction_diffusion_implicit_1d.jl` shows an **implicit** SciML solve with
 autodiff Jacobians using the `HaloArray` *as the ODE state* — matrix-free
-(`concrete_jac=false`), with `HaloKrylov(:gmres)`. The LinearSolve/Krylov
-extension builds Krylov.jl's workspace through `similar`, so `HaloKrylov` and
-the stock `KrylovJL_*` algorithms work directly on a 1-D halo-array state. It
+(`concrete_jac=false`), with `HaloKrylovKit(:gmres)` from the LinearSolve/
+KrylovKit extension (KrylovKit is VectorInterface-generic, so the halo array is
+its solver vector as-is; `HaloCG`/`HaloGMRES`/… do the same with caching). It
 runs both the **Local** and **Threaded** backends; the `*_mpi_1d.jl` companion
 runs the same solve on a **distributed** `HaloArray` (and checks it stays
 collective + matches serial). For a 2-D/3-D state, use the coordinate-free
