@@ -37,15 +37,12 @@ const _IdentityOp = LinearSolve.SciMLOperators.IdentityOperator
 @inline _is_identity_precond(_) = false
 
 # M⁻¹ v, for either side. Out of place the result is written into `z`, or is
-# `v` itself (no copy) when M is the identity — callers only read it. In place:
-# v ← M⁻¹ v. `UniformScaling` (`I`, `c*I`) is spelled out because LinearAlgebra's
-# `ldiv!` for it takes an `AbstractVecOrMat`, which a 3-D halo array is not.
+# `v` itself (no copy) when M is LinearSolve's default identity — callers only
+# read it. In place: v ← M⁻¹ v. (`I`/`c*I` go through HaloArrays' `ldiv!`.)
 @inline _precond(z, M, v) = ldiv!(z, M, v)
 @inline _precond(z, ::_IdentityOp, v) = v
-@inline _precond(z, J::UniformScaling, v) = isone(J.λ) ? v : (z .= v ./ J.λ; z)
 @inline _precond!(M, v) = ldiv!(M, v)
 @inline _precond!(::_IdentityOp, v) = v
-@inline _precond!(J::UniformScaling, v) = isone(J.λ) ? v : (v ./= J.λ; v)
 
 # A right preconditioner would be silently dropped by CG, so reject it explicitly.
 @inline _reject_right_precond(Pr) =

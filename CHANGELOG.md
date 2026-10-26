@@ -35,6 +35,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `Pl`. With `Pr` only the monitored residual is the true residual. `HaloCG`
   still takes `Pl` only and `HaloMINRES` neither; both throw on an unsupported
   preconditioner instead of ignoring it.
+- `ldiv!`/`rdiv!` with a `UniformScaling` (`I`, `c*I`) on a halo array of any
+  dimensionality, as an interior-only broadcast (LinearAlgebra's methods are
+  `AbstractVecOrMat`-only). The Halo solvers' `c*I` preconditioner was silently
+  treated as the identity; it now divides by `c`.
 
 ### Fixed
 - `HaloCG`/`HaloBiCGStab`/`HaloGMRES` with a left preconditioner: the stopping
