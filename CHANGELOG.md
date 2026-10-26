@@ -31,6 +31,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   them is silenced (tolerances were already honoured through the cache).
 
 ### Fixed
+- `HaloCG`/`HaloBiCGStab`/`HaloGMRES` with a left preconditioner: the stopping
+  test compared the *preconditioned* residual against `reltol * ‖b‖`, so the
+  effective tolerance was scaled by `‖b‖/‖M⁻¹b‖` — a strongly scaled `Pl`
+  reported `Success` at a true relative residual of ~1e-5 for `reltol = 1e-10`
+  (or over-solved). `reltol` is now relative to `b` in the same norm the loop
+  monitors (`‖M⁻¹b‖`, and `√⟨b, M⁻¹b⟩` for CG); unpreconditioned solves are
+  unchanged.
 - `dot`, `swap!`, `rotate!` and `reflect!` on two field collections with
   different field counts now throw `DimensionMismatch`. They combined the fields
   with `zip`/`foreach`, which stop at the shorter tuple, so a partial result was

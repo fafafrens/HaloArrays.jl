@@ -19,8 +19,12 @@ const _IdentityOp = LinearSolve.SciMLOperators.IdentityOperator
 # in `cache.cacheval`) and reused by `solve!`, which reports a proper retcode.
 # ============================================================
 
-@inline _threshold(b, abstol, reltol) =
-    max(abstol, reltol * max(norm(b), eps(float(real(eltype(b))))))
+# Stopping threshold. `reltol` is relative to `b` measured in the SAME norm the
+# loop monitors: with a left preconditioner that is ‖M⁻¹b‖ (BiCGStab, GMRES) or
+# √⟨b, M⁻¹b⟩ (CG), never the plain ‖b‖ — otherwise a scaled `Pl` shifts the
+# effective tolerance by ‖b‖/‖M⁻¹b‖. Each solver computes its own measure below.
+@inline _threshold(bnorm, abstol, reltol) =
+    max(abstol, reltol * max(bnorm, eps(typeof(bnorm))))
 
 # ---- left-preconditioning helpers ----
 # These solvers apply a LEFT preconditioner `Pl` (approximating A), the usual
@@ -59,11 +63,12 @@ _cg_workspace(b) = CGWorkspace(similar(b), similar(b), similar(b), similar(b))
 # stock CG — no extra communication when unpreconditioned.
 function _cg!(x, A, b, w::CGWorkspace, Pl; abstol, reltol, maxiter)
     Ap, r, p, z = w.Ap, w.r, w.p, w.z
+    _apply_precond!(Ap, Pl, b)                      # Ap = M⁻¹ b   (scratch for now)
+    thr = _threshold(sqrt(real(dot(b, Ap))), abstol, reltol)   # ‖b‖ in the CG norm
     mul!(Ap, A, x); copyto!(r, b); r .-= Ap        # r = b - A*x
     _apply_precond!(z, Pl, r)                       # z = M⁻¹ r
     copyto!(p, z)
     rz = real(dot(r, z))
-    thr = _threshold(b, abstol, reltol)
     res = sqrt(rz)
     res ≤ thr && return x, 0, res, true
     iters = 0
@@ -95,13 +100,14 @@ _bicgstab_workspace(b) =
 # (identical to the true residual when unpreconditioned).
 function _bicgstab!(x, A, b, w::BiCGStabWorkspace, Pl; abstol, reltol, maxiter)
     r, tmp, rhat, p, v, s, t = w.r, w.tmp, w.rhat, w.p, w.v, w.s, w.t
+    _apply_precond!(tmp, Pl, b)                     # tmp = M⁻¹ b  (scratch for now)
+    thr = _threshold(norm(tmp), abstol, reltol)
     copyto!(r, b); mul!(tmp, A, x); r .-= tmp       # r = b - A*x
     _apply_precond!(Pl, r)                          # r ← M⁻¹ r
     copyto!(rhat, r)
     fill!(p, 0); fill!(v, 0)
     Tr = real(eltype(b))
     ρ_old = α = ω = one(Tr)
-    thr = _threshold(b, abstol, reltol)
     res = norm(r)
     res ≤ thr && return x, 0, res, true
     iters = 0
@@ -154,7 +160,8 @@ end
 function _gmres!(x, A, b, work::GMRESWorkspace, Pl; abstol, reltol, maxiter)
     V, H, g, cs, sn, w, Ax = work.V, work.H, work.g, work.cs, work.sn, work.w, work.Ax
     T = real(float(eltype(b))); m = length(cs)
-    thr = _threshold(b, abstol, reltol)
+    _apply_precond!(w, Pl, b)                        # w = M⁻¹ b    (scratch for now)
+    thr = _threshold(norm(w), abstol, reltol)
     res = norm(b); total = 0
     while total < maxiter
         mul!(Ax, A, x)
@@ -219,7 +226,7 @@ function _minres!(x, A, b, work::MINRESWorkspace; abstol, reltol, maxiter)
     T = real(float(eltype(b)))
     mul!(y, A, x); r1 .= b .- y                 # r0 = b - A*x0
     β = norm(r1)
-    thr = _threshold(b, abstol, reltol)
+    thr = _threshold(norm(b), abstol, reltol)
     res = β
     β ≤ thr && return x, 0, res, true
     copyto!(y, r1); copyto!(r2, r1)
@@ -296,33 +303,22 @@ LinearSolve.init_cacheval(alg::HaloGMRESAlg, A, b, u, Pl, Pr, maxiters, abstol, 
 
 _retcode(converged) = converged ? SciMLBase.ReturnCode.Success : SciMLBase.ReturnCode.MaxIters
 
-function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::HaloCGAlg; kwargs...)
-    _reject_right_precond(cache.Pr)
-    x, iters, _res, conv = _cg!(cache.u, cache.A, cache.b, cache.cacheval, cache.Pl;
-        abstol = cache.abstol, reltol = cache.reltol, maxiter = cache.maxiters)
-    return SciMLBase.build_linear_solution(alg, x, nothing, cache; retcode = _retcode(conv), iters = iters)
-end
-
-function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::HaloMINRESAlg; kwargs...)
-    # Preconditioned MINRES needs the SPD Lanczos rework; reject rather than
-    # silently ignore a supplied preconditioner (use HaloCG/HaloGMRES instead).
-    (_is_identity_precond(cache.Pl) && _is_identity_precond(cache.Pr)) || throw(ArgumentError(
+# Which preconditioners each algorithm accepts, and which kernel runs it. MINRES
+# would need the SPD Lanczos rework to precondition, so it rejects any `Pl`
+# rather than silently ignore it (use HaloCG/HaloGMRES instead).
+_check_precond(::_HaloAlg, Pl, Pr) = _reject_right_precond(Pr)
+_check_precond(::HaloMINRESAlg, Pl, Pr) =
+    (_is_identity_precond(Pl) && _is_identity_precond(Pr)) || throw(ArgumentError(
         "HaloMINRES does not support preconditioning; use HaloCG (SPD) or HaloGMRES with `Pl`."))
-    x, iters, _res, conv = _minres!(cache.u, cache.A, cache.b, cache.cacheval;
-        abstol = cache.abstol, reltol = cache.reltol, maxiter = cache.maxiters)
-    return SciMLBase.build_linear_solution(alg, x, nothing, cache; retcode = _retcode(conv), iters = iters)
-end
 
-function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::HaloBiCGStabAlg; kwargs...)
-    _reject_right_precond(cache.Pr)
-    x, iters, _res, conv = _bicgstab!(cache.u, cache.A, cache.b, cache.cacheval, cache.Pl;
-        abstol = cache.abstol, reltol = cache.reltol, maxiter = cache.maxiters)
-    return SciMLBase.build_linear_solution(alg, x, nothing, cache; retcode = _retcode(conv), iters = iters)
-end
+_kernel!(::HaloCGAlg,       x, A, b, w, Pl; kw...) = _cg!(x, A, b, w, Pl; kw...)
+_kernel!(::HaloBiCGStabAlg, x, A, b, w, Pl; kw...) = _bicgstab!(x, A, b, w, Pl; kw...)
+_kernel!(::HaloGMRESAlg,    x, A, b, w, Pl; kw...) = _gmres!(x, A, b, w, Pl; kw...)
+_kernel!(::HaloMINRESAlg,   x, A, b, w, Pl; kw...) = _minres!(x, A, b, w; kw...)
 
-function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::HaloGMRESAlg; kwargs...)
-    _reject_right_precond(cache.Pr)
-    x, iters, _res, conv = _gmres!(cache.u, cache.A, cache.b, cache.cacheval, cache.Pl;
+function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::_HaloAlg; kwargs...)
+    _check_precond(alg, cache.Pl, cache.Pr)
+    x, iters, _res, conv = _kernel!(alg, cache.u, cache.A, cache.b, cache.cacheval, cache.Pl;
         abstol = cache.abstol, reltol = cache.reltol, maxiter = cache.maxiters)
     return SciMLBase.build_linear_solution(alg, x, nothing, cache; retcode = _retcode(conv), iters = iters)
 end
