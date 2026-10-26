@@ -396,12 +396,11 @@ end
     prob() = LinearProblem(copy(A), copy(b); u0 = zeros(n))
 
     @test_throws ArgumentError HaloFGMRES(restart = 0)
-    @test_throws ArgumentError solve(prob(), HaloFGMRES(); Pl = Diagonal(diag(A)))
 
-    # With a FIXED Pr (or none) FGMRES is GMRES: same count, same solution.
-    # (Full cycle, restart = n: restarted GMRES(20) stagnates on this κ.)
-    for Pr in (nothing, Diagonal(diag(A)))
-        kw = Pr === nothing ? (;) : (; Pr)
+    # With FIXED preconditioners (none, Pr, Pl, both) FGMRES is GMRES: same
+    # count, same solution. (Full cycle: restarted GMRES(20) stagnates on this κ.)
+    D = Diagonal(diag(A)); Dh = Diagonal(sqrt.(diag(A)))
+    for kw in ((;), (; Pr = D), (; Pl = D), (; Pl = Dh, Pr = Dh))
         g = solve(prob(), HaloGMRES(restart = n); kw..., reltol = 1e-10, abstol = 0.0, maxiters = 400)
         f = solve(prob(), HaloFGMRES(restart = n); kw..., reltol = 1e-10, abstol = 0.0, maxiters = 400)
         @test g.retcode == ReturnCode.Success
@@ -437,6 +436,13 @@ end
     @test isapprox(relres2(f.u), f.resid / norm(b2); rtol = 0.1)       # reported ≈ true
     g = solve(prob2(), HaloGMRES(restart = 20); Pr = P, reltol = 1e-10, abstol = 0.0, maxiters = 400)
     @test !isapprox(relres2(g.u), g.resid / norm(b2); rtol = 0.1)      # reported ≠ true
+
+    # A fixed Pl on top of the variable Pr: still the true solution.
+    fl = solve(prob2(), HaloFGMRES(restart = 20); Pl = Diagonal(diag(A2)), Pr = P,
+               reltol = 1e-10, abstol = 0.0, maxiters = 400)
+    @test fl.retcode == ReturnCode.Success
+    @test relres2(fl.u) < 1e-8
+    @test isapprox(fl.u, A2 \ b2; rtol = 1e-6)
 
     # On a 2-D halo array, with a nested HaloBiCGStab as the preconditioner.
     h = LocalHaloArray(Float64, (6, 5), 1; boundary_condition = :periodic)

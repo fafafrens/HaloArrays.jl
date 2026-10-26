@@ -244,9 +244,10 @@ end
 # ---- Flexible GMRES (Saad 1993) — variable right preconditioner ----
 # Keeps zⱼ = Prⱼ⁻¹ vⱼ for every basis vector and updates x = x + Σ gᵢ zᵢ from
 # them, so Pr may differ at every step: a nested iterative solve with a few
-# iterations, smoother sweeps, a multigrid cycle. Right-preconditioned only (a
-# varying Pl would change the norm being minimised from step to step); the
-# monitored residual is the true residual. Twice the vectors of GMRES.
+# iterations, smoother sweeps, a multigrid cycle. `Pl` is applied as in GMRES
+# and must be one FIXED linear operator: it defines the norm being minimised,
+# ‖Pl⁻¹(b - Ax)‖ (the true residual when Pl is the identity, whatever Pr is).
+# Twice the vectors of GMRES.
 struct FGMRESWorkspace{TV,TH,TG,TC,TW}
     V::TV; Z::TV; H::TH; g::TG; cs::TC; sn::TG; w::TW; Ax::TW
     function FGMRESWorkspace(b; restart)
@@ -258,16 +259,14 @@ struct FGMRESWorkspace{TV,TH,TG,TC,TW}
 end
 
 function _krylov!(x, A, b, work::FGMRESWorkspace, Pl, Pr; abstol, reltol, maxiter)
-    _is_identity_precond(Pl) || throw(ArgumentError(
-        "HaloFGMRES is right-preconditioned only (flexible Pr); a left preconditioner " *
-        "Pl::$(typeof(Pl)) is not supported. Pass it as Pr, or use HaloGMRES."))
     V, Z, H, g, w, Ax = work.V, work.Z, work.H, work.g, work.w, work.Ax
     m = length(work.cs)
-    thr = _threshold(norm(b), abstol, reltol)
+    thr = _threshold(norm(_precond(w, Pl, b)), abstol, reltol)     # ‖Pl⁻¹ b‖
     res = norm(b); total = 0
     while total < maxiter
         mul!(Ax, A, x)
-        r = V[1]; copyto!(r, b); r .-= Ax           # true residual in V[1]
+        r = V[1]; copyto!(r, b); r .-= Ax           # residual in V[1]
+        _precond!(Pl, r)                             # r ← Pl⁻¹(b - Ax)
         β = norm(r); res = β
         res ≤ thr && break
         V[1] .*= inv(β)
@@ -277,7 +276,7 @@ function _krylov!(x, A, b, work::FGMRESWorkspace, Pl, Pr; abstol, reltol, maxite
         for j in 1:inner
             k = j; total += 1
             _precond_into!(Z[j], Pr, V[j])          # zⱼ = Prⱼ⁻¹ vⱼ, kept
-            mul!(w, A, Z[j])                        # w ← A zⱼ
+            mul!(w, A, Z[j]); _precond!(Pl, w)      # w ← Pl⁻¹ A zⱼ
             res, happy = _arnoldi_step!(work, w, j)
             (res ≤ thr || happy) && break
         end

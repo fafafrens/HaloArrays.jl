@@ -62,8 +62,9 @@ reductions). The Krylov workspace is built once and cached by LinearSolve.
 - `HaloGMRES` — restarted GMRES (`restart` basis vectors), for general square `A`.
 - `HaloFGMRES` — flexible GMRES (Saad): the right preconditioner may change from
   iteration to iteration (a nested iterative solve, smoother sweeps, a multigrid
-  cycle). Stores the `restart` preconditioned directions as well, so twice the
-  memory of `HaloGMRES`; `Pr` only.
+  cycle). `Pl` is taken too but must be a fixed linear operator (it defines the
+  minimised norm). Stores the `restart` preconditioned directions as well, so
+  twice the memory of `HaloGMRES`.
 
 Preconditioning follows the LinearSolve convention (`Pl`, `Pr` applied with
 `ldiv!`; the solved system is `Pl⁻¹ A Pr⁻¹ y = Pl⁻¹ b`, `x = Pr⁻¹ y`):
