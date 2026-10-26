@@ -315,7 +315,12 @@ end
 @testset "LinearSolve algorithm interface contract" begin
     # LinearSolve's own checker: a release that adds a required hook fails here
     # instead of warning at solve time.
+    # (The checker arrived in LinearSolve 5.17; compat still allows older 5.x.)
     for alg in (HaloCG(), HaloGMRES(), HaloBiCGStab(), HaloMINRES(), HaloKrylovKit())
-        @test isempty(LinearSolve.algorithm_interface_issues(alg))
+        if isdefined(LinearSolve, :algorithm_interface_issues)
+            @test isempty(LinearSolve.algorithm_interface_issues(alg))
+        else
+            @test_skip isempty(LinearSolve.algorithm_interface_issues(alg))
+        end
     end
 end
