@@ -139,6 +139,14 @@ LinearAlgebra.ldiv!(out::AbstractHaloArray, D::_HaloDiagonal, b::AbstractHaloArr
     (out .= b ./ D.diag; out)
 LinearAlgebra.ldiv!(D::_HaloDiagonal, b::AbstractHaloArray) = (b .= b ./ D.diag; b)
 
+# `UniformScaling` (`I`, `c*I`), the other preconditioner spelling solvers pass
+# around. LinearAlgebra's methods take an `AbstractVecOrMat`, which a 3-D halo
+# array is not; these are elementwise, so the same interior-only broadcast.
+LinearAlgebra.ldiv!(out::AbstractHaloArray, J::UniformScaling, b::AbstractHaloArray) =
+    (out .= b ./ J.λ; out)
+LinearAlgebra.ldiv!(J::UniformScaling, b::AbstractHaloArray) = (b .= b ./ J.λ; b)
+LinearAlgebra.rdiv!(b::AbstractHaloArray, J::UniformScaling) = (b .= b ./ J.λ; b)
+
 # contiguous @simd over the leading (contiguous) dim of a dense Array parent …
 @inline function _interior_scal!(p::Array, rng::Tuple, s)
     inner = rng[1]; outer = CartesianIndices(Base.tail(rng))

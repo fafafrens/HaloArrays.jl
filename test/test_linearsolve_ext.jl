@@ -5,6 +5,7 @@ using KrylovKit
 using OrdinaryDiffEq
 using LinearAlgebra
 using LinearSolve.SciMLOperators: FunctionOperator
+using HaloArrays: Krylov
 
 # HaloArraysKrylovKitExt: KrylovKit as the `linsolve` of an implicit integrator,
 # the halo array itself as the ODE state (KrylovKit is VectorInterface-generic,
@@ -111,11 +112,10 @@ end
     @test_throws ArgumentError HaloGMRES(restart = 0)
     @test_throws ArgumentError HaloGMRES(restart = -3)
 
-    # Reach the internal solver to check the numerical edge cases directly.
-    ext = Base.get_extension(HaloArrays, :HaloArraysLinearSolveExt)
+    # Reach the kernel to check the numerical edge cases directly.
     run_gmres(x, A, b; restart = length(b), maxiter = 10 * length(b)) =
-        ext._gmres!(x, A, b, ext._gmres_workspace(b; restart = restart), I;
-                    abstol = 0.0, reltol = 1e-10, maxiter = maxiter)
+        Krylov.gmres!(x, A, b, Krylov.GMRESWorkspace(b; restart = restart);
+                      abstol = 0.0, reltol = 1e-10, maxiter = maxiter)
 
     # Complex system: the Hessenberg/Givens stay in the complex field — A = i,
     # b = 1 must give x = -i (a real-truncating GMRES would record H[1,1] = 0).
@@ -125,13 +125,13 @@ end
     # Happy breakdown: an exact 3-dimensional Krylov space converges (and stops)
     # without using an un-formed basis vector.
     A = Diagonal([1.0, 2, 3, 4, 5]); b = [1.0, 1, 1, 0, 0]
-    x = zeros(5); _, iters, _, conv = run_gmres(x, A, b; restart = 5, maxiter = 20)
-    @test conv && iters == 3 && x ≈ A \ b
+    x = zeros(5); r = run_gmres(x, A, b; restart = 5, maxiter = 20)
+    @test r.converged && r.iters == 3 && x ≈ A \ b
 
     # Iteration budget: maxiter = 1 must perform at most one Arnoldi step
     # (not a full restart cycle of `restart` matvecs).
-    xb = zeros(8); _, itb, _, _ = run_gmres(xb, randn(8, 8) + 8I, randn(8); restart = 30, maxiter = 1)
-    @test itb ≤ 1
+    xb = zeros(8); rb = run_gmres(xb, randn(8, 8) + 8I, randn(8); restart = 30, maxiter = 1)
+    @test rb.iters ≤ 1
 end
 
 @testset "left preconditioning (Pl) is applied, not ignored" begin
@@ -170,8 +170,8 @@ end
         relres(sol) = norm(b - Aspd * sol.u) / norm(b)
         base = solve(LinearProblem(Aspd, b; u0 = zeros(n)), alg; reltol = 1e-10, abstol = 0.0, maxiters = 500)
         @test relres(base) < 1e-9
-        for c in (1e6, 1e-6)
-            sol = solve(LinearProblem(Aspd, b; u0 = zeros(n)), alg; Pl = Diagonal(fill(c, n)), reltol = 1e-10, abstol = 0.0, maxiters = 500)
+        for c in (1e6, 1e-6), Pl in (Diagonal(fill(c, n)), c * I)
+            sol = solve(LinearProblem(Aspd, b; u0 = zeros(n)), alg; Pl, reltol = 1e-10, abstol = 0.0, maxiters = 500)
             @test sol.retcode == ReturnCode.Success
             @test relres(sol) < 1e-9
             @test abs(sol.iters - base.iters) ≤ 1
@@ -181,8 +181,71 @@ end
     # Unsupported preconditioner requests are rejected, not silently dropped.
     M = Diagonal(diag(Aspd))
     @test_throws ArgumentError solve(LinearProblem(Aspd, b), HaloCG(); Pr = M)
-    @test_throws ArgumentError solve(LinearProblem(Aspd, b), HaloGMRES(); Pr = M)
     @test_throws ArgumentError solve(LinearProblem(Aspd, b), HaloMINRES(); Pl = M)
+    @test_throws ArgumentError solve(LinearProblem(Aspd, b), HaloMINRES(); Pr = M)
+end
+
+@testset "right preconditioning (Pr) on HaloGMRES / HaloBiCGStab" begin
+    n = 12
+    # Badly scaled rows/columns: Jacobi on either side takes most of the iterations out.
+    d = collect(10.0 .^ range(0, 4; length = n))
+    Agen = Diagonal(d) + 0.1 * randn(n, n)
+    b = randn(n)
+    xref = Agen \ b
+    relres(sol) = norm(b - Agen * sol.u) / norm(b)
+    M = Diagonal(diag(Agen))
+
+    @testset "$name" for (name, alg) in (("HaloGMRES", HaloGMRES(restart = n)), ("HaloBiCGStab", HaloBiCGStab()))
+        prob() = LinearProblem(copy(Agen), copy(b); u0 = zeros(n))
+        base = solve(prob(), alg; reltol = 1e-10, abstol = 0.0, maxiters = 500)
+        right = solve(prob(), alg; Pr = M, reltol = 1e-10, abstol = 0.0, maxiters = 500)
+        @test right.retcode == ReturnCode.Success
+        @test relres(right) < 1e-9
+        @test isapprox(right.u, xref; rtol = 1e-6)
+        @test right.iters < base.iters                   # the preconditioner is applied
+
+        # Both sides at once (split Jacobi): still converges to the same solution.
+        both = solve(prob(), alg; Pl = Diagonal(sqrt.(d)), Pr = Diagonal(sqrt.(d)),
+                     reltol = 1e-10, abstol = 0.0, maxiters = 500)
+        @test both.retcode == ReturnCode.Success
+        @test isapprox(both.u, xref; rtol = 1e-6)
+
+        # A perfect right preconditioner on a diagonal system (A Pr⁻¹ = I) converges
+        # in a single iteration — proof the direction is mapped back through Pr⁻¹.
+        Ad = Diagonal(d); bd = randn(n)
+        exact = solve(LinearProblem(Ad, copy(bd); u0 = zeros(n)), alg; Pr = Diagonal(d), reltol = 1e-10, maxiters = 50)
+        @test exact.iters == 1
+        @test exact.u ≈ Ad \ bd
+
+        # Pr = c·I leaves the iterates unchanged (y = c x spans the same space),
+        # and the monitored residual is the TRUE residual, so the stopping test
+        # must be scale-invariant without any rescaling. On a well-conditioned
+        # system (rounding does not move the count) the counts must agree.
+        Awc = Diagonal(range(3.0, 6.0; length = n)) + 0.2 * randn(n, n)
+        wc() = LinearProblem(copy(Awc), copy(b); u0 = zeros(n))   # fresh: u0 is aliased
+        base_wc = solve(wc(), alg; reltol = 1e-10, abstol = 0.0, maxiters = 500)
+        for c in (1e6, 1e-6), Pr in (Diagonal(fill(c, n)), c * I)
+            sol = solve(wc(), alg; Pr, reltol = 1e-10, abstol = 0.0, maxiters = 500)
+            @test sol.retcode == ReturnCode.Success
+            @test norm(b - Awc * sol.u) / norm(b) < 1e-9
+            @test abs(sol.iters - base_wc.iters) ≤ 1
+        end
+    end
+
+    # On an N-D halo array, with a halo-array-valued diagonal preconditioner.
+    h = LocalHaloArray(Float64, (6, 5), 1; boundary_condition = :periodic)
+    fill_from_global_indices!(I -> 1.0 + 0.3 * sin(I[1] + 2I[2]), h)
+    dh = 2.0 .+ 0.5 .* h                              # positive diagonal, a halo array
+    Aop = FunctionOperator((w, v, u, p, t) -> (w .= dh .* v; w), h, h; isinplace = true, islinear = true)
+    Mop = FunctionOperator((w, v, u, p, t) -> (w .= v ./ dh; w), h, h; isinplace = true, islinear = true)
+    # LinearSolve applies Pr through `ldiv!`; FunctionOperator exposes the inverse
+    # through `\`, so wrap the inverse as the operator: Pr⁻¹ v = v ./ dh.
+    for alg in (HaloGMRES(restart = 10), HaloBiCGStab())
+        sol = solve(LinearProblem(Aop, h; u0 = zero(h)), alg; Pr = LinearSolve.InvPreconditioner(Mop),
+                    reltol = 1e-10, abstol = 0.0, maxiters = 100)
+        @test sol.retcode == ReturnCode.Success
+        @test sol.u ≈ h ./ dh
+    end
 end
 
 # A 2-D / 3-D halo array as the state of an implicit OrdinaryDiffEq solve.
@@ -304,19 +367,98 @@ end
 end
 
 @testset "HaloMINRES on a symmetric indefinite system" begin
-    ext = Base.get_extension(HaloArrays, :HaloArraysLinearSolveExt)
     n = 40; S = randn(n, n); A = Symmetric(S + S')   # eigenvalues straddle 0 → CG breaks down
     b = randn(n); x = zeros(n)
-    _, _, _, conv = ext._minres!(x, A, b, ext._minres_workspace(b);
-                                 abstol = 0.0, reltol = 1e-10, maxiter = 5n)
-    @test conv && x ≈ A \ b
+    r = Krylov.minres!(x, A, b, Krylov.MINRESWorkspace(b); abstol = 0.0, reltol = 1e-10, maxiter = 5n)
+    @test r.converged && x ≈ A \ b
+end
+
+# A preconditioner that is itself an iterative solve, truncated: its action
+# depends on the input, so it is NOT a fixed linear operator. GMRES reconstructs
+# Pr⁻¹(Σ gᵢ vᵢ) at the end of a cycle and silently gets a different vector than
+# the Σ gᵢ (Pr⁻¹ vᵢ) it built the space from; FGMRES keeps the zᵢ it applied.
+struct NestedSolve{C}
+    cache::C
+end
+function LinearAlgebra.ldiv!(z, P::NestedSolve, v)
+    c = P.cache
+    copyto!(c.b, v); fill!(c.u, 0); solve!(c); copyto!(z, c.u)
+end
+
+@testset "HaloFGMRES: flexible right preconditioning" begin
+    n = 40
+    Q = Matrix(qr(randn(n, n)).Q)
+    A = Q * Diagonal(10.0 .^ range(0, 4; length = n)) * transpose(Q); A = (A + A') / 2   # SPD, κ = 1e4
+    b = randn(n); xref = A \ b
+    relres(x) = norm(b - A * x) / norm(b)
+    prob() = LinearProblem(copy(A), copy(b); u0 = zeros(n))
+
+    @test_throws ArgumentError HaloFGMRES(restart = 0)
+
+    # With FIXED preconditioners (none, Pr, Pl, both) FGMRES is GMRES: same
+    # count, same solution. (Full cycle: restarted GMRES(20) stagnates on this κ.)
+    D = Diagonal(diag(A)); Dh = Diagonal(sqrt.(diag(A)))
+    for kw in ((;), (; Pr = D), (; Pl = D), (; Pl = Dh, Pr = Dh))
+        g = solve(prob(), HaloGMRES(restart = n); kw..., reltol = 1e-10, abstol = 0.0, maxiters = 400)
+        f = solve(prob(), HaloFGMRES(restart = n); kw..., reltol = 1e-10, abstol = 0.0, maxiters = 400)
+        @test g.retcode == ReturnCode.Success
+        @test f.retcode == ReturnCode.Success
+        @test f.iters == g.iters
+        @test isapprox(f.u, g.u; rtol = 1e-8)
+        @test relres(f.u) ≤ 2 * f.resid / norm(b) + 1e-12            # reported residual is the true one
+    end
+
+    # A VARIABLE Pr: 10 iterations of HaloCG on the same operator (its action
+    # depends on the input, so it is not a fixed linear operator). On a moderately
+    # conditioned system that is a strong preconditioner: FGMRES converges in a
+    # fraction of restarted GMRES's iterations and reports the true residual.
+    # GMRES with the same Pr builds its space from the zᵢ it applied but updates
+    # x with Pr⁻¹(Σ gᵢ vᵢ), a different vector: its reported residual (the
+    # Krylov estimate) and the true residual of the x it returns disagree.
+    n2 = 60
+    Q2 = Matrix(qr(randn(n2, n2)).Q)
+    A2 = Q2 * Diagonal(10.0 .^ range(0, 2; length = n2)) * transpose(Q2); A2 = (A2 + A2') / 2   # κ = 1e2
+    b2 = randn(n2)
+    relres2(x) = norm(b2 - A2 * x) / norm(b2)
+    prob2() = LinearProblem(copy(A2), copy(b2); u0 = zeros(n2))
+    inner = init(LinearProblem(copy(A2), zeros(n2); u0 = zeros(n2)), HaloCG();
+                 reltol = 0.0, abstol = 0.0, maxiters = 10)
+    P = NestedSolve(inner)
+    plain = solve(prob2(), HaloGMRES(restart = 20); reltol = 1e-10, abstol = 0.0, maxiters = 400)
+    @test plain.retcode == ReturnCode.Success
+    f = solve(prob2(), HaloFGMRES(restart = 20); Pr = P, reltol = 1e-10, abstol = 0.0, maxiters = 400)
+    @test f.retcode == ReturnCode.Success
+    @test relres2(f.u) < 1e-9
+    @test isapprox(f.u, A2 \ b2; rtol = 1e-6)
+    @test f.iters < plain.iters ÷ 2
+    @test isapprox(relres2(f.u), f.resid / norm(b2); rtol = 0.1)       # reported ≈ true
+    g = solve(prob2(), HaloGMRES(restart = 20); Pr = P, reltol = 1e-10, abstol = 0.0, maxiters = 400)
+    @test !isapprox(relres2(g.u), g.resid / norm(b2); rtol = 0.1)      # reported ≠ true
+
+    # A fixed Pl on top of the variable Pr: still the true solution.
+    fl = solve(prob2(), HaloFGMRES(restart = 20); Pl = Diagonal(diag(A2)), Pr = P,
+               reltol = 1e-10, abstol = 0.0, maxiters = 400)
+    @test fl.retcode == ReturnCode.Success
+    @test relres2(fl.u) < 1e-8
+    @test isapprox(fl.u, A2 \ b2; rtol = 1e-6)
+
+    # On a 2-D halo array, with a nested HaloBiCGStab as the preconditioner.
+    h = LocalHaloArray(Float64, (6, 5), 1; boundary_condition = :periodic)
+    fill_from_global_indices!(I -> 1.0 + 0.3 * sin(I[1] + 2I[2]), h)
+    dh = 2.0 .+ 0.5 .* h
+    Aop = FunctionOperator((w, v, u, p, t) -> (w .= dh .* v; w), h, h; isinplace = true, islinear = true)
+    innerh = init(LinearProblem(Aop, zero(h); u0 = zero(h)), HaloBiCGStab(); reltol = 0.0, abstol = 0.0, maxiters = 2)
+    sol = solve(LinearProblem(Aop, h; u0 = zero(h)), HaloFGMRES(restart = 10); Pr = NestedSolve(innerh),
+                reltol = 1e-10, abstol = 0.0, maxiters = 100)
+    @test sol.retcode == ReturnCode.Success
+    @test sol.u ≈ h ./ dh
 end
 
 @testset "LinearSolve algorithm interface contract" begin
     # LinearSolve's own checker: a release that adds a required hook fails here
     # instead of warning at solve time.
     # (The checker arrived in LinearSolve 5.17; compat still allows older 5.x.)
-    for alg in (HaloCG(), HaloGMRES(), HaloBiCGStab(), HaloMINRES(), HaloKrylovKit())
+    for alg in (HaloCG(), HaloGMRES(), HaloFGMRES(), HaloBiCGStab(), HaloMINRES(), HaloKrylovKit())
         if isdefined(LinearSolve, :algorithm_interface_issues)
             @test isempty(LinearSolve.algorithm_interface_issues(alg))
         else

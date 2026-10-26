@@ -24,9 +24,10 @@ collection, as the unknown; both are matrix-free and MPI-collective.
 | solver | for | notes |
 |---|---|---|
 | [`HaloCG`](@ref) | symmetric positive-definite `A` | cheapest; left preconditioner `Pl`; workspace cached |
-| [`HaloMINRES`](@ref) | symmetric, possibly indefinite `A` | where CG would break down |
-| [`HaloBiCGStab`](@ref) | general `A` | fixed memory, two products per iteration |
-| [`HaloGMRES`](@ref)`(; restart)` | general `A` | most robust; memory grows with `restart` |
+| [`HaloMINRES`](@ref) | symmetric, possibly indefinite `A` | where CG would break down; no preconditioner |
+| [`HaloBiCGStab`](@ref) | general `A` | fixed memory, two products per iteration; `Pl` and `Pr` |
+| [`HaloGMRES`](@ref)`(; restart)` | general `A` | most robust; memory grows with `restart`; `Pl` and `Pr` |
+| [`HaloFGMRES`](@ref)`(; restart)` | general `A`, variable preconditioner | flexible GMRES: `Pr` may be a nested iterative solve, `Pl` fixed; twice the memory |
 | [`HaloKrylovKit`](@ref)`(:gmres | :cg | :bicgstab)` | same | KrylovKit.jl's implementations; no preconditioning, basis allocated per solve |
 
 LinearSolve's stock `KrylovJL_*` (Krylov.jl) and `SimpleGMRES` are **not**
@@ -102,3 +103,34 @@ hand-written coordinate-free Krylov solvers across MPI ranks. For repeated
 `LinearProblem` solves, `examples/schrodinger/crank_nicolson_2d.jl` reuses one
 `LinearSolve` cache and one `HaloGMRES` workspace across every Crank–Nicolson
 time step.
+
+## Without LinearSolve: `HaloArrays.Krylov`
+
+The algorithms behind the `Halo*` solvers are plain functions in the package,
+with an explicit workspace and no LinearSolve dependency:
+
+```julia
+using HaloArrays, HaloArrays.Krylov
+ws = CGWorkspace(b)                                   # allocated once, reused
+r  = cg!(x, A, b, ws; Pl = nothing, abstol = 0.0, reltol = 1e-8, maxiter = 200)
+r.converged, r.iters, r.residual
+```
+
+`A` is anything with `mul!`, a preconditioner anything with `ldiv!`, and `x`
+is overwritten in place. The same kernels run on a `Vector`, which is how
+their edge cases are tested.
+
+```@docs
+HaloArrays.Krylov
+HaloArrays.Krylov.Result
+HaloArrays.Krylov.cg!
+HaloArrays.Krylov.minres!
+HaloArrays.Krylov.bicgstab!
+HaloArrays.Krylov.gmres!
+HaloArrays.Krylov.fgmres!
+HaloArrays.Krylov.CGWorkspace
+HaloArrays.Krylov.MINRESWorkspace
+HaloArrays.Krylov.BiCGStabWorkspace
+HaloArrays.Krylov.GMRESWorkspace
+HaloArrays.Krylov.FGMRESWorkspace
+```

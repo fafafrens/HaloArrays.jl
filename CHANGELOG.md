@@ -30,6 +30,27 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   one-time "tolerance update not implemented" warning OrdinaryDiffEq logged for
   them is silenced (tolerances were already honoured through the cache).
 
+- `HaloGMRES` and `HaloBiCGStab` accept a right preconditioner `Pr` (LinearSolve
+  convention: `Pl⁻¹ A Pr⁻¹ y = Pl⁻¹ b`, `x = Pr⁻¹ y`), alone or together with
+  `Pl`. With `Pr` only the monitored residual is the true residual. `HaloCG`
+  still takes `Pl` only and `HaloMINRES` neither; both throw on an unsupported
+  preconditioner instead of ignoring it.
+- `HaloArrays.Krylov`: the matrix-free solvers behind `HaloCG`/`HaloMINRES`/
+  `HaloBiCGStab`/`HaloGMRES`/`HaloFGMRES` now live in the package as
+  `cg!`/`minres!`/`bicgstab!`/`gmres!`/`fgmres!` with explicit workspaces
+  (`CGWorkspace(b)`, `GMRESWorkspace(b; restart)`, …) and a `Result`, usable
+  without LinearSolve (`using HaloArrays.Krylov`). Preconditioners are anything
+  with `ldiv!`; `nothing` is none. The LinearSolve extension is glue only.
+- `HaloFGMRES(; restart)`: flexible GMRES (Saad). The right preconditioner may
+  change between iterations — a nested `HaloCG`/`HaloBiCGStab` solve with a few
+  iterations, smoother sweeps, a multigrid cycle — where `HaloGMRES` would
+  silently lose convergence. `Pl` is accepted as a fixed linear operator; stores
+  the `restart` preconditioned directions (twice the memory of `HaloGMRES`).
+- `ldiv!`/`rdiv!` with a `UniformScaling` (`I`, `c*I`) on a halo array of any
+  dimensionality, as an interior-only broadcast (LinearAlgebra's methods are
+  `AbstractVecOrMat`-only). The Halo solvers' `c*I` preconditioner was silently
+  treated as the identity; it now divides by `c`.
+
 ### Fixed
 - `HaloCG`/`HaloBiCGStab`/`HaloGMRES` with a left preconditioner: the stopping
   test compared the *preconditioned* residual against `reltol * ‖b‖`, so the

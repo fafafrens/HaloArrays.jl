@@ -790,6 +790,26 @@ end
         end
     end
 
+    @testset "UniformScaling ldiv!/rdiv! on a halo array" begin
+        # LinearAlgebra's methods are AbstractVecOrMat-only (no 3-D), and `c*I`
+        # must divide by c, not be mistaken for the identity.
+        for dims in ((8,), (4, 3), (3, 2, 2))
+            u = LocalHaloArray(Float64, dims, 1; boundary_condition = :periodic)
+            b = fill_from_global_indices!(I -> Float64(sum(Tuple(I))), similar(u))
+            out = similar(u)
+            for J in (I, 2I, 0.5I)
+                @test ldiv!(out, J, b) === out
+                @test collect(out) ≈ collect(b) ./ J.λ
+                copyto!(out, b)
+                @test ldiv!(J, out) === out
+                @test collect(out) ≈ collect(b) ./ J.λ
+                copyto!(out, b)
+                @test rdiv!(out, J) === out
+                @test collect(out) ≈ collect(b) ./ J.λ
+            end
+        end
+    end
+
     @testset "ThreadedHaloArray iteration yields values, not indices" begin
         # Regression: iterate delegated to CartesianIndices and returned the
         # indices themselves, so collect/comprehensions silently gave 1,2,3,…
