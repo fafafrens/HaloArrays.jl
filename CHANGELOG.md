@@ -61,6 +61,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   treated as the identity; it now divides by `c`.
 
 ### Fixed
+
+- `HaloKrylovKit(:gmres)`: LinearSolve's `maxiters` was passed to KrylovKit as
+  its GMRES `maxiter`, which counts restart cycles of up to `krylovdim`
+  products each, and `iters` reported the cycle count. `maxiters` is now
+  converted to cycles and `iters` is the number of operator applications, as
+  for the other solvers. A scaled `c*I` preconditioner is rejected like any
+  other (it was silently treated as the identity).
+- `cg!`/`HaloCG` reports a breakdown (`⟨p, Ap⟩ = 0`: not converged, after the
+  last good iterate) instead of spinning to `maxiter` on NaNs, and its monitored
+  measure is `√|⟨r, Pl⁻¹r⟩|`, so a negative-definite pair such as
+  OrdinaryDiffEq's `W = J - M/γ` on a diffusion operator is handled as the same
+  iteration on `-A x = -b`. `bicgstab!`/`HaloBiCGStab` reports its breakdowns
+  (`⟨r̂, r⟩ = 0`, `⟨r̂, v⟩ = 0`, `t = 0`) the same way.
+- `gmres!`/`fgmres!` no longer do a second global reduction of `b` at entry;
+  `fgmres!` without `Pr` reads the correction from the Arnoldi basis instead of
+  copying every basis vector.
 - `HaloCG`/`HaloBiCGStab`/`HaloGMRES` with a left preconditioner: the stopping
   test compared the *preconditioned* residual against `reltol * ‖b‖`, so the
   effective tolerance was scaled by `‖b‖/‖M⁻¹b‖` — a strongly scaled `Pl`

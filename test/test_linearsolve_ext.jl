@@ -82,6 +82,24 @@ function _neg_laplacian!(y, x, _u, p, _t)
     return y
 end
 
+@testset "HaloKrylovKit: maxiters counts operator products; c*I is not the identity" begin
+    n = 40; Q = Matrix(qr(randn(n, n)).Q)
+    A = Q * Diagonal(range(1.0, 400.0; length = n)) * transpose(Q); A = (A + A') / 2
+    b = randn(n)
+    ncalls = Ref(0)
+    Aop = FunctionOperator((w, v, u, p, t) -> (ncalls[] += 1; mul!(w, A, v)), b, b; isinplace = true, islinear = true)
+    for (maxiters, kd) in ((7, 5), (12, 30))
+        ncalls[] = 0
+        sol = solve(LinearProblem(Aop, b; u0 = zeros(n)), HaloKrylovKit(:gmres; krylovdim = kd);
+                    reltol = 1e-14, abstol = 0.0, maxiters)
+        @test sol.retcode == ReturnCode.MaxIters
+        @test abs(sol.iters - ncalls[]) ≤ 1                       # reported ≈ operator applications (KrylovKit's own count)
+        @test ncalls[] ≤ cld(maxiters, kd) * kd + 2               # within the cycle budget, never ×krylovdim
+    end
+    @test_throws ArgumentError solve(LinearProblem(A, b; u0 = zeros(n)), HaloKrylovKit(); Pl = 2I)
+    @test solve(LinearProblem(A, b; u0 = zeros(n)), HaloKrylovKit(); Pl = I, reltol = 1e-8).retcode == ReturnCode.Success
+end
+
 @testset "Coordinate-free LinearSolve solvers on an N-D halo array" begin
     # 2-D Dirichlet Poisson with a manufactured solution u = x(1-x)y(1-y).
     n = 48; h = 1.0 / n; ctr(i) = (i - 0.5) * h

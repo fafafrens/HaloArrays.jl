@@ -63,17 +63,19 @@ end
 
 # KrylovKit's `tol` is an ABSOLUTE bound on the residual 2-norm; LinearSolve's
 # `abstol`/`reltol` combine the LinearSolve way (reltol relative to ‖b‖).
-_kk_alg(alg::HaloKrylovKitAlg, tol, maxiter) =
-    alg.method === :gmres    ? KrylovKit.GMRES(;    tol, maxiter, alg.kwargs...) :
-    alg.method === :cg       ? KrylovKit.CG(;       tol, maxiter, alg.kwargs...) :
-                               KrylovKit.BiCGStab(; tol, maxiter, alg.kwargs...)
+# KrylovKit's `maxiter` counts iterations for CG/BiCGStab but restart CYCLES for
+# GMRES (each up to `krylovdim` operator products), so LinearSolve's `maxiters`
+# — a count of operator products — is converted to cycles there.
+_kk_alg(alg::HaloKrylovKitAlg, tol, maxiters) =
+    alg.method === :gmres    ? KrylovKit.GMRES(;    tol, maxiter = cld(maxiters, _krylovdim(alg)), alg.kwargs...) :
+    alg.method === :cg       ? KrylovKit.CG(;       tol, maxiter = maxiters, alg.kwargs...) :
+                               KrylovKit.BiCGStab(; tol, maxiter = maxiters, alg.kwargs...)
+_krylovdim(alg::HaloKrylovKitAlg) = get(alg.kwargs, :krylovdim, KrylovKit.KrylovDefaults.krylovdim[])
 
 @inline _is_identity_precond(::_IdentityOp) = true
-@inline _is_identity_precond(::UniformScaling) = true
+@inline _is_identity_precond(J::UniformScaling) = isone(J.λ)
 @inline _is_identity_precond(_) = false
 
-LinearSolve.default_alias_A(::HaloKrylovKitAlg, ::Any, ::Any) = true
-LinearSolve.default_alias_b(::HaloKrylovKitAlg, ::Any, ::Any) = true
 LinearSolve.init_cacheval(::HaloKrylovKitAlg, A, b, u, Pl, Pr, maxiters, abstol, reltol, verbose, assump) = nothing
 LinearSolve.update_tolerances_internal!(cache, ::HaloKrylovKitAlg, abstol, reltol) = nothing
 # A halo array is one N-D field, not a batch of columns (see the LinearSolve ext).
@@ -88,8 +90,10 @@ function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::HaloKrylovKitAlg;
     x, info = KrylovKit.linsolve(v -> mul!(similar(v), A, v), b, cache.u, _kk_alg(alg, tol, cache.maxiters))
     x === cache.u || copyto!(cache.u, x)
     retcode = info.converged == 1 ? SciMLBase.ReturnCode.Success : SciMLBase.ReturnCode.MaxIters
+    # `numops` (operator applications) is the count comparable to `maxiters` and
+    # to the Halo solvers' `iters`; KrylovKit's `numiter` is restart cycles for GMRES.
     return SciMLBase.build_linear_solution(alg, cache.u, info.normres, cache;
-                                           retcode, iters = info.numiter)
+                                           retcode, iters = info.numops)
 end
 
 end

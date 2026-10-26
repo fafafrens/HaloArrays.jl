@@ -53,9 +53,6 @@ precond(z, ::Nothing, v) = v
 # v ← M⁻¹ v
 precond!(M, v) = ldiv!(M, v)
 precond!(::Nothing, v) = v
-# Always into `z` (FGMRES must own each zⱼ).
-precond_into!(z, M, v) = ldiv!(z, M, v)
-precond_into!(z, ::Nothing, v) = copyto!(z, v)
 
 # ---- stopping test and residual -----------------------------------------------
 # `reltol` is relative to `b` measured in the SAME norm the solver monitors; with
@@ -92,31 +89,35 @@ end
     cg!(x, A, b, ws::CGWorkspace; Pl = nothing, abstol, reltol, maxiter) -> Result
 
 Preconditioned conjugate gradient (Saad, *Iterative Methods for Sparse Linear
-Systems*, Alg. 9.1) for `A` and `Pl` symmetric/Hermitian positive-definite.
-Left preconditioning in the `Pl`-inner product; the monitored residual is
-`√⟨r, Pl⁻¹r⟩`, which is `‖b - Ax‖` without a preconditioner. One operator
-product, two inner products and three vector updates per iteration.
+Systems*, Alg. 9.1) for `A` and `Pl` symmetric/Hermitian and definite — both
+positive, or both negative (OrdinaryDiffEq's `W = J - M/γ` is negative-definite
+for a diffusion operator; CG is the same iteration on `-A x = -b`). Left
+preconditioning in the `Pl`-inner product; the monitored residual is
+`√|⟨r, Pl⁻¹r⟩|`, which is `‖b - Ax‖` without a preconditioner. A breakdown
+(`⟨p, Ap⟩ = 0`, i.e. an indefinite `A`) returns the last iterate, not converged.
+One operator product, two inner products and three vector updates per iteration.
 """
 function cg!(x, A, b, ws::CGWorkspace; Pl = nothing, abstol, reltol, maxiter)
     (; r, p, Ap) = ws
     Mb  = precond(ws.z, Pl, b)                        # ‖b‖ in the monitored norm
-    thr = threshold(sqrt(real(dot(b, Mb))), abstol, reltol)
+    thr = threshold(sqrt(abs(real(dot(b, Mb)))), abstol, reltol)
 
     residual!(r, A, x, b, Ap)                         # r  = b - A x
     z = precond(ws.z, Pl, r)                          # z  = M⁻¹ r
     copyto!(p, z)                                     # p  = z
     rz  = real(dot(r, z))
-    res = sqrt(rz)
+    res = sqrt(abs(rz))
     converged(res, thr) && return Result(0, res, true)
 
     for k in 1:maxiter
         mul!(Ap, A, p)                                # Ap = A p
         α = rz / real(dot(p, Ap))
+        isfinite(α) || return Result(k - 1, res, false)   # breakdown: ⟨p, Ap⟩ = 0 (A indefinite)
         x .+= α .* p                                  # x += α p
         r .-= α .* Ap                                 # r -= α Ap
         z = precond(ws.z, Pl, r)                      # z  = M⁻¹ r
         rz, rz_old = real(dot(r, z)), rz
-        res = sqrt(rz)
+        res = sqrt(abs(rz))
         converged(res, thr) && return Result(k, res, true)
         p .= z .+ (rz / rz_old) .* p                  # p  = z + β p
     end
@@ -231,11 +232,13 @@ function bicgstab!(x, A, b, ws::BiCGStabWorkspace; Pl = nothing, Pr = nothing, a
 
     for k in 1:maxiter
         ρ = dot(rhat, r)
+        iszero(ρ) && return Result(k - 1, res, false) # breakdown: ⟨r̂, r⟩ = 0
         β = (ρ / ρ_old) * (α / ω)
         p .= r .+ β .* (p .- ω .* v)                  # p  = r + β (p - ω v)
         p̂ = precond(phat, Pr, p)                      # p̂  = Pr⁻¹ p
         mul!(v, A, p̂); precond!(Pl, v)                # v  = Pl⁻¹ A p̂
         α = ρ / dot(rhat, v)
+        isfinite(α) || return Result(k - 1, res, false)   # breakdown: ⟨r̂, v⟩ = 0
         s .= r .- α .* v                              # s  = r - α v
         res = norm(s)
         if converged(res, thr)
@@ -245,6 +248,7 @@ function bicgstab!(x, A, b, ws::BiCGStabWorkspace; Pl = nothing, Pr = nothing, a
         ŝ = precond(shat, Pr, s)                      # ŝ  = Pr⁻¹ s
         mul!(t, A, ŝ); precond!(Pl, t)                # t  = Pl⁻¹ A ŝ
         ω = dot(t, s) / dot(t, t)
+        isfinite(ω) || return Result(k - 1, res, false)   # breakdown: t = 0
         x .+= α .* p̂ .+ ω .* ŝ                        # x += α p̂ + ω ŝ
         r .= s .- ω .* t                              # r  = s - ω t
         res = norm(r)
@@ -402,8 +406,9 @@ function gmres!(x, A, b, ws::GMRESWorkspace; Pl = nothing, Pr = nothing, orth = 
     (; V, H, g, w, Ax) = ws
     m   = length(ws.cs)
     o   = Val(resolve_orth(orth, b))
-    thr = threshold(norm(precond(w, Pl, b)), abstol, reltol)       # ‖Pl⁻¹ b‖
-    res = norm(b); total = 0
+    res = norm(precond(w, Pl, b))                     # ‖Pl⁻¹ b‖, the monitored norm
+    thr = threshold(res, abstol, reltol)
+    total = 0
 
     while total < maxiter
         r = V[1]
@@ -442,12 +447,19 @@ fixed linear operator, since it defines the norm being minimised; the monitored
 residual is `Pl⁻¹(b - Ax)`, the true residual when `Pl` is `nothing`. `orth` as
 in [`gmres!`](@ref).
 """
+# Without a right preconditioner every zⱼ is vⱼ: read the correction from V and
+# never touch Z (no copies, by dispatch).
+zbasis(ws::FGMRESWorkspace, ::Nothing) = ws.V
+zbasis(ws::FGMRESWorkspace, Pr) = ws.Z
+
 function fgmres!(x, A, b, ws::FGMRESWorkspace; Pl = nothing, Pr = nothing, orth = :auto, abstol, reltol, maxiter)
     (; V, Z, H, g, w, Ax) = ws
     m   = length(ws.cs)
     o   = Val(resolve_orth(orth, b))
-    thr = threshold(norm(precond(w, Pl, b)), abstol, reltol)       # ‖Pl⁻¹ b‖
-    res = norm(b); total = 0
+    zs  = zbasis(ws, Pr)                              # the zⱼ: Z, or V itself without Pr
+    res = norm(precond(w, Pl, b))                     # ‖Pl⁻¹ b‖, the monitored norm
+    thr = threshold(res, abstol, reltol)
+    total = 0
 
     while total < maxiter
         r = V[1]
@@ -459,14 +471,14 @@ function fgmres!(x, A, b, ws::FGMRESWorkspace; Pl = nothing, Pr = nothing, orth 
         k = 0
         for j in 1:min(m, maxiter - total)
             k = j; total += 1
-            precond_into!(Z[j], Pr, V[j])             # zⱼ = Prⱼ⁻¹ vⱼ, kept
-            mul!(w, A, Z[j]); precond!(Pl, w)         # w  = Pl⁻¹ A zⱼ
+            zⱼ = precond(Z[j], Pr, V[j])              # zⱼ = Prⱼ⁻¹ vⱼ into Z[j] (vⱼ itself without Pr)
+            mul!(w, A, zⱼ); precond!(Pl, w)           # w  = Pl⁻¹ A zⱼ
             res, happy = arnoldi_step!(ws, w, j, o)
             (converged(res, thr) || happy) && break
         end
         hessenberg_solve!(H, g, k)
         for i in 1:k
-            x .+= g[i] .* Z[i]                        # x += Σ yᵢ zᵢ
+            x .+= g[i] .* zs[i]                       # x += Σ yᵢ zᵢ
         end
         converged(res, thr) && break
     end
