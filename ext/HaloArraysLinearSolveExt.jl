@@ -55,12 +55,12 @@ const _IdentityOp = LinearSolve.SciMLOperators.IdentityOperator
 
 # ---- Conjugate Gradient — symmetric positive-definite ----
 struct CGWorkspace{T}
-    Ap::T
-    r::T
-    p::T
-    z::T
+    Ap::T; r::T; p::T; z::T
+    function CGWorkspace(b)
+        Ap = similar(b)
+        new{typeof(Ap)}(Ap, similar(b), similar(b), similar(b))
+    end
 end
-_cg_workspace(b) = CGWorkspace(similar(b), similar(b), similar(b), similar(b))
 
 # Preconditioned CG (M SPD). `rz = ⟨r, M⁻¹r⟩` is the monitored residual measure:
 # with the identity preconditioner `z ≡ r`, so `rz = ⟨r,r⟩`, `sqrt(rz) = ‖r‖`,
@@ -96,9 +96,11 @@ end
 # ---- BiCGStab — general square systems (short recurrence) ----
 struct BiCGStabWorkspace{T}
     r::T; tmp::T; rhat::T; p::T; v::T; s::T; t::T; shat::T
+    function BiCGStabWorkspace(b)
+        r = similar(b)
+        new{typeof(r)}(r, similar(b), similar(b), similar(b), similar(b), similar(b), similar(b), similar(b))
+    end
 end
-_bicgstab_workspace(b) =
-    BiCGStabWorkspace(similar(b), similar(b), similar(b), similar(b), similar(b), similar(b), similar(b), similar(b))
 
 # Preconditioned BiCGStab for Pl⁻¹ A Pr⁻¹: the directions p, s are right-
 # preconditioned before each operator product (p̂ = Pr⁻¹p, ŝ = Pr⁻¹s) and the
@@ -146,11 +148,12 @@ end
 # ---- GMRES with restart — general square systems ----
 struct GMRESWorkspace{TV,TH,TG,TC,TW}
     V::TV; H::TH; g::TG; cs::TC; sn::TG; w::TW; Ax::TW
-end
-function _gmres_workspace(b; restart)
-    K = float(eltype(b)); T = real(K); m = restart   # Hessenberg/g/sn in the element field
-    GMRESWorkspace([similar(b) for _ in 1:m+1], zeros(K, m + 1, m), zeros(K, m + 1),
-                   zeros(T, m), zeros(K, m), similar(b), similar(b))
+    function GMRESWorkspace(b; restart)
+        K = float(eltype(b)); T = real(K); m = restart   # Hessenberg/g/sn in the element field
+        V = [similar(b) for _ in 1:m+1]; H = zeros(K, m + 1, m); g = zeros(K, m + 1)
+        cs = zeros(T, m); w = similar(b)
+        new{typeof(V),typeof(H),typeof(g),typeof(cs),typeof(w)}(V, H, g, cs, zeros(K, m), w, similar(b))
+    end
 end
 
 # Givens rotation [c s; -conj(s) c] that zeros `b`; `c` is real. Correct for both
@@ -228,9 +231,11 @@ end
 # scalars stay real; only the basis/solution vectors carry the element type.
 struct MINRESWorkspace{T}
     v::T; y::T; r1::T; r2::T; w::T; w1::T; w2::T
+    function MINRESWorkspace(b)
+        v = similar(b)
+        new{typeof(v)}(v, similar(b), similar(b), similar(b), similar(b), similar(b), similar(b))
+    end
 end
-_minres_workspace(b) =
-    MINRESWorkspace(similar(b), similar(b), similar(b), similar(b), similar(b), similar(b), similar(b))
 
 function _minres!(x, A, b, work::MINRESWorkspace; abstol, reltol, maxiter)
     v, y, r1, r2, w, w1, w2 = work.v, work.y, work.r1, work.r2, work.w, work.w1, work.w2
@@ -304,13 +309,13 @@ LinearSolve._check_batched_rhs_support(::_HaloAlg, ::AbstractHaloArray) = nothin
 LinearSolve.update_tolerances_internal!(cache, ::_HaloAlg, abstol, reltol) = nothing
 
 LinearSolve.init_cacheval(::HaloCGAlg, A, b, u, Pl, Pr, maxiters, abstol, reltol, verbose, assump) =
-    _cg_workspace(b)
+    CGWorkspace(b)
 LinearSolve.init_cacheval(::HaloBiCGStabAlg, A, b, u, Pl, Pr, maxiters, abstol, reltol, verbose, assump) =
-    _bicgstab_workspace(b)
+    BiCGStabWorkspace(b)
 LinearSolve.init_cacheval(::HaloMINRESAlg, A, b, u, Pl, Pr, maxiters, abstol, reltol, verbose, assump) =
-    _minres_workspace(b)
+    MINRESWorkspace(b)
 LinearSolve.init_cacheval(alg::HaloGMRESAlg, A, b, u, Pl, Pr, maxiters, abstol, reltol, verbose, assump) =
-    _gmres_workspace(b; restart = alg.restart)
+    GMRESWorkspace(b; restart = alg.restart)
 
 _retcode(converged) = converged ? SciMLBase.ReturnCode.Success : SciMLBase.ReturnCode.MaxIters
 
