@@ -455,6 +455,35 @@ Base.similar(halo::AbstractSingleHaloArray, dims::Dims{M}) where {M} = similar(h
 Base.similar(halo::AbstractSingleHaloArray, dims::NTuple{M,<:Integer}) where {M} =
     similar(halo, eltype(halo), dims)
 
+"""
+    vec(halo::AbstractHaloArray) -> halo
+
+Return the halo array itself — a single halo array of any dimensionality, a
+field collection (`MultiHaloArray`, `ArrayOfHaloArray`, …) or a `MaybeHaloArray`.
+Base already returns `halo` for a 1-D array; a collection is never 1-D to Base,
+since its `size` is `(fields..., spatial...)`.
+
+A halo array has no 1-D form: `Base.vec` would wrap it in a `ReshapedArray` that
+scalar-indexes the interior and knows nothing of halos, boundary conditions,
+tiles, fields or MPI, and that cannot be `similar`ed back into a
+geometry-carrying array. The only callers that flatten the state are
+matrix-oriented ones — the SciML implicit integrators `vec` the state around
+every `mul!` with the Jacobian-free `W` operator and reshape it back for the
+Jacobian-vector product. Everything those callers then do with the result
+(`mul!`, broadcast, `dot`, `norm`, `axpy!`) a halo array already supports as a
+vector-space element, so the identity is the behaviour that keeps a halo-array
+state working in an implicit `OrdinaryDiffEq` solve with a matrix-free
+`linsolve` ([`HaloCG`](@ref), [`HaloGMRES`](@ref), …). Without it, an N-D array
+or any collection state fails while the `W` operator is built, before any
+linear solver runs. The stock `KrylovJL_*` solvers remain 1-D only regardless:
+Krylov.jl slices its work vectors, and OrdinaryDiffEq wraps their error weights
+in a `Diagonal`, which needs a true vector.
+"""
+Base.vec(halo::AbstractHaloArray) = halo
+# Explicit intersection with Base's `vec(::AbstractVector)`, so the 1-D case can
+# never become ambiguous whatever Base does with its own method.
+Base.vec(halo::AbstractHaloArray{<:Any,1}) = halo
+
 # permutedims/reverse have no meaningful generic behaviour on a halo array: the
 # Base fallbacks (similar + scalar indexing) would permute/flip the DATA but copy
 # the boundary condition verbatim — leaving it attached to the original axes and
