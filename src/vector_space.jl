@@ -38,7 +38,9 @@ function LinearAlgebra.norm(halo::AbstractSingleHaloArray, p::Real)
     p == 1    && return mapreduce(norm, +, halo)
     p == Inf  && return mapreduce(norm, max, halo)
     p == -Inf && return mapreduce(norm, min, halo)
-    p == 0    && return convert(float(real(eltype(halo))), mapreduce(x -> !iszero(x), +, halo))
+    # Count of nonzero cells, in the SCALAR type of a norm (Float64 for an SVector
+    # eltype, like Base's `norm(::Array{<:SVector}, 0)`; Float32 stays Float32).
+    p == 0    && return oftype(sqrt(_sqnorm_zero(eltype(halo))), mapreduce(x -> !iszero(x), +, halo))
     return mapreduce(x -> norm(x)^p, +, halo)^(1 / p)
 end
 # The 2-norm above IS the fast path: `_local_sum` runs the contiguous-aware
@@ -69,8 +71,12 @@ end
 # The interior dot is allocation-free (BLAS-backed for contiguous storage) and
 # globally correct (MPI Allreduce; per-tile / per-field combine).
 LinearAlgebra.dot(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray) = _local_dot(x, y)
+# Tuple broadcast, not `zip`/`map`/`foreach` over the two field tuples: those
+# silently stop at the shorter tuple, so two collections with different field
+# counts would combine a partial result. Broadcasting two tuples checks their
+# lengths (`DimensionMismatch`), unrolls at compile time and allocates nothing.
 LinearAlgebra.dot(x::AbstractHaloCollection, y::AbstractHaloCollection) =
-    sum(fxy -> dot(fxy[1], fxy[2]), zip(eachfield(x), eachfield(y)))
+    sum(dot.(eachfield(x), eachfield(y)))
 # MaybeHaloArray: forward to the inner array (its own dot/norm already do the right
 # global reduction); an inactive value contributes nothing. Without these, `dot`
 # hits the two-arg-mapreduce fallback below and `norm` hits Base's generic path —
@@ -266,12 +272,14 @@ function LinearAlgebra.reflect!(x::AbstractSingleHaloArray, y::AbstractSingleHal
 end
 
 # Field collections: apply the per-field method (each field picks serial/threaded).
+# Tuple broadcast rather than a two-tuple `foreach`, which silently stops at the
+# shorter tuple (see the collection `dot`); `Ref` keeps the scalars out of it.
 swap!(x::AbstractHaloCollection, y::AbstractHaloCollection) =
-    (foreach(swap!, eachfield(x), eachfield(y)); (x, y))
+    (swap!.(eachfield(x), eachfield(y)); (x, y))
 LinearAlgebra.rotate!(x::AbstractHaloCollection, y::AbstractHaloCollection, c, s) =
-    (foreach((fx, fy) -> rotate!(fx, fy, c, s), eachfield(x), eachfield(y)); (x, y))
+    (rotate!.(eachfield(x), eachfield(y), Ref(c), Ref(s)); (x, y))
 LinearAlgebra.reflect!(x::AbstractHaloCollection, y::AbstractHaloCollection, c, s) =
-    (foreach((fx, fy) -> reflect!(fx, fy, c, s), eachfield(x), eachfield(y)); (x, y))
+    (reflect!.(eachfield(x), eachfield(y), Ref(c), Ref(s)); (x, y))
 
 # MaybeHaloArray: forward to the inner array when active, no-op when inactive
 # (completes the BLAS-1 surface — `dot`/`norm`/`axpy!`/… already cover Maybe).
