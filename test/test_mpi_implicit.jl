@@ -2,17 +2,17 @@ using Test
 using HaloArrays
 using MPI
 using LinearSolve
-using Krylov
+using KrylovKit
 using OrdinaryDiffEq
 using LinearAlgebra
 
 # Distributed implicit solve regression: the stiff Fisher–KPP reaction–diffusion
-# integrated with FBDF + HaloKrylov(:gmres), the state a *distributed* HaloArray.
+# integrated with FBDF + HaloKrylovKit(:gmres), the state a *distributed* HaloArray.
 # Asserts the integrator stays collective (identical accepted-step counts on
 # every rank) and that the gathered solution matches a single-process reference.
 # Runs only under the MPI CI job (MPI_SIZE > 1).
 
-@testset "MPI implicit (FBDF + HaloKrylov)" begin
+@testset "MPI implicit (FBDF + HaloKrylovKit)" begin
     comm = MPI.COMM_WORLD
     nr = MPI.Comm_size(comm)
     GNX = 96
@@ -31,7 +31,7 @@ using LinearAlgebra
         end
         return nothing
     end
-    alg = FBDF(linsolve = HaloKrylov(:gmres), concrete_jac = false)
+    alg = FBDF(linsolve = HaloKrylovKit(:gmres), concrete_jac = false)
     dx2inv = inv((1.0 / GNX)^2)
 
     topo = CartesianTopology(comm, (0,); periodic = (true,))

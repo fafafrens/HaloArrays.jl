@@ -8,13 +8,11 @@
 #   • The HaloArray is the SciML state directly (no marshalling to a Vector).
 #   • Implicit FBDF + `concrete_jac = false` ⇒ no dense Jacobian; the Newton/W
 #     system is solved by GMRES using only matrix-vector products.
-#   • The linear solver is `HaloKrylov(:gmres)` from HaloArrays' LinearSolve/Krylov
-#     extension — a `KrylovJL` whose workspace is built with `similar` (via
-#     `KrylovConstructor`), so the HaloArray can be the solver vector. (The stock
-#     `KrylovJL_*` allocate via `S(undef, n)`, which a geometry-carrying HaloArray
-#     has no constructor for; the extension fixes that.) The state here is 1-D —
-#     `HaloKrylov` needs that, since Krylov.jl requires `b::AbstractVector`. For
-#     a 2-D/3-D state use the coordinate-free `HaloCG`/`HaloGMRES`/`HaloBiCGStab`.
+#   • The linear solver is `HaloKrylovKit(:gmres)` from HaloArrays' LinearSolve/
+#     KrylovKit extension: KrylovKit is VectorInterface-generic, so the HaloArray
+#     is its solver vector as-is (any dimensionality). The package's own
+#     coordinate-free `HaloCG`/`HaloGMRES`/`HaloBiCGStab` work the same way and
+#     add left preconditioning and workspace caching.
 #
 # Only the state *constructor* changes between backends — the RHS is
 # backend-agnostic (it loops over storage tiles: one for Local/MPI, many for
@@ -25,7 +23,7 @@
 using HaloArrays
 using OrdinaryDiffEq
 using LinearSolve
-using Krylov
+using KrylovKit
 using Printf
 
 const D = 1.0
@@ -56,10 +54,10 @@ end
 # interior-only and works on any halo-array backend.
 function solve_stiff(u0, f!; nx, tend = 0.3, label)
     prob = ODEProblem(f!, u0, (0.0, tend), inv((1.0 / nx)^2))
-    # `HaloKrylov(:gmres)` (the LinearSolve/Krylov extension) runs GMRES with the
-    # HaloArray itself as the solver vector — matrix-free, cached. `concrete_jac =
+    # `HaloKrylovKit(:gmres)` (the LinearSolve/KrylovKit extension) runs GMRES with
+    # the HaloArray itself as the solver vector — matrix-free. `concrete_jac =
     # false` keeps the Newton/W system matrix-free (Jacobian-vector products).
-    alg = FBDF(linsolve = HaloKrylov(:gmres), concrete_jac = false)
+    alg = FBDF(linsolve = HaloKrylovKit(:gmres), concrete_jac = false)
     sol = solve(prob, alg; reltol = 1e-7, abstol = 1e-7, save_everystep = false)
     ref = solve(prob, Tsit5(); reltol = 1e-10, abstol = 1e-10, save_everystep = false)
     err = maximum(abs, sol.u[end] - ref.u[end])

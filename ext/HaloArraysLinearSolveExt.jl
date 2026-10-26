@@ -2,66 +2,16 @@ module HaloArraysLinearSolveExt
 
 using HaloArrays
 using LinearSolve
-using Krylov
 using LinearAlgebra: dot, norm, mul!, ldiv!, UniformScaling
 
 const SciMLBase = LinearSolve.SciMLBase
 const _IdentityOp = LinearSolve.SciMLOperators.IdentityOperator
 
 # ============================================================
-# Path 1 — KrylovJL on a *1-D* halo array (Krylov.jl, mature, cached)
+# Coordinate-free solvers for halo arrays of any dimensionality
 #
-# `HaloKrylov(:method)` is a thin KrylovJL alias; the init_cacheval override
-# below builds Krylov's workspace via KrylovConstructor (similar-based) instead
-# of `S(undef, n)`, so the stock `KrylovJL_*` work on a halo array too — and are
-# cached by LinearSolve's solve!. Krylov.jl requires `b::AbstractVector`, so this
-# path only applies to 1-D halo-array states (an N-D halo array is not a vector).
-# For N-D states use the coordinate-free solvers in Path 2.
-# ============================================================
-
-const _HALOKRYLOV_METHODS = (:gmres, :cg, :bicgstab, :minres, :dqgmres, :diom,
-                             :fom, :cgs, :minares, :minres_qlp, :symmlq)
-
-function HaloArrays.HaloKrylov(method::Symbol; kwargs...)
-    method in _HALOKRYLOV_METHODS || throw(ArgumentError(string(
-        "HaloKrylov: unsupported method :", method, ". Supported (matrix-free, ",
-        "cached via LinearSolve's KrylovJL): ", join(_HALOKRYLOV_METHODS, ", "), ". ",
-        ":fgmres/:qmr/:bilq allocate via S(undef, n) mid-solve; :car/:cg_lanczos ",
-        "are not wrapped by LinearSolve's KrylovJL.")))
-    return KrylovJL(; KrylovAlg = getproperty(Krylov, Symbol(method, :!)), kwargs...)
-end
-
-function LinearSolve.init_cacheval(alg::KrylovJL, A, b::AbstractHaloArray, u, Pl, Pr,
-        maxiters::Int, abstol, reltol, verbose::Union{LinearSolve.LinearVerbosity, Bool},
-        assumptions::LinearSolve.OperatorAssumptions; zeroinit = true)
-    KS = LinearSolve.get_KrylovJL_solver(alg.KrylovAlg)
-    kc = Krylov.KrylovConstructor(b)
-    memory_methods = (Krylov.dqgmres!, Krylov.diom!, Krylov.gmres!, Krylov.fgmres!,
-                      Krylov.gpmr!, Krylov.fom!)
-    solver = if zeroinit
-        alg.KrylovAlg in memory_methods ? KS(kc; memory = 1) : KS(kc)
-    else
-        knt = NamedTuple(alg.kwargs)
-        memory = haskey(knt, :memory) ? knt[:memory] :
-                 (alg.gmres_restart == 0 ? min(20, size(A, 1)) : alg.gmres_restart)
-        if alg.KrylovAlg in memory_methods
-            KS(kc; memory)
-        elseif alg.KrylovAlg in (Krylov.minres!, Krylov.symmlq!, Krylov.lslq!,
-                                 Krylov.lsqr!, Krylov.lsmr!)
-            alg.window != 0 ? KS(kc; window = alg.window) : KS(kc)
-        else
-            KS(kc)
-        end
-    end
-    solver.x = u
-    return solver
-end
-
-# ============================================================
-# Path 2 — coordinate-free solvers for *N-D* halo arrays
-#
-# Krylov.jl / SimpleGMRES model the unknown as a flat `AbstractVector`, so they
-# can't take an N-D halo array. These solvers (standard algorithms, Saad)
+# LinearSolve's stock Krylov wrappers model the unknown as a flat `AbstractVector`,
+# so they can't take an N-D halo array. These solvers (standard algorithms, Saad)
 # touch the unknown only through similar/copy/broadcast/dot/norm/mul!, so they
 # run on a halo array of any dimensionality — and stay MPI-collective, since
 # HaloArrays defines dot/norm as global reductions. Each is wrapped as a
@@ -324,9 +274,16 @@ end
 # LinearSolve rejects an `AbstractMatrix` right-hand side for Krylov subspace
 # methods, reading extra columns as a batch of independent vectors. A 2-D halo
 # array is one N-D field, not a batch, and these solvers are coordinate-free —
-# they only ever touch `b` through broadcasts and `_hdot`. Opt out of the check.
-LinearSolve._check_batched_rhs_support(::LinearSolve.AbstractKrylovSubspaceMethod,
-    ::AbstractHaloArray) = nothing
+# they only ever touch `b` through broadcasts and `_hdot`. Opt out of the check
+# for THESE algorithms only (not every `AbstractKrylovSubspaceMethod`: a broader
+# method was ambiguous with LinearSolve's own `KrylovJL` method).
+const _HaloAlg = Union{HaloCGAlg, HaloBiCGStabAlg, HaloMINRESAlg, HaloGMRESAlg}
+LinearSolve._check_batched_rhs_support(::_HaloAlg, ::AbstractHaloArray) = nothing
+
+# OrdinaryDiffEq updates the per-step tolerances through `update_tolerances!`,
+# which sets `cache.abstol`/`cache.reltol` (read fresh by every `solve!` below)
+# and then calls this hook; the generic fallback only warns "not implemented".
+LinearSolve.update_tolerances_internal!(cache, ::_HaloAlg, abstol, reltol) = nothing
 
 LinearSolve.init_cacheval(::HaloCGAlg, A, b, u, Pl, Pr, maxiters, abstol, reltol, verbose, assump) =
     _cg_workspace(b)
