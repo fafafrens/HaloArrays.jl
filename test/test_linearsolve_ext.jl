@@ -114,7 +114,7 @@ end
     # Reach the internal solver to check the numerical edge cases directly.
     ext = Base.get_extension(HaloArrays, :HaloArraysLinearSolveExt)
     run_gmres(x, A, b; restart = length(b), maxiter = 10 * length(b)) =
-        ext._gmres!(x, A, b, ext._gmres_workspace(b; restart = restart), I;
+        ext._gmres!(x, A, b, ext._gmres_workspace(b; restart = restart), I, I;
                     abstol = 0.0, reltol = 1e-10, maxiter = maxiter)
 
     # Complex system: the Hessenberg/Givens stay in the complex field — A = i,
@@ -181,8 +181,68 @@ end
     # Unsupported preconditioner requests are rejected, not silently dropped.
     M = Diagonal(diag(Aspd))
     @test_throws ArgumentError solve(LinearProblem(Aspd, b), HaloCG(); Pr = M)
-    @test_throws ArgumentError solve(LinearProblem(Aspd, b), HaloGMRES(); Pr = M)
     @test_throws ArgumentError solve(LinearProblem(Aspd, b), HaloMINRES(); Pl = M)
+    @test_throws ArgumentError solve(LinearProblem(Aspd, b), HaloMINRES(); Pr = M)
+end
+
+@testset "right preconditioning (Pr) on HaloGMRES / HaloBiCGStab" begin
+    n = 12
+    # Badly scaled rows/columns: Jacobi on either side takes most of the iterations out.
+    d = collect(10.0 .^ range(0, 4; length = n))
+    Agen = Diagonal(d) + 0.1 * randn(n, n)
+    b = randn(n)
+    xref = Agen \ b
+    relres(sol) = norm(b - Agen * sol.u) / norm(b)
+    M = Diagonal(diag(Agen))
+
+    @testset "$name" for (name, alg) in (("HaloGMRES", HaloGMRES(restart = n)), ("HaloBiCGStab", HaloBiCGStab()))
+        prob() = LinearProblem(copy(Agen), copy(b); u0 = zeros(n))
+        base = solve(prob(), alg; reltol = 1e-10, abstol = 0.0, maxiters = 500)
+        right = solve(prob(), alg; Pr = M, reltol = 1e-10, abstol = 0.0, maxiters = 500)
+        @test right.retcode == ReturnCode.Success
+        @test relres(right) < 1e-9
+        @test isapprox(right.u, xref; rtol = 1e-6)
+        @test right.iters < base.iters                   # the preconditioner is applied
+
+        # Both sides at once (split Jacobi): still converges to the same solution.
+        both = solve(prob(), alg; Pl = Diagonal(sqrt.(d)), Pr = Diagonal(sqrt.(d)),
+                     reltol = 1e-10, abstol = 0.0, maxiters = 500)
+        @test both.retcode == ReturnCode.Success
+        @test isapprox(both.u, xref; rtol = 1e-6)
+
+        # A perfect right preconditioner on a diagonal system (A Pr⁻¹ = I) converges
+        # in a single iteration — proof the direction is mapped back through Pr⁻¹.
+        Ad = Diagonal(d); bd = randn(n)
+        exact = solve(LinearProblem(Ad, copy(bd); u0 = zeros(n)), alg; Pr = Diagonal(d), reltol = 1e-10, maxiters = 50)
+        @test exact.iters == 1
+        @test exact.u ≈ Ad \ bd
+
+        # Pr = c·I leaves the iterates unchanged (y = c x spans the same space),
+        # and the monitored residual is the TRUE residual, so the stopping test
+        # must be scale-invariant without any rescaling. (Slack for rounding: on
+        # this ill-conditioned system BiCGStab's count moves by an iteration or two.)
+        for c in (1e6, 1e-6)
+            sol = solve(prob(), alg; Pr = Diagonal(fill(c, n)), reltol = 1e-10, abstol = 0.0, maxiters = 500)
+            @test sol.retcode == ReturnCode.Success
+            @test relres(sol) < 1e-9
+            @test abs(sol.iters - base.iters) ≤ max(2, base.iters ÷ 10)
+        end
+    end
+
+    # On an N-D halo array, with a halo-array-valued diagonal preconditioner.
+    h = LocalHaloArray(Float64, (6, 5), 1; boundary_condition = :periodic)
+    fill_from_global_indices!(I -> 1.0 + 0.3 * sin(I[1] + 2I[2]), h)
+    dh = 2.0 .+ 0.5 .* h                              # positive diagonal, a halo array
+    Aop = FunctionOperator((w, v, u, p, t) -> (w .= dh .* v; w), h, h; isinplace = true, islinear = true)
+    Mop = FunctionOperator((w, v, u, p, t) -> (w .= v ./ dh; w), h, h; isinplace = true, islinear = true)
+    # LinearSolve applies Pr through `ldiv!`; FunctionOperator exposes the inverse
+    # through `\`, so wrap the inverse as the operator: Pr⁻¹ v = v ./ dh.
+    for alg in (HaloGMRES(restart = 10), HaloBiCGStab())
+        sol = solve(LinearProblem(Aop, h; u0 = zero(h)), alg; Pr = LinearSolve.InvPreconditioner(Mop),
+                    reltol = 1e-10, abstol = 0.0, maxiters = 100)
+        @test sol.retcode == ReturnCode.Success
+        @test sol.u ≈ h ./ dh
+    end
 end
 
 # A 2-D / 3-D halo array as the state of an implicit OrdinaryDiffEq solve.

@@ -30,6 +30,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   one-time "tolerance update not implemented" warning OrdinaryDiffEq logged for
   them is silenced (tolerances were already honoured through the cache).
 
+- `HaloGMRES` and `HaloBiCGStab` accept a right preconditioner `Pr` (LinearSolve
+  convention: `Pl⁻¹ A Pr⁻¹ y = Pl⁻¹ b`, `x = Pr⁻¹ y`), alone or together with
+  `Pl`. With `Pr` only the monitored residual is the true residual. `HaloCG`
+  still takes `Pl` only and `HaloMINRES` neither; both throw on an unsupported
+  preconditioner instead of ignoring it.
+
 ### Fixed
 - `HaloCG`/`HaloBiCGStab`/`HaloGMRES` with a left preconditioner: the stopping
   test compared the *preconditioned* residual against `reltol * ‖b‖`, so the
