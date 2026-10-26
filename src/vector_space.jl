@@ -288,13 +288,9 @@ function dots!(h, V, w, j)
     return h
 end
 dots!(h, V, w::AbstractSingleHaloArray, j) = _dots!(h, V, w, j, communicator(w))
-# A collection reduces once too: its local product is the sum over fields of the
-# per-field local products (the tuple broadcast rejects a field-count mismatch,
-# as `dot` does), and its communicator is its fields' (one topology per collection).
+# A collection reduces once too (`_local_dot` over its fields, reduction.jl;
+# `communicator` from its fields, abstract_haloarray.jl).
 dots!(h, V, w::AbstractHaloCollection, j) = _dots!(h, V, w, j, communicator(w))
-_local_dot(x::AbstractHaloCollection, y::AbstractHaloCollection) =
-    sum(_local_dot.(eachfield(x), eachfield(y)))
-communicator(c::AbstractHaloCollection) = communicator(first(eachfield(c)))
 # Serial backends: `_local_dot` is the whole reduction (tile-parallel on ThreadedHaloArray).
 function _dots!(h, V, w, j, ::Nothing)
     for i in 1:j
