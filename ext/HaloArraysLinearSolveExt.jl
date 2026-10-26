@@ -19,23 +19,12 @@ const _IdentityOp = LinearSolve.SciMLOperators.IdentityOperator
 # in `cache.cacheval`) and reused by `solve!`, which reports a proper retcode.
 # ============================================================
 
-# Stopping threshold for the residual measure a solver monitors. `reltol` is
-# relative to `b` measured in the SAME norm as that residual: with a left
-# preconditioner the loops monitor the preconditioned residual (‖M⁻¹r‖, or
-# √⟨r, M⁻¹r⟩ in CG), so `b` must be measured as ‖M⁻¹b‖ (resp. √⟨b, M⁻¹b⟩) —
-# otherwise the effective tolerance is scaled by ‖b‖/‖M⁻¹b‖ and a strongly
-# scaled `Pl` reports "converged" at a true residual far above `reltol` (or
-# over-solves). Unpreconditioned, both measures are ‖b‖: the stock path.
+# Stopping threshold. `reltol` is relative to `b` measured in the SAME norm the
+# loop monitors: with a left preconditioner that is ‖M⁻¹b‖ (BiCGStab, GMRES) or
+# √⟨b, M⁻¹b⟩ (CG), never the plain ‖b‖ — otherwise a scaled `Pl` shifts the
+# effective tolerance by ‖b‖/‖M⁻¹b‖. Each solver computes its own measure below.
 @inline _threshold(bnorm, abstol, reltol) =
     max(abstol, reltol * max(bnorm, eps(typeof(bnorm))))
-# ‖M⁻¹b‖ (BiCGStab/GMRES) and √⟨b, M⁻¹b⟩ (CG), computed into a workspace vector
-# the caller is about to overwrite; the identity cases cost one reduction, as before.
-@inline _precond_bnorm(b, ::_IdentityOp, tmp)   = norm(b)
-@inline _precond_bnorm(b, ::UniformScaling, tmp) = norm(b)
-@inline _precond_bnorm(b, Pl, tmp)               = (_apply_precond!(tmp, Pl, b); norm(tmp))
-@inline _precond_cgnorm(b, ::_IdentityOp, tmp)   = norm(b)
-@inline _precond_cgnorm(b, ::UniformScaling, tmp) = norm(b)
-@inline _precond_cgnorm(b, Pl, tmp)               = (_apply_precond!(tmp, Pl, b); sqrt(real(dot(b, tmp))))
 
 # ---- left-preconditioning helpers ----
 # These solvers apply a LEFT preconditioner `Pl` (approximating A), the usual
@@ -74,7 +63,8 @@ _cg_workspace(b) = CGWorkspace(similar(b), similar(b), similar(b), similar(b))
 # stock CG — no extra communication when unpreconditioned.
 function _cg!(x, A, b, w::CGWorkspace, Pl; abstol, reltol, maxiter)
     Ap, r, p, z = w.Ap, w.r, w.p, w.z
-    thr = _threshold(_precond_cgnorm(b, Pl, Ap), abstol, reltol)   # Ap is scratch here
+    _apply_precond!(Ap, Pl, b)                      # Ap = M⁻¹ b   (scratch for now)
+    thr = _threshold(sqrt(real(dot(b, Ap))), abstol, reltol)   # ‖b‖ in the CG norm
     mul!(Ap, A, x); copyto!(r, b); r .-= Ap        # r = b - A*x
     _apply_precond!(z, Pl, r)                       # z = M⁻¹ r
     copyto!(p, z)
@@ -110,7 +100,8 @@ _bicgstab_workspace(b) =
 # (identical to the true residual when unpreconditioned).
 function _bicgstab!(x, A, b, w::BiCGStabWorkspace, Pl; abstol, reltol, maxiter)
     r, tmp, rhat, p, v, s, t = w.r, w.tmp, w.rhat, w.p, w.v, w.s, w.t
-    thr = _threshold(_precond_bnorm(b, Pl, tmp), abstol, reltol)   # tmp is scratch here
+    _apply_precond!(tmp, Pl, b)                     # tmp = M⁻¹ b  (scratch for now)
+    thr = _threshold(norm(tmp), abstol, reltol)
     copyto!(r, b); mul!(tmp, A, x); r .-= tmp       # r = b - A*x
     _apply_precond!(Pl, r)                          # r ← M⁻¹ r
     copyto!(rhat, r)
@@ -169,7 +160,8 @@ end
 function _gmres!(x, A, b, work::GMRESWorkspace, Pl; abstol, reltol, maxiter)
     V, H, g, cs, sn, w, Ax = work.V, work.H, work.g, work.cs, work.sn, work.w, work.Ax
     T = real(float(eltype(b))); m = length(cs)
-    thr = _threshold(_precond_bnorm(b, Pl, w), abstol, reltol)     # w is scratch here
+    _apply_precond!(w, Pl, b)                        # w = M⁻¹ b    (scratch for now)
+    thr = _threshold(norm(w), abstol, reltol)
     res = norm(b); total = 0
     while total < maxiter
         mul!(Ax, A, x)
