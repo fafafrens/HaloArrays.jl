@@ -45,6 +45,10 @@ solve(prob, FBDF(linsolve = HaloKrylov(:gmres), concrete_jac = false))   # 1-D s
 solve(prob, FBDF(linsolve = HaloGMRES(),        concrete_jac = false))   # N-D state
 ```
 
+An N-D state passes through untouched: `vec` is the identity on a halo array,
+so the integrator's internal flattening around its matrix-free `W` operator
+never wraps the state in a `ReshapedArray`.
+
 This works on **distributed states** too: OrdinaryDiffEq automatically wraps the
 iterative solver with error-weight preconditioners (`Diagonal(weight)` where
 `weight` is a halo array), and HaloArrays supplies elementwise `mul!`/`ldiv!`

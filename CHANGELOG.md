@@ -4,6 +4,17 @@ All notable changes to HaloArrays.jl are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- `vec(halo)` is the identity on a halo array of any dimensionality, so a 2-D or
+  3-D halo array now works as the state of an implicit `OrdinaryDiffEq` solve
+  with a matrix-free `linsolve` (`HaloCG`, `HaloGMRES`, …), as the solver docs
+  already described. Before, the integrator `vec`-wrapped the state into a
+  `ReshapedArray` and failed while building its `W` operator (`similar` of a
+  1-D `Dims` on a 2-D geometry) before any linear solver ran; only 1-D states
+  worked, where `vec` was already the identity.
+
 ## [0.12.1] — 2026-10-07
 
 ### Added

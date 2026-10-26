@@ -164,6 +164,41 @@ end
     @test_throws ArgumentError solve(LinearProblem(Aspd, b), HaloMINRES(); Pl = M)
 end
 
+# A 2-D / 3-D halo array as the state of an implicit OrdinaryDiffEq solve.
+# OrdinaryDiffEq `vec`s the state around every `mul!` with the matrix-free `W`
+# operator (and `zero(vec(u))`s it to build `W`); `vec` is the identity on a halo
+# array, so the N-D state reaches the Jacobian-vector product and the coordinate-
+# free solvers untouched. Heat equation, Dirichlet, vs. a tight explicit reference.
+@testset "Implicit OrdinaryDiffEq on an N-D halo array state" begin
+    @test vec(LocalHaloArray(Float64, (4, 3), 1; boundary_condition = :periodic)) isa LocalHaloArray{Float64,2}
+    function heat!(du, u, p, t)
+        synchronize_halo!(u)
+        s = parent(u); d = parent(du)
+        @inbounds for I in CartesianIndices(interior_range(u))
+            acc = zero(eltype(s))
+            for v in HaloArrays.versors(u)
+                e = CartesianIndex(v)
+                acc += s[I - e] - 2s[I] + s[I + e]
+            end
+            d[I] = acc * p
+        end
+        return nothing
+    end
+    @testset "$(length(dims))-D, $name" for dims in ((24, 20), (10, 9, 8)),
+                                            (name, alg) in (("HaloCG", HaloCG()), ("HaloGMRES", HaloGMRES()))
+        n = dims[1]
+        u0 = LocalHaloArray(Float64, dims, 1; boundary_condition = :antireflecting)
+        fill_from_global_indices!(I -> exp(-sum(d -> (I[d] - dims[d] / 2)^2, 1:length(dims)) / 6), u0)
+        prob = ODEProblem(heat!, u0, (0.0, 0.05), Float64(n^2))
+        ref = solve(prob, Tsit5(); reltol = 1e-10, abstol = 1e-10, save_everystep = false)
+        sol = solve(prob, FBDF(linsolve = alg, concrete_jac = false);
+                    reltol = 1e-7, abstol = 1e-7, save_everystep = false)
+        @test sol.retcode == ReturnCode.Success
+        @test sol.u[end] isa LocalHaloArray{Float64,length(dims)}
+        @test maximum(abs, sol.u[end] - ref.u[end]) < 1e-6
+    end
+end
+
 @testset "HaloMINRES on a symmetric indefinite system" begin
     ext = Base.get_extension(HaloArrays, :HaloArraysLinearSolveExt)
     n = 40; S = randn(n, n); A = Symmetric(S + S')   # eigenvalues straddle 0 → CG breaks down
