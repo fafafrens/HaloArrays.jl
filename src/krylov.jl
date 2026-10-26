@@ -248,7 +248,10 @@ function bicgstab!(x, A, b, ws::BiCGStabWorkspace; Pl = nothing, Pr = nothing, a
         ŝ = precond(shat, Pr, s)                      # ŝ  = Pr⁻¹ s
         mul!(t, A, ŝ); precond!(Pl, t)                # t  = Pl⁻¹ A ŝ
         ω = dot(t, s) / dot(t, t)
-        isfinite(ω) || return Result(k - 1, res, false)   # breakdown: t = 0
+        if !isfinite(ω)                               # breakdown: t = 0. `res` is ‖s‖, the
+            x .+= α .* p̂                              # residual of the half-step x + α p̂:
+            return Result(k, res, false)              # return that iterate, so x and res agree
+        end
         x .+= α .* p̂ .+ ω .* ŝ                        # x += α p̂ + ω ŝ
         r .= s .- ω .* t                              # r  = s - ω t
         res = norm(r)

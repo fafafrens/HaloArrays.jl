@@ -64,6 +64,11 @@ LinearAlgebra.mul!(y, D::ScaleOp, x) = (y .= D.d .* x; y)
     Askew = [0.0 1.0; -1.0 0.0]; bs = [1.0, 0.0]            # ⟨r̂, A r̂⟩ = 0 at the first step
     rs = bicgstab!(zeros(2), Askew, bs, BiCGStabWorkspace(bs); abstol = 0.0, reltol = 1e-10, maxiter = 50)
     @test !rs.converged && rs.iters == 0 && isfinite(rs.residual)
+    # t = A ŝ = 0 breakdown: the returned x and residual must describe the same iterate
+    At = [1.0 2.0; 0.0 0.0]; bt = [1.0, 2.0]; xt = zeros(2)
+    rt = bicgstab!(xt, At, bt, BiCGStabWorkspace(bt); abstol = 0.0, reltol = 1e-10, maxiter = 50)
+    @test !rt.converged
+    @test rt.residual ≈ norm(bt - At * xt)
 
     # fgmres! without Pr leaves Z untouched (the correction reads V).
     wsz = FGMRESWorkspace(b; restart = n); foreach(z -> fill!(z, 7.0), wsz.Z)
