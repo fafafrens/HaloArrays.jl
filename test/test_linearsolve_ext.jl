@@ -114,7 +114,7 @@ end
     # Reach the internal solver to check the numerical edge cases directly.
     ext = Base.get_extension(HaloArrays, :HaloArraysLinearSolveExt)
     run_gmres(x, A, b; restart = length(b), maxiter = 10 * length(b)) =
-        ext._gmres!(x, A, b, ext.GMRESWorkspace(b; restart = restart), I, I;
+        ext._krylov!(x, A, b, ext.GMRESWorkspace(b; restart = restart), I, I;
                     abstol = 0.0, reltol = 1e-10, maxiter = maxiter)
 
     # Complex system: the Hessenberg/Givens stay in the complex field — A = i,
@@ -367,7 +367,7 @@ end
     ext = Base.get_extension(HaloArrays, :HaloArraysLinearSolveExt)
     n = 40; S = randn(n, n); A = Symmetric(S + S')   # eigenvalues straddle 0 → CG breaks down
     b = randn(n); x = zeros(n)
-    _, _, _, conv = ext._minres!(x, A, b, ext.MINRESWorkspace(b);
+    _, _, _, conv = ext._krylov!(x, A, b, ext.MINRESWorkspace(b), I, I;
                                  abstol = 0.0, reltol = 1e-10, maxiter = 5n)
     @test conv && x ≈ A \ b
 end

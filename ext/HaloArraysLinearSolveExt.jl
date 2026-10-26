@@ -63,7 +63,8 @@ end
 # with the identity preconditioner `z ≡ r`, so `rz = ⟨r,r⟩`, `sqrt(rz) = ‖r‖`,
 # and the two per-iteration reductions (`⟨p,Ap⟩`, `⟨r,z⟩`) reduce to exactly the
 # stock CG — no extra communication when unpreconditioned.
-function _cg!(x, A, b, w::CGWorkspace, Pl; abstol, reltol, maxiter)
+function _krylov!(x, A, b, w::CGWorkspace, Pl, Pr; abstol, reltol, maxiter)
+    _reject_right_precond(Pr)
     Ap, r, p = w.Ap, w.r, w.p
     Mb = _precond(Ap, Pl, b)                        # M⁻¹ b        (Ap is scratch here)
     thr = _threshold(sqrt(real(dot(b, Mb))), abstol, reltol)   # ‖b‖ in the CG norm
@@ -104,7 +105,7 @@ end
 # solution is updated with p̂, ŝ; the products are left-preconditioned in place,
 # so all residual norms are the Pl-preconditioned residual (the true residual
 # when Pl is the identity, whatever Pr is).
-function _bicgstab!(x, A, b, w::BiCGStabWorkspace, Pl, Pr; abstol, reltol, maxiter)
+function _krylov!(x, A, b, w::BiCGStabWorkspace, Pl, Pr; abstol, reltol, maxiter)
     r, tmp, rhat, p, v, s, t, shat = w.r, w.tmp, w.rhat, w.p, w.v, w.s, w.t, w.shat
     thr = _threshold(norm(_precond(tmp, Pl, b)), abstol, reltol)   # ‖Pl⁻¹ b‖
     copyto!(r, b); mul!(tmp, A, x); r .-= tmp       # r = b - A*x
@@ -166,7 +167,7 @@ end
 # monitor the residual `Pl⁻¹(b - Ax)` (the true residual when Pl is the identity,
 # whatever Pr is). The Arnoldi vectors span the right-preconditioned space, so
 # the correction Σ gᵢ vᵢ is mapped back through Pr⁻¹ before updating x.
-function _gmres!(x, A, b, work::GMRESWorkspace, Pl, Pr; abstol, reltol, maxiter)
+function _krylov!(x, A, b, work::GMRESWorkspace, Pl, Pr; abstol, reltol, maxiter)
     V, H, g, cs, sn, w, Ax = work.V, work.H, work.g, work.cs, work.sn, work.w, work.Ax
     T = real(float(eltype(b))); m = length(cs)
     thr = _threshold(norm(_precond(w, Pl, b)), abstol, reltol)     # ‖Pl⁻¹ b‖
@@ -234,7 +235,11 @@ struct MINRESWorkspace{T}
     end
 end
 
-function _minres!(x, A, b, work::MINRESWorkspace; abstol, reltol, maxiter)
+# Preconditioned MINRES needs the SPD Lanczos rework, so reject rather than
+# silently ignore a supplied preconditioner (use HaloCG/HaloGMRES instead).
+function _krylov!(x, A, b, work::MINRESWorkspace, Pl, Pr; abstol, reltol, maxiter)
+    (_is_identity_precond(Pl) && _is_identity_precond(Pr)) || throw(ArgumentError(
+        "HaloMINRES does not support preconditioning; use HaloCG (SPD) or HaloGMRES with `Pl`."))
     v, y, r1, r2, w, w1, w2 = work.v, work.y, work.r1, work.r2, work.w, work.w1, work.w2
     T = real(float(eltype(b)))
     mul!(y, A, x); r1 .= b .- y                 # r0 = b - A*x0
@@ -316,25 +321,9 @@ LinearSolve.init_cacheval(alg::HaloGMRESAlg, A, b, u, Pl, Pr, maxiters, abstol, 
 
 _retcode(converged) = converged ? SciMLBase.ReturnCode.Success : SciMLBase.ReturnCode.MaxIters
 
-# Which preconditioners each algorithm accepts, and which kernel runs it.
-# GMRES/BiCGStab take both sides. CG needs a symmetric operator, which only the
-# left form (in the M-inner product) preserves, so it rejects `Pr`. MINRES would
-# need the SPD Lanczos rework to precondition at all, so it rejects any
-# preconditioner rather than silently ignore it (use HaloCG/HaloGMRES instead).
-_check_precond(::_HaloAlg, Pl, Pr) = nothing
-_check_precond(::HaloCGAlg, Pl, Pr) = _reject_right_precond(Pr)
-_check_precond(::HaloMINRESAlg, Pl, Pr) =
-    (_is_identity_precond(Pl) && _is_identity_precond(Pr)) || throw(ArgumentError(
-        "HaloMINRES does not support preconditioning; use HaloCG (SPD) or HaloGMRES with `Pl`."))
-
-_kernel!(::HaloCGAlg,       x, A, b, w, Pl, Pr; kw...) = _cg!(x, A, b, w, Pl; kw...)
-_kernel!(::HaloBiCGStabAlg, x, A, b, w, Pl, Pr; kw...) = _bicgstab!(x, A, b, w, Pl, Pr; kw...)
-_kernel!(::HaloGMRESAlg,    x, A, b, w, Pl, Pr; kw...) = _gmres!(x, A, b, w, Pl, Pr; kw...)
-_kernel!(::HaloMINRESAlg,   x, A, b, w, Pl, Pr; kw...) = _minres!(x, A, b, w; kw...)
-
+# The workspace in `cacheval` names the algorithm: `_krylov!` dispatches on it.
 function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::_HaloAlg; kwargs...)
-    _check_precond(alg, cache.Pl, cache.Pr)
-    x, iters, _res, conv = _kernel!(alg, cache.u, cache.A, cache.b, cache.cacheval, cache.Pl, cache.Pr;
+    x, iters, _res, conv = _krylov!(cache.u, cache.A, cache.b, cache.cacheval, cache.Pl, cache.Pr;
         abstol = cache.abstol, reltol = cache.reltol, maxiter = cache.maxiters)
     return SciMLBase.build_linear_solution(alg, x, nothing, cache; retcode = _retcode(conv), iters = iters)
 end
