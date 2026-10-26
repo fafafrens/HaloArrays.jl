@@ -311,3 +311,11 @@ end
                                  abstol = 0.0, reltol = 1e-10, maxiter = 5n)
     @test conv && x ≈ A \ b
 end
+
+@testset "LinearSolve algorithm interface contract" begin
+    # LinearSolve's own checker: a release that adds a required hook fails here
+    # instead of warning at solve time.
+    for alg in (HaloCG(), HaloGMRES(), HaloBiCGStab(), HaloMINRES(), HaloKrylovKit())
+        @test isempty(LinearSolve.algorithm_interface_issues(alg))
+    end
+end
