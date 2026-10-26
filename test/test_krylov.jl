@@ -52,6 +52,30 @@ LinearAlgebra.mul!(y, D::ScaleOp, x) = (y .= D.d .* x; y)
             @test x ≈ Agen \ b
         end
     end
+    # Breakdowns are reported, not spun on: CG on an indefinite operator,
+    # BiCGStab with a shadow residual orthogonal to A r.
+    Aind = Diagonal([1.0, -1.0]); bi = [1.0, 1.0]
+    ri = cg!(zeros(2), Aind, bi, CGWorkspace(bi); abstol = 0.0, reltol = 1e-10, maxiter = 50)
+    @test !ri.converged && ri.iters == 0 && isfinite(ri.residual)
+    # A negative-definite pair (A, Pl) is the same iteration as (-A, -Pl): converges.
+    xn = zeros(n)
+    rn = cg!(xn, -Aspd, -b, CGWorkspace(b); Pl = -Diagonal(diag(Aspd)), abstol = 0.0, reltol = 1e-10, maxiter = 10n)
+    @test rn.converged && xn ≈ Aspd \ b
+    Askew = [0.0 1.0; -1.0 0.0]; bs = [1.0, 0.0]            # ⟨r̂, A r̂⟩ = 0 at the first step
+    rs = bicgstab!(zeros(2), Askew, bs, BiCGStabWorkspace(bs); abstol = 0.0, reltol = 1e-10, maxiter = 50)
+    @test !rs.converged && rs.iters == 0 && isfinite(rs.residual)
+    # t = A ŝ = 0 breakdown: the returned x and residual must describe the same iterate
+    At = [1.0 2.0; 0.0 0.0]; bt = [1.0, 2.0]; xt = zeros(2)
+    rt = bicgstab!(xt, At, bt, BiCGStabWorkspace(bt); abstol = 0.0, reltol = 1e-10, maxiter = 50)
+    @test !rt.converged
+    @test rt.residual ≈ norm(bt - At * xt)
+
+    # fgmres! without Pr leaves Z untouched (the correction reads V).
+    wsz = FGMRESWorkspace(b; restart = n); foreach(z -> fill!(z, 7.0), wsz.Z)
+    xz = zeros(n); @test fgmres!(xz, Agen, b, wsz; tol..., maxiter = 10n).converged
+    @test all(z -> all(==(7.0), z), wsz.Z)
+    @test xz ≈ Agen \ b
+
     @test_throws ArgumentError GMRESWorkspace(b; restart = 0)
     @test_throws ArgumentError FGMRESWorkspace(b; restart = 0)
 
