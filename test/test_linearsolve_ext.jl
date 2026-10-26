@@ -170,8 +170,8 @@ end
         relres(sol) = norm(b - Aspd * sol.u) / norm(b)
         base = solve(LinearProblem(Aspd, b; u0 = zeros(n)), alg; reltol = 1e-10, abstol = 0.0, maxiters = 500)
         @test relres(base) < 1e-9
-        for c in (1e6, 1e-6)
-            sol = solve(LinearProblem(Aspd, b; u0 = zeros(n)), alg; Pl = Diagonal(fill(c, n)), reltol = 1e-10, abstol = 0.0, maxiters = 500)
+        for c in (1e6, 1e-6), Pl in (Diagonal(fill(c, n)), c * I)
+            sol = solve(LinearProblem(Aspd, b; u0 = zeros(n)), alg; Pl, reltol = 1e-10, abstol = 0.0, maxiters = 500)
             @test sol.retcode == ReturnCode.Success
             @test relres(sol) < 1e-9
             @test abs(sol.iters - base.iters) ≤ 1
@@ -221,8 +221,8 @@ end
         # and the monitored residual is the TRUE residual, so the stopping test
         # must be scale-invariant without any rescaling. (Slack for rounding: on
         # this ill-conditioned system BiCGStab's count moves by an iteration or two.)
-        for c in (1e6, 1e-6)
-            sol = solve(prob(), alg; Pr = Diagonal(fill(c, n)), reltol = 1e-10, abstol = 0.0, maxiters = 500)
+        for c in (1e6, 1e-6), Pr in (Diagonal(fill(c, n)), c * I)
+            sol = solve(prob(), alg; Pr, reltol = 1e-10, abstol = 0.0, maxiters = 500)
             @test sol.retcode == ReturnCode.Success
             @test relres(sol) < 1e-9
             @test abs(sol.iters - base.iters) ≤ max(2, base.iters ÷ 10)

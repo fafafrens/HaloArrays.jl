@@ -31,21 +31,21 @@ const _IdentityOp = LinearSolve.SciMLOperators.IdentityOperator
 # system is `Pl⁻¹ A Pr⁻¹ y = Pl⁻¹ b`, `x = Pr⁻¹ y`. The identity default (no
 # preconditioner) is a no-op, so the unpreconditioned path stays byte-for-byte
 # and reduction-for-reduction identical.
+# "No preconditioner": LinearSolve's default `IdentityOperator`, or `I`.
 @inline _is_identity_precond(::_IdentityOp) = true
-@inline _is_identity_precond(::UniformScaling) = true
+@inline _is_identity_precond(J::UniformScaling) = isone(J.λ)
 @inline _is_identity_precond(_) = false
 
-@inline _apply_precond!(z, Pl, r) = ldiv!(z, Pl, r)     # z = Pl⁻¹ r  (out of place)
-@inline _apply_precond!(z, ::_IdentityOp, r) = copyto!(z, r)
-@inline _apply_precond!(z, ::UniformScaling, r) = copyto!(z, r)
-@inline _apply_precond!(Pl, v) = ldiv!(Pl, v)           # v ← Pl⁻¹ v  (in place)
-@inline _apply_precond!(::_IdentityOp, v) = v
-@inline _apply_precond!(::UniformScaling, v) = v
-# Pr⁻¹ v for a right preconditioner: computed into `z`, or `v` itself (no copy)
-# when Pr is the identity — the direction is then used as is.
-@inline _right_precond(z, Pr, v) = ldiv!(z, Pr, v)
-@inline _right_precond(z, ::_IdentityOp, v) = v
-@inline _right_precond(z, ::UniformScaling, v) = v
+# M⁻¹ v, for either side. Out of place the result is written into `z`, or is
+# `v` itself (no copy) when M is the identity — callers only read it. In place:
+# v ← M⁻¹ v. `UniformScaling` (`I`, `c*I`) is spelled out because LinearAlgebra's
+# `ldiv!` for it takes an `AbstractVecOrMat`, which a 3-D halo array is not.
+@inline _precond(z, M, v) = ldiv!(z, M, v)
+@inline _precond(z, ::_IdentityOp, v) = v
+@inline _precond(z, J::UniformScaling, v) = isone(J.λ) ? v : (z .= v ./ J.λ; z)
+@inline _precond!(M, v) = ldiv!(M, v)
+@inline _precond!(::_IdentityOp, v) = v
+@inline _precond!(J::UniformScaling, v) = isone(J.λ) ? v : (v ./= J.λ; v)
 
 # A right preconditioner would be silently dropped by CG, so reject it explicitly.
 @inline _reject_right_precond(Pr) =
@@ -67,11 +67,11 @@ _cg_workspace(b) = CGWorkspace(similar(b), similar(b), similar(b), similar(b))
 # and the two per-iteration reductions (`⟨p,Ap⟩`, `⟨r,z⟩`) reduce to exactly the
 # stock CG — no extra communication when unpreconditioned.
 function _cg!(x, A, b, w::CGWorkspace, Pl; abstol, reltol, maxiter)
-    Ap, r, p, z = w.Ap, w.r, w.p, w.z
-    _apply_precond!(Ap, Pl, b)                      # Ap = M⁻¹ b   (scratch for now)
-    thr = _threshold(sqrt(real(dot(b, Ap))), abstol, reltol)   # ‖b‖ in the CG norm
+    Ap, r, p = w.Ap, w.r, w.p
+    Mb = _precond(Ap, Pl, b)                        # M⁻¹ b        (Ap is scratch here)
+    thr = _threshold(sqrt(real(dot(b, Mb))), abstol, reltol)   # ‖b‖ in the CG norm
     mul!(Ap, A, x); copyto!(r, b); r .-= Ap        # r = b - A*x
-    _apply_precond!(z, Pl, r)                       # z = M⁻¹ r
+    z = _precond(w.z, Pl, r)                        # z = M⁻¹ r    (r itself if Pl = I)
     copyto!(p, z)
     rz = real(dot(r, z))
     res = sqrt(rz)
@@ -83,7 +83,7 @@ function _cg!(x, A, b, w::CGWorkspace, Pl; abstol, reltol, maxiter)
         α = rz / real(dot(p, Ap))
         x .+= α .* p
         r .-= α .* Ap
-        _apply_precond!(z, Pl, r)
+        z = _precond(w.z, Pl, r)
         rznew = real(dot(r, z))
         res = sqrt(rznew)
         res ≤ thr && return x, iters, res, true
@@ -107,10 +107,9 @@ _bicgstab_workspace(b) =
 # when Pl is the identity, whatever Pr is).
 function _bicgstab!(x, A, b, w::BiCGStabWorkspace, Pl, Pr; abstol, reltol, maxiter)
     r, tmp, rhat, p, v, s, t, shat = w.r, w.tmp, w.rhat, w.p, w.v, w.s, w.t, w.shat
-    _apply_precond!(tmp, Pl, b)                     # tmp = M⁻¹ b  (scratch for now)
-    thr = _threshold(norm(tmp), abstol, reltol)
+    thr = _threshold(norm(_precond(tmp, Pl, b)), abstol, reltol)   # ‖Pl⁻¹ b‖
     copyto!(r, b); mul!(tmp, A, x); r .-= tmp       # r = b - A*x
-    _apply_precond!(Pl, r)                          # r ← M⁻¹ r
+    _precond!(Pl, r)                          # r ← M⁻¹ r
     copyto!(rhat, r)
     fill!(p, 0); fill!(v, 0)
     Tr = real(eltype(b))
@@ -123,8 +122,8 @@ function _bicgstab!(x, A, b, w::BiCGStabWorkspace, Pl, Pr; abstol, reltol, maxit
         ρ = dot(rhat, r)
         β = (ρ / ρ_old) * (α / ω)
         p .-= ω .* v; p .*= β; p .+= r              # p = r + β(p - ω v)
-        phat = _right_precond(tmp, Pr, p)           # p̂ = Pr⁻¹ p   (p itself if Pr = I)
-        mul!(v, A, phat); _apply_precond!(Pl, v)    # v ← Pl⁻¹ A p̂
+        phat = _precond(tmp, Pr, p)                 # p̂ = Pr⁻¹ p   (p itself if Pr = I)
+        mul!(v, A, phat); _precond!(Pl, v)          # v ← Pl⁻¹ A p̂
         α = ρ / dot(rhat, v)
         s .= r .- α .* v
         res = norm(s)
@@ -132,8 +131,8 @@ function _bicgstab!(x, A, b, w::BiCGStabWorkspace, Pl, Pr; abstol, reltol, maxit
             x .+= α .* phat
             return x, iters, res, true
         end
-        shat_ = _right_precond(shat, Pr, s)         # ŝ = Pr⁻¹ s
-        mul!(t, A, shat_); _apply_precond!(Pl, t)   # t ← Pl⁻¹ A ŝ
+        shat_ = _precond(shat, Pr, s)               # ŝ = Pr⁻¹ s
+        mul!(t, A, shat_); _precond!(Pl, t)         # t ← Pl⁻¹ A ŝ
         ω = dot(t, s) / dot(t, t)
         x .+= α .* phat; x .+= ω .* shat_
         r .= s .- ω .* t
@@ -170,13 +169,12 @@ end
 function _gmres!(x, A, b, work::GMRESWorkspace, Pl, Pr; abstol, reltol, maxiter)
     V, H, g, cs, sn, w, Ax = work.V, work.H, work.g, work.cs, work.sn, work.w, work.Ax
     T = real(float(eltype(b))); m = length(cs)
-    _apply_precond!(w, Pl, b)                        # w = M⁻¹ b    (scratch for now)
-    thr = _threshold(norm(w), abstol, reltol)
+    thr = _threshold(norm(_precond(w, Pl, b)), abstol, reltol)     # ‖Pl⁻¹ b‖
     res = norm(b); total = 0
     while total < maxiter
         mul!(Ax, A, x)
         r = V[1]; copyto!(r, b); r .-= Ax           # residual in V[1]
-        _apply_precond!(Pl, r)                       # r ← M⁻¹(b - Ax)
+        _precond!(Pl, r)                       # r ← M⁻¹(b - Ax)
         β = norm(r); res = β
         res ≤ thr && break
         V[1] .*= inv(β)
@@ -185,8 +183,8 @@ function _gmres!(x, A, b, work::GMRESWorkspace, Pl, Pr; abstol, reltol, maxiter)
         inner = min(m, maxiter - total)             # never exceed the iteration budget
         for j in 1:inner
             k = j; total += 1
-            vj = _right_precond(Ax, Pr, V[j])       # Pr⁻¹ vⱼ      (Ax is scratch here)
-            mul!(w, A, vj); _apply_precond!(Pl, w)  # w ← Pl⁻¹ A Pr⁻¹ vⱼ
+            vj = _precond(Ax, Pr, V[j])             # Pr⁻¹ vⱼ      (Ax is scratch here)
+            mul!(w, A, vj); _precond!(Pl, w)        # w ← Pl⁻¹ A Pr⁻¹ vⱼ
             for i in 1:j                            # modified Gram-Schmidt
                 H[i, j] = dot(V[i], w)              # conjugate inner product (complex-safe)
                 w .-= H[i, j] .* V[i]
@@ -219,7 +217,7 @@ function _gmres!(x, A, b, work::GMRESWorkspace, Pl, Pr; abstol, reltol, maxiter)
         for i in 1:k
             w .+= g[i] .* V[i]                      # correction in the Pr-space
         end
-        x .+= _right_precond(Ax, Pr, w)             # x += Pr⁻¹ Σ gᵢ vᵢ
+        x .+= _precond(Ax, Pr, w)                   # x += Pr⁻¹ Σ gᵢ vᵢ
         res ≤ thr && break
     end
     return x, total, res, res ≤ thr
