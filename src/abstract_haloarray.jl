@@ -475,7 +475,9 @@ vector-space element, so the identity is the behaviour that keeps a halo-array
 state working in an implicit `OrdinaryDiffEq` solve with a matrix-free
 `linsolve` ([`HaloCG`](@ref), [`HaloGMRES`](@ref), …). Without it, an N-D array
 or any collection state fails while the `W` operator is built, before any
-linear solver runs.
+linear solver runs. The stock `KrylovJL_*` solvers remain 1-D only regardless:
+Krylov.jl slices its work vectors, and OrdinaryDiffEq wraps their error weights
+in a `Diagonal`, which needs a true vector.
 """
 Base.vec(halo::AbstractHaloArray) = halo
 # Explicit intersection with Base's `vec(::AbstractVector)`, so the 1-D case can
