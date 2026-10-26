@@ -187,7 +187,7 @@ end
     end
     cs[j], sn[j] = _givens(H[j, j], H[j+1, j])
     H[j, j]   = cs[j] * H[j, j] + sn[j] * H[j+1, j]
-    H[j+1, j] = 0
+    H[j+1, j] = zero(eltype(H))
     g[j+1] = -conj(sn[j]) * g[j]
     g[j]   =  cs[j] * g[j]
     return abs(g[j+1]), happy
