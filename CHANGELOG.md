@@ -7,6 +7,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- `dot`, `swap!`, `rotate!` and `reflect!` on two field collections with
+  different field counts now throw `DimensionMismatch`. They combined the fields
+  with `zip`/`foreach`, which stop at the shorter tuple, so a partial result was
+  returned silently; they now broadcast over the two field tuples, which checks
+  the lengths, unrolls at compile time and allocates nothing.
+- `norm(halo, 0)` on vector-valued cells (an `SVector` eltype) returned a
+  `MethodError`; it now returns the count of nonzero cells in the scalar type of
+  a norm (`Float64` for an `SVector{3,Float64}` eltype), as Base does, and
+  keeps `Float32` for a `Float32` array.
 - `vec(halo)` is the identity on any halo array — a single array of any
   dimensionality, a field collection (`MultiHaloArray`, …) or a
   `MaybeHaloArray` — so a 2-D/3-D halo array or a collection now works as the

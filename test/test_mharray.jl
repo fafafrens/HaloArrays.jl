@@ -1,7 +1,7 @@
 using Test
 using MPI
 using HaloArrays
-using LinearAlgebra: norm, dot
+using LinearAlgebra: norm, dot, rotate!, reflect!
 
 if !MPI.Initialized()
     MPI.Init()
@@ -456,4 +456,26 @@ end
             @test cache[1] === parent(rho) && cache[2] === parent(v.a) && cache[6] === parent(w[1])
         end
     end
+end
+
+@testset "Two-collection ops reject a field-count mismatch" begin
+    m2 = MultiHaloArray(LocalHaloArray, Float64, (4, 3), 1; fields = (:a, :b), boundary_condition = :periodic)
+    m3 = MultiHaloArray(LocalHaloArray, Float64, (4, 3), 1; fields = (:a, :b, :c), boundary_condition = :periodic)
+    fill!(m2, 1.0); fill!(m3, 1.0)
+    # matching field counts: unchanged results, no allocation
+    m2b = copy(m2)
+    @test dot(m2, m2b) == 24.0
+    # Allocation must not grow with the call count (`@allocated` of a Float64
+    # result reports a 16 B box on Julia 1.10, so an absolute 0 is not portable).
+    _dot_calls(n, a, b) = (s = 0.0; for _ in 1:n; s += dot(a, b); end; s)
+    _dot_calls(1, m2, m2b); _dot_calls(1000, m2, m2b)
+    @test @allocated(_dot_calls(1, m2, m2b)) == @allocated(_dot_calls(1000, m2, m2b))
+    x = copy(m2); y = copy(m2b); fill!(y, 2.0)
+    swap!(x, y); @test all(==(2.0), x) && all(==(1.0), y)
+    rotate!(x, y, 0.6, 0.8);  @test all(≈(0.6 * 2 + 0.8 * 1), x) && all(≈(0.6 * 1 - 0.8 * 2), y)
+    # mismatched: a partial result would be silently wrong; must throw
+    @test_throws DimensionMismatch dot(m2, m3)
+    @test_throws DimensionMismatch swap!(copy(m2), m3)
+    @test_throws DimensionMismatch rotate!(copy(m2), m3, 0.6, 0.8)
+    @test_throws DimensionMismatch reflect!(copy(m2), m3, 0.6, 0.8)
 end

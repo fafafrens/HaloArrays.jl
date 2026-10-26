@@ -220,3 +220,14 @@ end
         @test size(s) == size(u)
     end
 end
+
+@testset "norm(h, 0) on vector-valued cells returns a scalar count" begin
+    hs = LocalHaloArray(SVector{3,Float64}, (4, 3), 1; boundary_condition = :periodic)
+    fill!(hs, zero(SVector{3,Float64}))
+    interior_view(hs)[1, 1] = SVector(1.0, 0.0, 0.0)
+    interior_view(hs)[2, 3] = SVector(0.0, 0.0, 2.0)
+    @test norm(hs, 0) === 2.0                       # Float64, like Base on an Array of SVector
+    h32 = LocalHaloArray(Float32, (4, 3), 1; boundary_condition = :periodic)
+    fill!(h32, 0f0); interior_view(h32)[1, 1] = 1f0
+    @test norm(h32, 0) === 1f0                      # stays Float32
+end
