@@ -173,6 +173,8 @@ end
     for dims in ((4,), (4, 3), (4, 3, 2))
         h = LocalHaloArray(Float64, dims, 1; boundary_condition = :periodic)
         @test vec(h) === h
+        m = MultiHaloArray(LocalHaloArray, Float64, dims, 1; fields = (:a, :b), boundary_condition = :periodic)
+        @test vec(m) === m
     end
     function heat!(du, u, p, t)
         synchronize_halo!(u)
@@ -198,6 +200,44 @@ end
                     reltol = 1e-7, abstol = 1e-7, save_everystep = false)
         @test sol.retcode == ReturnCode.Success
         @test sol.u[end] isa LocalHaloArray{Float64,length(dims)}
+        @test maximum(abs, sol.u[end] - ref.u[end]) < 1e-6
+    end
+end
+
+# A field collection as the implicit state. Its `size` is `(fields..., spatial...)`,
+# so even a 1-D-in-space collection is a 2-D array to the integrator and would be
+# `vec`-wrapped; the identity keeps the named fields reachable inside `rhs!`.
+# Two-species reaction–diffusion (nonsymmetric Jacobian → GMRES / BiCGStab).
+@testset "Implicit OrdinaryDiffEq on a MultiHaloArray state" begin
+    function rd!(du, u, p, _t)
+        DA, DB, k, inv_dx2 = p
+        synchronize_halo!(u)
+        dA = parent(du.A); dB = parent(du.B); A = parent(u.A); B = parent(u.B)
+        @inbounds for I in CartesianIndices(interior_range(u.A))
+            lapA = zero(eltype(A)); lapB = zero(eltype(B))
+            for v in HaloArrays.versors(u.A)
+                e = CartesianIndex(v)
+                lapA += A[I + e] - 2A[I] + A[I - e]
+                lapB += B[I + e] - 2B[I] + B[I - e]
+            end
+            r = k * A[I] * B[I]
+            dA[I] = DA * lapA * inv_dx2 - r
+            dB[I] = DB * lapB * inv_dx2 - r
+        end
+        return du
+    end
+    @testset "$(length(n))-D, $name" for n in ((32,), (16, 12)),
+                                         (name, alg) in (("HaloGMRES", HaloGMRES()), ("HaloBiCGStab", HaloBiCGStab()))
+        bc = ntuple(_ -> (Periodic(), Periodic()), length(n))
+        u0 = MultiHaloArray(LocalHaloArray, Float64, n, 1; boundary_conditions = (A = bc, B = bc))
+        fill_from_global_indices!(I -> 0.5 + 0.1sin(2π * I[1] / n[1]), u0.A)
+        fill_from_global_indices!(I -> 0.5 + 0.1cos(2π * I[end] / n[end]), u0.B)
+        prob = ODEProblem{true}(rd!, u0, (0.0, 0.1), (1.0, 0.5, 50.0, Float64(n[1]^2)))
+        ref = solve(prob, Tsit5(); reltol = 1e-10, abstol = 1e-10, save_everystep = false)
+        sol = solve(prob, FBDF(linsolve = alg, concrete_jac = false);
+                    reltol = 1e-7, abstol = 1e-7, save_everystep = false)
+        @test sol.retcode == ReturnCode.Success
+        @test sol.u[end] isa MultiHaloArray
         @test maximum(abs, sol.u[end] - ref.u[end]) < 1e-6
     end
 end
