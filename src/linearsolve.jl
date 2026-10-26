@@ -60,6 +60,13 @@ reductions). The Krylov workspace is built once and cached by LinearSolve.
 - `HaloBiCGStab` — BiCGStab, for general square `A`.
 - `HaloGMRES` — restarted GMRES (`restart` basis vectors), for general square `A`.
 
+Preconditioning follows the LinearSolve convention (`Pl`, `Pr` applied with
+`ldiv!`; the solved system is `Pl⁻¹ A Pr⁻¹ y = Pl⁻¹ b`, `x = Pr⁻¹ y`):
+`HaloGMRES`/`HaloBiCGStab` take both sides, `HaloCG` takes `Pl` only (the
+right form is not symmetric), `HaloMINRES` takes neither. An unsupported
+preconditioner throws rather than being silently ignored. With `Pr` only, the
+monitored residual is the true residual `b - Ax`.
+
 For a `LinearProblem`, pass `u0` explicitly (e.g. `zero(b)`) — LinearSolve's
 default initial guess flattens `b` to a 1-D vector, which a halo array can't be.
 
