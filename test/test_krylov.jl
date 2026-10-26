@@ -55,6 +55,31 @@ LinearAlgebra.mul!(y, D::ScaleOp, x) = (y .= D.d .* x; y)
     @test_throws ArgumentError GMRESWorkspace(b; restart = 0)
     @test_throws ArgumentError FGMRESWorkspace(b; restart = 0)
 
+    # Orthogonalisation variants: same solution and count as :mgs on a
+    # well-conditioned system; an unknown choice throws; :auto is :mgs here.
+    @test Krylov.resolve_orth(:auto, b) === :mgs
+    @test_throws ArgumentError gmres!(zeros(n), Agen, b, GMRESWorkspace(b; restart = n); orth = :cgs, tol..., maxiter = n)
+    for (f, mk) in ((gmres!, GMRESWorkspace), (fgmres!, FGMRESWorkspace))
+        xm = zeros(n); rm = f(xm, Agen, b, mk(b; restart = n); orth = :mgs,  tol..., maxiter = 10n)
+        xc = zeros(n); rc = f(xc, Agen, b, mk(b; restart = n); orth = :cgs2, tol..., maxiter = 10n)
+        @test rc.converged && rc.iters == rm.iters
+        @test isapprox(xc, xm; rtol = 1e-8)
+    end
+    # Orthogonality of the Arnoldi basis after one full cycle on an ill-conditioned
+    # system (κ = 1e8). MGS loses it in proportion to the conditioning (here
+    # ~1e-8); CGS2 keeps it at working precision — what the second pass buys.
+    Qi = Matrix(qr(randn(n, n)).Q)
+    Aill = Qi * Diagonal(10.0 .^ range(0, 8; length = n)) * transpose(Qi)
+    loss = Dict{Symbol,Float64}()
+    for orth in (:mgs, :cgs2)
+        ws = GMRESWorkspace(b; restart = n)
+        r = gmres!(zeros(n), Aill, b, ws; orth, abstol = 0.0, reltol = 1e-14, maxiter = n)
+        Vk = reduce(hcat, ws.V[1:r.iters])
+        loss[orth] = norm(Vk' * Vk - I)
+    end
+    @test loss[:cgs2] < 1e-12
+    @test loss[:cgs2] < loss[:mgs]
+
     # 2-D halo array: D x = b with D a pointwise scaling by a halo array (any
     # operator with `mul!` will do).
     h = LocalHaloArray(Float64, (6, 5), 1; boundary_condition = :periodic)

@@ -120,6 +120,30 @@ r.converged, r.iters, r.residual
 is overwritten in place. The same kernels run on a `Vector`, which is how
 their edge cases are tested.
 
+### GMRES orthogonalisation on MPI: `orth`
+
+Every inner product on a distributed `HaloArray` is an `Allreduce`. Modified
+Gram–Schmidt (`orth = :mgs`) does `j` of them, one after another, at Arnoldi
+step `j`; classical Gram–Schmidt applied twice (`orth = :cgs2`) does the `j`
+products of each pass through [`dots!`](@ref) in one reduction, so a step costs
+three collectives instead of `j + 1`, at twice the local work. `orth = :auto`
+(the default) is `:cgs2` on a distributed array or collection and `:mgs`
+elsewhere. Measured, 60 steps of GMRES(30) on a 1-D stencil, one machine:
+
+| ranks | unknowns per rank | `:mgs` | `:cgs2` |
+|---|---|---|---|
+| 1 | 65 536 | 25 ms | 49 ms |
+| 4 | 256 | 16 ms | 4 ms |
+| 8 | 256 | 26 ms | 6 ms |
+| 8 | 4 096 | 29 ms | 10 ms |
+| 8 | 65 536 | 71 ms | 80 ms |
+
+Serial, the second pass is pure cost. On MPI the gain grows with the rank count
+and shrinks with the per-rank size; the crossover sits far higher on a cluster,
+whose `Allreduce` is much slower than this machine's shared-memory one. Pass
+`orth = :mgs` to override `:auto` on a distributed run with large, bandwidth-bound
+subdomains.
+
 ```@docs
 HaloArrays.Krylov
 HaloArrays.Krylov.Result

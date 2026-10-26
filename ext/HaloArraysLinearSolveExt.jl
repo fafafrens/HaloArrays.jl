@@ -18,22 +18,26 @@ struct HaloMINRESAlg   <: LinearSolve.AbstractKrylovSubspaceMethod end
 struct HaloBiCGStabAlg <: LinearSolve.AbstractKrylovSubspaceMethod end
 struct HaloGMRESAlg    <: LinearSolve.AbstractKrylovSubspaceMethod
     restart::Int
+    orth::Symbol
 end
 struct HaloFGMRESAlg   <: LinearSolve.AbstractKrylovSubspaceMethod
     restart::Int
+    orth::Symbol
 end
 const _HaloAlg = Union{HaloCGAlg, HaloMINRESAlg, HaloBiCGStabAlg, HaloGMRESAlg, HaloFGMRESAlg}
 
 HaloArrays.HaloCG()       = HaloCGAlg()
 HaloArrays.HaloMINRES()   = HaloMINRESAlg()
 HaloArrays.HaloBiCGStab() = HaloBiCGStabAlg()
-function HaloArrays.HaloGMRES(; restart = 30)
+function HaloArrays.HaloGMRES(; restart = 30, orth = :auto)
     restart ≥ 1 || throw(ArgumentError("HaloGMRES: `restart` must be ≥ 1, got $restart"))
-    return HaloGMRESAlg(restart)
+    orth in Krylov.ORTH || throw(ArgumentError("HaloGMRES: `orth` must be one of $(Krylov.ORTH), got $(repr(orth))"))
+    return HaloGMRESAlg(restart, orth)
 end
-function HaloArrays.HaloFGMRES(; restart = 30)
+function HaloArrays.HaloFGMRES(; restart = 30, orth = :auto)
     restart ≥ 1 || throw(ArgumentError("HaloFGMRES: `restart` must be ≥ 1, got $restart"))
-    return HaloFGMRESAlg(restart)
+    orth in Krylov.ORTH || throw(ArgumentError("HaloFGMRES: `orth` must be one of $(Krylov.ORTH), got $(repr(orth))"))
+    return HaloFGMRESAlg(restart, orth)
 end
 
 # ---- LinearSolve plumbing ----
@@ -70,8 +74,8 @@ _precond(P) = P
 _run!(::HaloCGAlg,       x, A, b, ws, Pl, ::Nothing;        kw...) = cg!(x, A, b, ws; Pl, kw...)
 _run!(::HaloMINRESAlg,   x, A, b, ws, ::Nothing, ::Nothing; kw...) = minres!(x, A, b, ws; kw...)
 _run!(::HaloBiCGStabAlg, x, A, b, ws, Pl, Pr;               kw...) = bicgstab!(x, A, b, ws; Pl, Pr, kw...)
-_run!(::HaloGMRESAlg,    x, A, b, ws, Pl, Pr;               kw...) = gmres!(x, A, b, ws; Pl, Pr, kw...)
-_run!(::HaloFGMRESAlg,   x, A, b, ws, Pl, Pr;               kw...) = fgmres!(x, A, b, ws; Pl, Pr, kw...)
+_run!(a::HaloGMRESAlg,   x, A, b, ws, Pl, Pr;               kw...) = gmres!(x, A, b, ws; Pl, Pr, orth = a.orth, kw...)
+_run!(a::HaloFGMRESAlg,  x, A, b, ws, Pl, Pr;               kw...) = fgmres!(x, A, b, ws; Pl, Pr, orth = a.orth, kw...)
 _run!(::HaloCGAlg, x, A, b, ws, Pl, Pr; kw...) = throw(ArgumentError(
     "HaloCG applies a LEFT preconditioner (Pl) only (A Pr⁻¹ is not symmetric); a right " *
     "preconditioner Pr::$(typeof(Pr)) is not supported. Use HaloGMRES/HaloBiCGStab."))

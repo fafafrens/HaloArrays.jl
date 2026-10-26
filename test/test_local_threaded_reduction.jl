@@ -289,6 +289,11 @@ using OhMyThreads  # OhMyThreadsBackend lives in the HaloArraysOhMyThreadsExt ex
                 wm = copy(m); for f in eachfield(wm); fill_from_global_indices!(I -> rand(T), f); end
                 hm = zeros(T, j)
                 @test dots!(hm, Vm, wm, j) ≈ [dot(Vm[i], wm) for i in 1:j]
+                @test HaloArrays.communicator(m) === nothing
+                # field-count mismatch is rejected, as for dot (the tuple broadcast
+                # of the per-field products; a 1-field collection broadcasts, as in dot)
+                m3 = MultiHaloArray(LocalHaloArray, T, dims, 1; fields=(:a, :b, :c), boundary_condition=:periodic)
+                @test_throws DimensionMismatch dots!(hm, Vm, m3, j)
             end
         end
         # allocation-free on the serial backends (one call vs many)
