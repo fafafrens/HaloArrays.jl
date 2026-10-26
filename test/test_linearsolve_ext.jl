@@ -5,6 +5,7 @@ using KrylovKit
 using OrdinaryDiffEq
 using LinearAlgebra
 using LinearSolve.SciMLOperators: FunctionOperator
+using HaloArrays: Krylov
 
 # HaloArraysKrylovKitExt: KrylovKit as the `linsolve` of an implicit integrator,
 # the halo array itself as the ODE state (KrylovKit is VectorInterface-generic,
@@ -111,11 +112,10 @@ end
     @test_throws ArgumentError HaloGMRES(restart = 0)
     @test_throws ArgumentError HaloGMRES(restart = -3)
 
-    # Reach the internal solver to check the numerical edge cases directly.
-    ext = Base.get_extension(HaloArrays, :HaloArraysLinearSolveExt)
+    # Reach the kernel to check the numerical edge cases directly.
     run_gmres(x, A, b; restart = length(b), maxiter = 10 * length(b)) =
-        ext._krylov!(x, A, b, ext.GMRESWorkspace(b; restart = restart), I, I;
-                    abstol = 0.0, reltol = 1e-10, maxiter = maxiter)
+        Krylov.gmres!(x, A, b, Krylov.GMRESWorkspace(b; restart = restart);
+                      abstol = 0.0, reltol = 1e-10, maxiter = maxiter)
 
     # Complex system: the Hessenberg/Givens stay in the complex field — A = i,
     # b = 1 must give x = -i (a real-truncating GMRES would record H[1,1] = 0).
@@ -125,13 +125,13 @@ end
     # Happy breakdown: an exact 3-dimensional Krylov space converges (and stops)
     # without using an un-formed basis vector.
     A = Diagonal([1.0, 2, 3, 4, 5]); b = [1.0, 1, 1, 0, 0]
-    x = zeros(5); _, iters, _, conv = run_gmres(x, A, b; restart = 5, maxiter = 20)
-    @test conv && iters == 3 && x ≈ A \ b
+    x = zeros(5); r = run_gmres(x, A, b; restart = 5, maxiter = 20)
+    @test r.converged && r.iters == 3 && x ≈ A \ b
 
     # Iteration budget: maxiter = 1 must perform at most one Arnoldi step
     # (not a full restart cycle of `restart` matvecs).
-    xb = zeros(8); _, itb, _, _ = run_gmres(xb, randn(8, 8) + 8I, randn(8); restart = 30, maxiter = 1)
-    @test itb ≤ 1
+    xb = zeros(8); rb = run_gmres(xb, randn(8, 8) + 8I, randn(8); restart = 30, maxiter = 1)
+    @test rb.iters ≤ 1
 end
 
 @testset "left preconditioning (Pl) is applied, not ignored" begin
@@ -367,12 +367,10 @@ end
 end
 
 @testset "HaloMINRES on a symmetric indefinite system" begin
-    ext = Base.get_extension(HaloArrays, :HaloArraysLinearSolveExt)
     n = 40; S = randn(n, n); A = Symmetric(S + S')   # eigenvalues straddle 0 → CG breaks down
     b = randn(n); x = zeros(n)
-    _, _, _, conv = ext._krylov!(x, A, b, ext.MINRESWorkspace(b), I, I;
-                                 abstol = 0.0, reltol = 1e-10, maxiter = 5n)
-    @test conv && x ≈ A \ b
+    r = Krylov.minres!(x, A, b, Krylov.MINRESWorkspace(b); abstol = 0.0, reltol = 1e-10, maxiter = 5n)
+    @test r.converged && x ≈ A \ b
 end
 
 # A preconditioner that is itself an iterative solve, truncated: its action

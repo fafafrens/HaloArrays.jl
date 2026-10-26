@@ -29,6 +29,7 @@ include("halo_exchange.jl")
 include("gather.jl")
 include("reduction.jl")
 include("vector_space.jl")
+include("krylov.jl")       # HaloArrays.Krylov: cg!/minres!/bicgstab!/gmres!/fgmres!
 include("linearsolve.jl")
 include("mpi_support.jl")
 include("grid.jl")

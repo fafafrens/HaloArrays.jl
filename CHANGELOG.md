@@ -35,6 +35,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `Pl`. With `Pr` only the monitored residual is the true residual. `HaloCG`
   still takes `Pl` only and `HaloMINRES` neither; both throw on an unsupported
   preconditioner instead of ignoring it.
+- `HaloArrays.Krylov`: the matrix-free solvers behind `HaloCG`/`HaloMINRES`/
+  `HaloBiCGStab`/`HaloGMRES`/`HaloFGMRES` now live in the package as
+  `cg!`/`minres!`/`bicgstab!`/`gmres!`/`fgmres!` with explicit workspaces
+  (`CGWorkspace(b)`, `GMRESWorkspace(b; restart)`, …) and a `Result`, usable
+  without LinearSolve (`using HaloArrays.Krylov`). Preconditioners are anything
+  with `ldiv!`; `nothing` is none. The LinearSolve extension is glue only.
 - `HaloFGMRES(; restart)`: flexible GMRES (Saad). The right preconditioner may
   change between iterations — a nested `HaloCG`/`HaloBiCGStab` solve with a few
   iterations, smoother sweeps, a multigrid cycle — where `HaloGMRES` would
