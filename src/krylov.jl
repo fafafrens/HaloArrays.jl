@@ -436,6 +436,11 @@ function gmres!(x, A, b, ws::GMRESWorkspace; Pl = nothing, Pr = nothing, orth = 
     return Result(total, res, converged(res, thr))
 end
 
+# Without a right preconditioner every zⱼ is vⱼ: read the correction from V and
+# never touch Z (no copies, by dispatch).
+zbasis(ws::FGMRESWorkspace, ::Nothing) = ws.V
+zbasis(ws::FGMRESWorkspace, Pr) = ws.Z
+
 """
     fgmres!(x, A, b, ws::FGMRESWorkspace; Pl = nothing, Pr = nothing, abstol, reltol, maxiter) -> Result
 
@@ -447,11 +452,6 @@ fixed linear operator, since it defines the norm being minimised; the monitored
 residual is `Pl⁻¹(b - Ax)`, the true residual when `Pl` is `nothing`. `orth` as
 in [`gmres!`](@ref).
 """
-# Without a right preconditioner every zⱼ is vⱼ: read the correction from V and
-# never touch Z (no copies, by dispatch).
-zbasis(ws::FGMRESWorkspace, ::Nothing) = ws.V
-zbasis(ws::FGMRESWorkspace, Pr) = ws.Z
-
 function fgmres!(x, A, b, ws::FGMRESWorkspace; Pl = nothing, Pr = nothing, orth = :auto, abstol, reltol, maxiter)
     (; V, Z, H, g, w, Ax) = ws
     m   = length(ws.cs)
