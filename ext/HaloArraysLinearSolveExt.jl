@@ -121,7 +121,7 @@ function _krylov!(x, A, b, w::BiCGStabWorkspace, Pl, Pr; abstol, reltol, maxiter
         iters = k
         ρ = dot(rhat, r)
         β = (ρ / ρ_old) * (α / ω)
-        p .-= ω .* v; p .*= β; p .+= r              # p = r + β(p - ω v)
+        p .= r .+ β .* (p .- ω .* v)                # one pass, not three
         phat = _precond(tmp, Pr, p)                 # p̂ = Pr⁻¹ p   (p itself if Pr = I)
         mul!(v, A, phat); _precond!(Pl, v)          # v ← Pl⁻¹ A p̂
         α = ρ / dot(rhat, v)
@@ -134,7 +134,7 @@ function _krylov!(x, A, b, w::BiCGStabWorkspace, Pl, Pr; abstol, reltol, maxiter
         shat_ = _precond(shat, Pr, s)               # ŝ = Pr⁻¹ s
         mul!(t, A, shat_); _precond!(Pl, t)         # t ← Pl⁻¹ A ŝ
         ω = dot(t, s) / dot(t, t)
-        x .+= α .* phat; x .+= ω .* shat_
+        x .+= α .* phat .+ ω .* shat_
         r .= s .- ω .* t
         res = norm(r)
         res ≤ thr && return x, iters, res, true
@@ -242,24 +242,23 @@ function _krylov!(x, A, b, work::MINRESWorkspace, Pl, Pr; abstol, reltol, maxite
         "HaloMINRES does not support preconditioning; use HaloCG (SPD) or HaloGMRES with `Pl`."))
     v, y, r1, r2, w, w1, w2 = work.v, work.y, work.r1, work.r2, work.w, work.w1, work.w2
     T = real(float(eltype(b)))
-    mul!(y, A, x); r1 .= b .- y                 # r0 = b - A*x0
-    β = norm(r1)
+    mul!(y, A, x); r2 .= b .- y                 # r0 = b - A*x0  (r1, y are free buffers)
+    β = norm(r2)
     thr = _threshold(norm(b), abstol, reltol)
     res = β
     β ≤ thr && return x, 0, res, true
-    copyto!(y, r1); copyto!(r2, r1)
     fill!(w, 0); fill!(w1, 0); fill!(w2, 0)
     oldb = zero(T); dbar = zero(T); epsln = zero(T); phibar = β
     cs = -one(T); sn = zero(T)
     iters = 0
     for k in 1:maxiter
         iters = k
-        v .= y .* inv(β)                         # vₖ = yₖ / βₖ
+        v .= r2 .* inv(β)                        # vₖ = yₖ / βₖ   (yₖ lives in r2)
         mul!(y, A, v)
         k ≥ 2 && (y .-= (β / oldb) .* r1)
         α = real(dot(v, y))                      # real for a Hermitian operator
         y .-= (α / β) .* r2
-        copyto!(r1, r2); copyto!(r2, y)
+        r1, r2, y = r2, y, r1                    # shift the history by rebinding, no copies
         oldb = β; β = norm(r2)
         oldeps = epsln                           # apply previous rotation to the tridiagonal
         δ    = cs * dbar + sn * α
@@ -269,7 +268,7 @@ function _krylov!(x, A, b, work::MINRESWorkspace, Pl, Pr; abstol, reltol, maxite
         γ = max(hypot(gbar, β), eps(T))          # next plane rotation
         cs = gbar / γ; sn = β / γ
         φ = cs * phibar; phibar = sn * phibar
-        copyto!(w1, w2); copyto!(w2, w)          # solution direction + update
+        w1, w2, w = w2, w, w1                    # solution direction history, rebinding
         w .= (v .- oldeps .* w1 .- δ .* w2) .* inv(γ)
         x .+= φ .* w
         res = phibar
