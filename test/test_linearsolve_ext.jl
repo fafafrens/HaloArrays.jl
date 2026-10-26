@@ -170,7 +170,10 @@ end
 # array, so the N-D state reaches the Jacobian-vector product and the coordinate-
 # free solvers untouched. Heat equation, Dirichlet, vs. a tight explicit reference.
 @testset "Implicit OrdinaryDiffEq on an N-D halo array state" begin
-    @test vec(LocalHaloArray(Float64, (4, 3), 1; boundary_condition = :periodic)) isa LocalHaloArray{Float64,2}
+    for dims in ((4,), (4, 3), (4, 3, 2))
+        h = LocalHaloArray(Float64, dims, 1; boundary_condition = :periodic)
+        @test vec(h) === h
+    end
     function heat!(du, u, p, t)
         synchronize_halo!(u)
         s = parent(u); d = parent(du)

@@ -475,6 +475,9 @@ an implicit `OrdinaryDiffEq` solve with a matrix-free `linsolve`
 while the `W` operator is built, before any linear solver runs.
 """
 Base.vec(halo::AbstractSingleHaloArray) = halo
+# Explicit intersection with Base's `vec(::AbstractVector)`, so the 1-D case can
+# never become ambiguous whatever Base does with its own method.
+Base.vec(halo::AbstractSingleHaloArray{<:Any,1}) = halo
 
 # permutedims/reverse have no meaningful generic behaviour on a halo array: the
 # Base fallbacks (similar + scalar indexing) would permute/flip the DATA but copy
