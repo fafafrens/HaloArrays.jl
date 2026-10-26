@@ -4,6 +4,7 @@ using LinearSolve
 using Krylov
 using OrdinaryDiffEq
 using LinearAlgebra
+using LinearSolve.SciMLOperators: FunctionOperator
 
 # Exercises HaloArraysLinearSolveExt: the `init_cacheval` override that lets
 # LinearSolve's KrylovJL build its workspace via `KrylovConstructor` on a halo
@@ -162,6 +163,122 @@ end
     @test_throws ArgumentError solve(LinearProblem(Aspd, b), HaloCG(); Pr = M)
     @test_throws ArgumentError solve(LinearProblem(Aspd, b), HaloGMRES(); Pr = M)
     @test_throws ArgumentError solve(LinearProblem(Aspd, b), HaloMINRES(); Pl = M)
+end
+
+# A 2-D / 3-D halo array as the state of an implicit OrdinaryDiffEq solve.
+# OrdinaryDiffEq `vec`s the state around every `mul!` with the matrix-free `W`
+# operator (and `zero(vec(u))`s it to build `W`); `vec` is the identity on a halo
+# array, so the N-D state reaches the Jacobian-vector product and the coordinate-
+# free solvers untouched. Heat equation, Dirichlet, vs. a tight explicit reference.
+@testset "Implicit OrdinaryDiffEq on an N-D halo array state" begin
+    for dims in ((4,), (4, 3), (4, 3, 2))
+        h = LocalHaloArray(Float64, dims, 1; boundary_condition = :periodic)
+        @test vec(h) === h
+        m = MultiHaloArray(LocalHaloArray, Float64, dims, 1; fields = (:a, :b), boundary_condition = :periodic)
+        @test vec(m) === m
+    end
+    function heat!(du, u, p, t)
+        synchronize_halo!(u)
+        s = parent(u); d = parent(du)
+        @inbounds for I in CartesianIndices(interior_range(u))
+            acc = zero(eltype(s))
+            for v in HaloArrays.versors(u)
+                e = CartesianIndex(v)
+                acc += s[I - e] - 2s[I] + s[I + e]
+            end
+            d[I] = acc * p
+        end
+        return nothing
+    end
+    @testset "$(length(dims))-D, $name" for dims in ((24, 20), (10, 9, 8)),
+                                            (name, alg) in (("HaloCG", HaloCG()), ("HaloGMRES", HaloGMRES()))
+        n = dims[1]
+        u0 = LocalHaloArray(Float64, dims, 1; boundary_condition = :antireflecting)
+        fill_from_global_indices!(I -> exp(-sum(d -> (I[d] - dims[d] / 2)^2, 1:length(dims)) / 6), u0)
+        prob = ODEProblem(heat!, u0, (0.0, 0.05), Float64(n^2))
+        ref = solve(prob, Tsit5(); reltol = 1e-10, abstol = 1e-10, save_everystep = false)
+        sol = solve(prob, FBDF(linsolve = alg, concrete_jac = false);
+                    reltol = 1e-7, abstol = 1e-7, save_everystep = false)
+        @test sol.retcode == ReturnCode.Success
+        @test sol.u[end] isa LocalHaloArray{Float64,length(dims)}
+        @test maximum(abs, sol.u[end] - ref.u[end]) < 1e-6
+    end
+end
+
+# A field collection as the implicit state. Its `size` is `(fields..., spatial...)`,
+# so even a 1-D-in-space collection is a 2-D array to the integrator and would be
+# `vec`-wrapped; the identity keeps the named fields reachable inside `rhs!`.
+# Two-species reaction–diffusion (nonsymmetric Jacobian → GMRES / BiCGStab).
+# A user-supplied Jacobian-vector product. OrdinaryDiffEq's matrix-free path
+# ignores `ODEFunction(; jvp)`; the route is `jac_prototype` as a SciMLOperators
+# `FunctionOperator` with `jvp!(Jv, v, u, p, t)` in place, and the halo array
+# flows through it unflattened. Linear 2-D heat: J is the Laplacian, so the
+# solution must match the autodiff path, while `rhs!` is called far less often.
+@testset "User Jacobian-vector product via jac_prototype on a 2-D halo array" begin
+    dims = (20, 16); p = Float64(dims[1]^2)
+    calls = Ref(0)
+    function heat!(du, u, p, t)
+        calls[] += 1
+        synchronize_halo!(u)
+        s = parent(u); d = parent(du)
+        @inbounds for I in CartesianIndices(interior_range(u))
+            acc = zero(eltype(s))
+            for v in HaloArrays.versors(u)
+                e = CartesianIndex(v); acc += s[I - e] - 2s[I] + s[I + e]
+            end
+            d[I] = acc * p
+        end
+        return nothing
+    end
+    jvp!(Jv, v, u, p, t) = (heat!(Jv, v, p, t); Jv)   # linear: J v = L v
+    u0 = LocalHaloArray(Float64, dims, 1; boundary_condition = :antireflecting)
+    fill_from_global_indices!(I -> exp(-sum(d -> (I[d] - dims[d] / 2)^2, 1:2) / 6), u0)
+    J = FunctionOperator(jvp!, similar(u0), similar(u0); u = u0, p = p, t = 0.0, isinplace = true, islinear = true)
+    tspan = (0.0, 0.05)
+    solve_with(f) = (calls[] = 0; sol = solve(ODEProblem(f, u0, tspan, p), FBDF(linsolve = HaloCG(), concrete_jac = false);
+                                               reltol = 1e-7, abstol = 1e-7, save_everystep = false); (sol, calls[]))
+    ref = solve(ODEProblem(heat!, u0, tspan, p), Tsit5(); reltol = 1e-10, abstol = 1e-10, save_everystep = false)
+    sol_ad, n_ad = solve_with(ODEFunction{true}(heat!))
+    sol_op, n_op = solve_with(ODEFunction{true}(heat!; jac_prototype = J))
+    @test sol_op.retcode == ReturnCode.Success
+    @test sol_op.u[end] isa LocalHaloArray{Float64,2}
+    @test maximum(abs, sol_op.u[end] - ref.u[end]) < 1e-6
+    @test sol_op.u[end] ≈ sol_ad.u[end] rtol = 1e-6
+    @test n_op < n_ad ÷ 2      # the operator replaced the autodiff JVP's rhs! evaluations
+end
+
+@testset "Implicit OrdinaryDiffEq on a MultiHaloArray state" begin
+    function rd!(du, u, p, _t)
+        DA, DB, k, inv_dx2 = p
+        synchronize_halo!(u)
+        dA = parent(du.A); dB = parent(du.B); A = parent(u.A); B = parent(u.B)
+        @inbounds for I in CartesianIndices(interior_range(u.A))
+            lapA = zero(eltype(A)); lapB = zero(eltype(B))
+            for v in HaloArrays.versors(u.A)
+                e = CartesianIndex(v)
+                lapA += A[I + e] - 2A[I] + A[I - e]
+                lapB += B[I + e] - 2B[I] + B[I - e]
+            end
+            r = k * A[I] * B[I]
+            dA[I] = DA * lapA * inv_dx2 - r
+            dB[I] = DB * lapB * inv_dx2 - r
+        end
+        return du
+    end
+    @testset "$(length(n))-D, $name" for n in ((32,), (16, 12)),
+                                         (name, alg) in (("HaloGMRES", HaloGMRES()), ("HaloBiCGStab", HaloBiCGStab()))
+        bc = ntuple(_ -> (Periodic(), Periodic()), length(n))
+        u0 = MultiHaloArray(LocalHaloArray, Float64, n, 1; boundary_conditions = (A = bc, B = bc))
+        fill_from_global_indices!(I -> 0.5 + 0.1sin(2π * I[1] / n[1]), u0.A)
+        fill_from_global_indices!(I -> 0.5 + 0.1cos(2π * I[end] / n[end]), u0.B)
+        prob = ODEProblem{true}(rd!, u0, (0.0, 0.1), (1.0, 0.5, 50.0, Float64(n[1]^2)))
+        ref = solve(prob, Tsit5(); reltol = 1e-10, abstol = 1e-10, save_everystep = false)
+        sol = solve(prob, FBDF(linsolve = alg, concrete_jac = false);
+                    reltol = 1e-7, abstol = 1e-7, save_everystep = false)
+        @test sol.retcode == ReturnCode.Success
+        @test sol.u[end] isa MultiHaloArray
+        @test maximum(abs, sol.u[end] - ref.u[end]) < 1e-6
+    end
 end
 
 @testset "HaloMINRES on a symmetric indefinite system" begin

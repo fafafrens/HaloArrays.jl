@@ -16,6 +16,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `MethodError`; it now returns the count of nonzero cells in the scalar type of
   a norm (`Float64` for an `SVector{3,Float64}` eltype), as Base does, and
   keeps `Float32` for a `Float32` array.
+- `vec(halo)` is the identity on any halo array — a single array of any
+  dimensionality, a field collection (`MultiHaloArray`, …) or a
+  `MaybeHaloArray` — so a 2-D/3-D halo array or a collection now works as the
+  state of an implicit `OrdinaryDiffEq` solve with a matrix-free `linsolve`
+  (`HaloCG`, `HaloGMRES`, …), as the solver docs already described. Before, the
+  integrator `vec`-wrapped the state into a `ReshapedArray` and failed while
+  building its `W` operator (`similar` of a 1-D `Dims` on an N-D geometry)
+  before any linear solver ran; only 1-D single arrays worked, where `vec` was
+  already the identity. A collection is never 1-D to Base (its `size` is
+  `(fields..., spatial...)`), so no collection state worked before.
 
 ## [0.12.1] — 2026-10-07
 
