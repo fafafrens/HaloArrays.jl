@@ -158,7 +158,8 @@ export halo_exchange!,
     HaloCG,
     HaloBiCGStab,
     HaloMINRES,
-    HaloGMRES
+    HaloGMRES,
+    HaloFGMRES
 
 # Reductions and gather
 export mapreduce_haloarray_dims,

@@ -27,6 +27,7 @@ collection, as the unknown; both are matrix-free and MPI-collective.
 | [`HaloMINRES`](@ref) | symmetric, possibly indefinite `A` | where CG would break down; no preconditioner |
 | [`HaloBiCGStab`](@ref) | general `A` | fixed memory, two products per iteration; `Pl` and `Pr` |
 | [`HaloGMRES`](@ref)`(; restart)` | general `A` | most robust; memory grows with `restart`; `Pl` and `Pr` |
+| [`HaloFGMRES`](@ref)`(; restart)` | general `A`, variable preconditioner | flexible GMRES: `Pr` may be a nested iterative solve; twice the memory |
 | [`HaloKrylovKit`](@ref)`(:gmres | :cg | :bicgstab)` | same | KrylovKit.jl's implementations; no preconditioning, basis allocated per solve |
 
 LinearSolve's stock `KrylovJL_*` (Krylov.jl) and `SimpleGMRES` are **not**

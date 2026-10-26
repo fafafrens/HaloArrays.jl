@@ -38,6 +38,7 @@ function HaloKrylovKit end
     HaloBiCGStab()
     HaloMINRES()
     HaloGMRES(; restart = 30)
+    HaloFGMRES(; restart = 30)
 
 LinearSolve algorithms for solving a linear system with a **halo array of any
 dimensionality** as the unknown — matrix-free, no marshalling to a flat vector.
@@ -59,6 +60,10 @@ reductions). The Krylov workspace is built once and cached by LinearSolve.
   where `HaloCG` would break down).
 - `HaloBiCGStab` — BiCGStab, for general square `A`.
 - `HaloGMRES` — restarted GMRES (`restart` basis vectors), for general square `A`.
+- `HaloFGMRES` — flexible GMRES (Saad): the right preconditioner may change from
+  iteration to iteration (a nested iterative solve, smoother sweeps, a multigrid
+  cycle). Stores the `restart` preconditioned directions as well, so twice the
+  memory of `HaloGMRES`; `Pr` only.
 
 Preconditioning follows the LinearSolve convention (`Pl`, `Pr` applied with
 `ldiv!`; the solved system is `Pl⁻¹ A Pr⁻¹ y = Pl⁻¹ b`, `x = Pr⁻¹ y`):
@@ -78,6 +83,8 @@ function HaloCG end
 function HaloBiCGStab end
 function HaloMINRES end
 function HaloGMRES end
+function HaloFGMRES end
 @doc (@doc HaloCG) HaloBiCGStab
 @doc (@doc HaloCG) HaloMINRES
 @doc (@doc HaloCG) HaloGMRES
+@doc (@doc HaloCG) HaloFGMRES
