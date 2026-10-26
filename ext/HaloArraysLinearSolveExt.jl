@@ -303,33 +303,22 @@ LinearSolve.init_cacheval(alg::HaloGMRESAlg, A, b, u, Pl, Pr, maxiters, abstol, 
 
 _retcode(converged) = converged ? SciMLBase.ReturnCode.Success : SciMLBase.ReturnCode.MaxIters
 
-function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::HaloCGAlg; kwargs...)
-    _reject_right_precond(cache.Pr)
-    x, iters, _res, conv = _cg!(cache.u, cache.A, cache.b, cache.cacheval, cache.Pl;
-        abstol = cache.abstol, reltol = cache.reltol, maxiter = cache.maxiters)
-    return SciMLBase.build_linear_solution(alg, x, nothing, cache; retcode = _retcode(conv), iters = iters)
-end
-
-function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::HaloMINRESAlg; kwargs...)
-    # Preconditioned MINRES needs the SPD Lanczos rework; reject rather than
-    # silently ignore a supplied preconditioner (use HaloCG/HaloGMRES instead).
-    (_is_identity_precond(cache.Pl) && _is_identity_precond(cache.Pr)) || throw(ArgumentError(
+# Which preconditioners each algorithm accepts, and which kernel runs it. MINRES
+# would need the SPD Lanczos rework to precondition, so it rejects any `Pl`
+# rather than silently ignore it (use HaloCG/HaloGMRES instead).
+_check_precond(::_HaloAlg, Pl, Pr) = _reject_right_precond(Pr)
+_check_precond(::HaloMINRESAlg, Pl, Pr) =
+    (_is_identity_precond(Pl) && _is_identity_precond(Pr)) || throw(ArgumentError(
         "HaloMINRES does not support preconditioning; use HaloCG (SPD) or HaloGMRES with `Pl`."))
-    x, iters, _res, conv = _minres!(cache.u, cache.A, cache.b, cache.cacheval;
-        abstol = cache.abstol, reltol = cache.reltol, maxiter = cache.maxiters)
-    return SciMLBase.build_linear_solution(alg, x, nothing, cache; retcode = _retcode(conv), iters = iters)
-end
 
-function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::HaloBiCGStabAlg; kwargs...)
-    _reject_right_precond(cache.Pr)
-    x, iters, _res, conv = _bicgstab!(cache.u, cache.A, cache.b, cache.cacheval, cache.Pl;
-        abstol = cache.abstol, reltol = cache.reltol, maxiter = cache.maxiters)
-    return SciMLBase.build_linear_solution(alg, x, nothing, cache; retcode = _retcode(conv), iters = iters)
-end
+_kernel!(::HaloCGAlg,       x, A, b, w, Pl; kw...) = _cg!(x, A, b, w, Pl; kw...)
+_kernel!(::HaloBiCGStabAlg, x, A, b, w, Pl; kw...) = _bicgstab!(x, A, b, w, Pl; kw...)
+_kernel!(::HaloGMRESAlg,    x, A, b, w, Pl; kw...) = _gmres!(x, A, b, w, Pl; kw...)
+_kernel!(::HaloMINRESAlg,   x, A, b, w, Pl; kw...) = _minres!(x, A, b, w; kw...)
 
-function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::HaloGMRESAlg; kwargs...)
-    _reject_right_precond(cache.Pr)
-    x, iters, _res, conv = _gmres!(cache.u, cache.A, cache.b, cache.cacheval, cache.Pl;
+function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::_HaloAlg; kwargs...)
+    _check_precond(alg, cache.Pl, cache.Pr)
+    x, iters, _res, conv = _kernel!(alg, cache.u, cache.A, cache.b, cache.cacheval, cache.Pl;
         abstol = cache.abstol, reltol = cache.reltol, maxiter = cache.maxiters)
     return SciMLBase.build_linear_solution(alg, x, nothing, cache; retcode = _retcode(conv), iters = iters)
 end
