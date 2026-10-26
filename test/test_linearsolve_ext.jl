@@ -161,6 +161,23 @@ end
         @test exact.u ≈ Ad \ bd
     end
 
+    # The stopping test is relative to b in the PRECONDITIONED norm: a strongly
+    # scaled Pl (c·I, which leaves the iterates unchanged) must neither report
+    # convergence early (c = 1e6: true residual far above reltol) nor over-solve
+    # (c = 1e-6: many extra iterations). Both must match the unpreconditioned solve.
+    @testset "preconditioned stopping test is scale-invariant: $name" for (name, alg) in (
+            ("HaloCG", HaloCG()), ("HaloBiCGStab", HaloBiCGStab()), ("HaloGMRES", HaloGMRES(restart = 10)))
+        relres(sol) = norm(b - Aspd * sol.u) / norm(b)
+        base = solve(LinearProblem(Aspd, b; u0 = zeros(n)), alg; reltol = 1e-10, abstol = 0.0, maxiters = 500)
+        @test relres(base) < 1e-9
+        for c in (1e6, 1e-6)
+            sol = solve(LinearProblem(Aspd, b; u0 = zeros(n)), alg; Pl = Diagonal(fill(c, n)), reltol = 1e-10, abstol = 0.0, maxiters = 500)
+            @test sol.retcode == ReturnCode.Success
+            @test relres(sol) < 1e-9
+            @test abs(sol.iters - base.iters) ≤ 1
+        end
+    end
+
     # Unsupported preconditioner requests are rejected, not silently dropped.
     M = Diagonal(diag(Aspd))
     @test_throws ArgumentError solve(LinearProblem(Aspd, b), HaloCG(); Pr = M)
