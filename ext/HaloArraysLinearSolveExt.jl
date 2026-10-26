@@ -43,6 +43,9 @@ const _IdentityOp = LinearSolve.SciMLOperators.IdentityOperator
 @inline _precond(z, ::_IdentityOp, v) = v
 @inline _precond!(M, v) = ldiv!(M, v)
 @inline _precond!(::_IdentityOp, v) = v
+# Always into `z` (FGMRES must own its zⱼ even when Pr is the identity).
+@inline _precond_into!(z, M, v) = ldiv!(z, M, v)
+@inline _precond_into!(z, ::_IdentityOp, v) = copyto!(z, v)
 
 # A right preconditioner would be silently dropped by CG, so reject it explicitly.
 @inline _reject_right_precond(Pr) =
@@ -163,19 +166,57 @@ end
     return (abs(a) / ρ, (a / abs(a)) * conj(b) / ρ)
 end
 
+# One Arnoldi step with modified Gram–Schmidt and the Givens update of column j:
+# `w` holds the new (preconditioned) operator product on entry. Returns the
+# residual estimate |g[j+1]| and whether the next basis vector could be formed.
+@inline function _arnoldi_step!(work, w, j)
+    V, H, g, cs, sn = work.V, work.H, work.g, work.cs, work.sn
+    T = real(eltype(g))
+    for i in 1:j                                # modified Gram-Schmidt
+        H[i, j] = dot(V[i], w)                  # conjugate inner product (complex-safe)
+        w .-= H[i, j] .* V[i]
+    end
+    hnext = norm(w)                             # real; H is the (possibly complex) field
+    H[j+1, j] = hnext
+    happy = hnext ≤ eps(T)                      # the next Arnoldi vector can't be formed
+    happy || (V[j+1] .= w .* inv(hnext))
+    for i in 1:j-1                              # apply previous Givens rotations
+        τ         =  cs[i] * H[i, j] + sn[i] * H[i+1, j]
+        H[i+1, j] = -conj(sn[i]) * H[i, j] + cs[i] * H[i+1, j]
+        H[i, j]   = τ
+    end
+    cs[j], sn[j] = _givens(H[j, j], H[j+1, j])
+    H[j, j]   = cs[j] * H[j, j] + sn[j] * H[j+1, j]
+    H[j+1, j] = 0
+    g[j+1] = -conj(sn[j]) * g[j]
+    g[j]   =  cs[j] * g[j]
+    return abs(g[j+1]), happy
+end
+# Back-substitution H[1:k,1:k] y = g[1:k], solved in place into g (no allocation).
+@inline function _hessenberg_solve!(H, g, k)
+    for i in k:-1:1
+        for l in i+1:k
+            g[i] -= H[i, l] * g[l]
+        end
+        g[i] /= H[i, i]
+    end
+    return g
+end
+
 # Preconditioned restarted GMRES: build the Krylov space of Pl⁻¹ A Pr⁻¹ and
 # monitor the residual `Pl⁻¹(b - Ax)` (the true residual when Pl is the identity,
 # whatever Pr is). The Arnoldi vectors span the right-preconditioned space, so
-# the correction Σ gᵢ vᵢ is mapped back through Pr⁻¹ before updating x.
+# the correction Σ gᵢ vᵢ is mapped back through Pr⁻¹ before updating x — which
+# assumes Pr is one fixed linear operator (see HaloFGMRES otherwise).
 function _krylov!(x, A, b, work::GMRESWorkspace, Pl, Pr; abstol, reltol, maxiter)
-    V, H, g, cs, sn, w, Ax = work.V, work.H, work.g, work.cs, work.sn, work.w, work.Ax
-    T = real(float(eltype(b))); m = length(cs)
+    V, H, g, w, Ax = work.V, work.H, work.g, work.w, work.Ax
+    m = length(work.cs)
     thr = _threshold(norm(_precond(w, Pl, b)), abstol, reltol)     # ‖Pl⁻¹ b‖
     res = norm(b); total = 0
     while total < maxiter
         mul!(Ax, A, x)
         r = V[1]; copyto!(r, b); r .-= Ax           # residual in V[1]
-        _precond!(Pl, r)                       # r ← M⁻¹(b - Ax)
+        _precond!(Pl, r)                             # r ← Pl⁻¹(b - Ax)
         β = norm(r); res = β
         res ≤ thr && break
         V[1] .*= inv(β)
@@ -186,39 +227,64 @@ function _krylov!(x, A, b, work::GMRESWorkspace, Pl, Pr; abstol, reltol, maxiter
             k = j; total += 1
             vj = _precond(Ax, Pr, V[j])             # Pr⁻¹ vⱼ      (Ax is scratch here)
             mul!(w, A, vj); _precond!(Pl, w)        # w ← Pl⁻¹ A Pr⁻¹ vⱼ
-            for i in 1:j                            # modified Gram-Schmidt
-                H[i, j] = dot(V[i], w)              # conjugate inner product (complex-safe)
-                w .-= H[i, j] .* V[i]
-            end
-            hnext = norm(w)                         # real; H is the (possibly complex) field
-            H[j+1, j] = hnext
-            happy = hnext ≤ eps(T)                  # the next Arnoldi vector can't be formed
-            happy || (V[j+1] .= w .* inv(hnext))
-            for i in 1:j-1                          # apply previous Givens rotations
-                τ         =  cs[i] * H[i, j] + sn[i] * H[i+1, j]
-                H[i+1, j] = -conj(sn[i]) * H[i, j] + cs[i] * H[i+1, j]
-                H[i, j]   = τ
-            end
-            cs[j], sn[j] = _givens(H[j, j], H[j+1, j])
-            H[j, j]   = cs[j] * H[j, j] + sn[j] * H[j+1, j]
-            H[j+1, j] = 0
-            g[j+1] = -conj(sn[j]) * g[j]
-            g[j]   =  cs[j] * g[j]
-            res = abs(g[j+1])
+            res, happy = _arnoldi_step!(work, w, j)
             (res ≤ thr || happy) && break           # stop on convergence or happy breakdown
         end
-        # back-substitution H[1:k,1:k] y = g[1:k], solved in place into g (no allocation)
-        for i in k:-1:1
-            for l in i+1:k
-                g[i] -= H[i, l] * g[l]
-            end
-            g[i] /= H[i, i]
-        end
+        _hessenberg_solve!(H, g, k)
         fill!(w, 0)
         for i in 1:k
             w .+= g[i] .* V[i]                      # correction in the Pr-space
         end
         x .+= _precond(Ax, Pr, w)                   # x += Pr⁻¹ Σ gᵢ vᵢ
+        res ≤ thr && break
+    end
+    return x, total, res, res ≤ thr
+end
+
+# ---- Flexible GMRES (Saad 1993) — variable right preconditioner ----
+# Keeps zⱼ = Prⱼ⁻¹ vⱼ for every basis vector and updates x = x + Σ gᵢ zᵢ from
+# them, so Pr may differ at every step: a nested iterative solve with a few
+# iterations, smoother sweeps, a multigrid cycle. Right-preconditioned only (a
+# varying Pl would change the norm being minimised from step to step); the
+# monitored residual is the true residual. Twice the vectors of GMRES.
+struct FGMRESWorkspace{TV,TH,TG,TC,TW}
+    V::TV; Z::TV; H::TH; g::TG; cs::TC; sn::TG; w::TW; Ax::TW
+    function FGMRESWorkspace(b; restart)
+        K = float(eltype(b)); T = real(K); m = restart
+        V = [similar(b) for _ in 1:m+1]; Z = [similar(b) for _ in 1:m]
+        H = zeros(K, m + 1, m); g = zeros(K, m + 1); cs = zeros(T, m); w = similar(b)
+        new{typeof(V),typeof(H),typeof(g),typeof(cs),typeof(w)}(V, Z, H, g, cs, zeros(K, m), w, similar(b))
+    end
+end
+
+function _krylov!(x, A, b, work::FGMRESWorkspace, Pl, Pr; abstol, reltol, maxiter)
+    _is_identity_precond(Pl) || throw(ArgumentError(
+        "HaloFGMRES is right-preconditioned only (flexible Pr); a left preconditioner " *
+        "Pl::$(typeof(Pl)) is not supported. Pass it as Pr, or use HaloGMRES."))
+    V, Z, H, g, w, Ax = work.V, work.Z, work.H, work.g, work.w, work.Ax
+    m = length(work.cs)
+    thr = _threshold(norm(b), abstol, reltol)
+    res = norm(b); total = 0
+    while total < maxiter
+        mul!(Ax, A, x)
+        r = V[1]; copyto!(r, b); r .-= Ax           # true residual in V[1]
+        β = norm(r); res = β
+        res ≤ thr && break
+        V[1] .*= inv(β)
+        fill!(g, 0); g[1] = β
+        k = 0
+        inner = min(m, maxiter - total)
+        for j in 1:inner
+            k = j; total += 1
+            _precond_into!(Z[j], Pr, V[j])          # zⱼ = Prⱼ⁻¹ vⱼ, kept
+            mul!(w, A, Z[j])                        # w ← A zⱼ
+            res, happy = _arnoldi_step!(work, w, j)
+            (res ≤ thr || happy) && break
+        end
+        _hessenberg_solve!(H, g, k)
+        for i in 1:k
+            x .+= g[i] .* Z[i]                      # x += Σ gᵢ zᵢ
+        end
         res ≤ thr && break
     end
     return x, total, res, res ≤ thr
@@ -286,6 +352,9 @@ struct HaloMINRESAlg   <: LinearSolve.AbstractKrylovSubspaceMethod end
 struct HaloGMRESAlg    <: LinearSolve.AbstractKrylovSubspaceMethod
     restart::Int
 end
+struct HaloFGMRESAlg   <: LinearSolve.AbstractKrylovSubspaceMethod
+    restart::Int
+end
 
 HaloArrays.HaloCG()       = HaloCGAlg()
 HaloArrays.HaloBiCGStab() = HaloBiCGStabAlg()
@@ -294,6 +363,10 @@ function HaloArrays.HaloGMRES(; restart = 30)
     restart ≥ 1 || throw(ArgumentError("HaloGMRES: `restart` must be ≥ 1, got $restart"))
     return HaloGMRESAlg(restart)
 end
+function HaloArrays.HaloFGMRES(; restart = 30)
+    restart ≥ 1 || throw(ArgumentError("HaloFGMRES: `restart` must be ≥ 1, got $restart"))
+    return HaloFGMRESAlg(restart)
+end
 
 # LinearSolve rejects an `AbstractMatrix` right-hand side for Krylov subspace
 # methods, reading extra columns as a batch of independent vectors. A 2-D halo
@@ -301,7 +374,7 @@ end
 # they only ever touch `b` through broadcasts and `_hdot`. Opt out of the check
 # for THESE algorithms only (not every `AbstractKrylovSubspaceMethod`: a broader
 # method was ambiguous with LinearSolve's own `KrylovJL` method).
-const _HaloAlg = Union{HaloCGAlg, HaloBiCGStabAlg, HaloMINRESAlg, HaloGMRESAlg}
+const _HaloAlg = Union{HaloCGAlg, HaloBiCGStabAlg, HaloMINRESAlg, HaloGMRESAlg, HaloFGMRESAlg}
 LinearSolve._check_batched_rhs_support(::_HaloAlg, ::AbstractHaloArray) = nothing
 
 # OrdinaryDiffEq updates the per-step tolerances through `update_tolerances!`,
@@ -317,14 +390,16 @@ LinearSolve.init_cacheval(::HaloMINRESAlg, A, b, u, Pl, Pr, maxiters, abstol, re
     MINRESWorkspace(b)
 LinearSolve.init_cacheval(alg::HaloGMRESAlg, A, b, u, Pl, Pr, maxiters, abstol, reltol, verbose, assump) =
     GMRESWorkspace(b; restart = alg.restart)
+LinearSolve.init_cacheval(alg::HaloFGMRESAlg, A, b, u, Pl, Pr, maxiters, abstol, reltol, verbose, assump) =
+    FGMRESWorkspace(b; restart = alg.restart)
 
 _retcode(converged) = converged ? SciMLBase.ReturnCode.Success : SciMLBase.ReturnCode.MaxIters
 
 # The workspace in `cacheval` names the algorithm: `_krylov!` dispatches on it.
 function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::_HaloAlg; kwargs...)
-    x, iters, _res, conv = _krylov!(cache.u, cache.A, cache.b, cache.cacheval, cache.Pl, cache.Pr;
+    x, iters, res, conv = _krylov!(cache.u, cache.A, cache.b, cache.cacheval, cache.Pl, cache.Pr;
         abstol = cache.abstol, reltol = cache.reltol, maxiter = cache.maxiters)
-    return SciMLBase.build_linear_solution(alg, x, nothing, cache; retcode = _retcode(conv), iters = iters)
+    return SciMLBase.build_linear_solution(alg, x, res, cache; retcode = _retcode(conv), iters = iters)
 end
 
 end # module

@@ -35,6 +35,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `Pl`. With `Pr` only the monitored residual is the true residual. `HaloCG`
   still takes `Pl` only and `HaloMINRES` neither; both throw on an unsupported
   preconditioner instead of ignoring it.
+- `HaloFGMRES(; restart)`: flexible GMRES (Saad). The right preconditioner may
+  change between iterations — a nested `HaloCG`/`HaloBiCGStab` solve with a few
+  iterations, smoother sweeps, a multigrid cycle — where `HaloGMRES` would
+  silently lose convergence. Right-preconditioned only; stores the `restart`
+  preconditioned directions (twice the memory of `HaloGMRES`).
 - `ldiv!`/`rdiv!` with a `UniformScaling` (`I`, `c*I`) on a halo array of any
   dimensionality, as an interior-only broadcast (LinearAlgebra's methods are
   `AbstractVecOrMat`-only). The Halo solvers' `c*I` preconditioner was silently
