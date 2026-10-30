@@ -36,8 +36,8 @@ common API isn't buried among the advanced kernel and threading internals.
 - [`synchronize_halo!`](@ref) fills every ghost cell — applying boundary
   conditions and exchanging between ranks/tiles — in one call
 - Boundary-condition types: [`Periodic`](@ref), [`Mirror`](@ref) (constructed by
-  [`Reflecting`](@ref) and [`Antireflecting`](@ref)), [`Repeating`](@ref), and
-  [`NoBoundaryCondition`](@ref)
+  [`Reflecting`](@ref) and [`Antireflecting`](@ref)), [`Repeating`](@ref),
+  [`Extrapolation`](@ref), and [`NoBoundaryCondition`](@ref)
   (opt out so you can fill an edge yourself)
 
 ## Finite-volume kernels

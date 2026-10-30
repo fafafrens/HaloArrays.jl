@@ -6,6 +6,35 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-10-30
+
+### Changed
+- **Breaking:** the even and odd wall reflections are one boundary condition,
+  `Mirror(sign)`, with the parity as an `Int8` field (`+1` even, `-1` odd)
+  instead of the two singleton types `Reflecting` and `Antireflecting`. The two
+  names remain as constructors returning `Mirror(1)` and `Mirror(-1)`, the
+  symbols `:reflecting`/`:antireflecting` map to them, and `to_bc` also accepts
+  the bare names, so existing calls are unchanged. Only code that used the names
+  as types breaks: replace `isa Reflecting` by `=== Reflecting()` or `isa Mirror`.
+  Reason: the boundary condition is a type parameter of every halo array, so a
+  collection mixing both parities (the components of a vector or tensor at a
+  symmetry axis) had an abstract field container and `synchronize_halo!`
+  dispatched at run time once per field, 16 bytes and ~70 ns each. With one type
+  for both parities the container is concrete and the refresh is static and
+  allocation-free (310 µs → 68 µs and 4000 → 0 allocations on a 10×400
+  `ArrayOfHaloArray`).
+
+### Added
+- `Mirror(sign)`, exported, with a docstring; `Reflecting()` and
+  `Antireflecting()` documented as its two constructors.
+- `Extrapolation(order = 1)`: polynomial extrapolation into the ghost cells.
+  Each ghost cell takes the value of the degree-`order` polynomial through the
+  `order + 1` interior cells nearest the wall (Lagrange weights, integers at the
+  cell positions, so integer arrays are exact); `Extrapolation(0)` is
+  `Repeating`. Works on every backend; the interior, or the tile, must hold
+  `order + 1` cells along that dimension. Symbol `:extrapolating` for the linear
+  case.
+
 ## [0.13.0] — 2026-10-26
 
 ### Changed
