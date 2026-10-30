@@ -346,7 +346,7 @@ end
     return ghost_view(tile_parent(halo, tile_id), s, Dim(D), halo_width(halo))
 end
 @inline _band_view(halo::ThreadedHaloArray, s::Side, d::Dim, w::Int, tile_id::Integer) =
-    _band_view(tile_parent(halo, tile_id), s, d, halo_width(halo), w)
+    _storage_band_view(tile_parent(halo, tile_id), s, d, halo_width(halo), w)
 
 @inline function neighbor_tile_id(halo::ThreadedHaloArray, tile_id::Integer, dim::Integer, side::Integer)
     return neighbor_tile_id(halo.topology, tile_id, dim, side)

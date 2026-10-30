@@ -405,13 +405,13 @@ the cells a halo exchange (or a boundary condition) writes. Same shape as
 # nearest the wall on side 1, cell `w` on side 2, like the edge band.
 @inline _band_window(::Side{1}, sd::Int, halo::Int, w::Int) = (halo+1):(halo+w)
 @inline _band_window(::Side{2}, sd::Int, halo::Int, w::Int) = (sd-halo-w+1):(sd-halo)
-@inline function _band_view(arr::AbstractArray, s::Side, ::Dim{D}, halo::Int, w::Int) where {D}
+@inline function _storage_band_view(arr::AbstractArray, s::Side, ::Dim{D}, halo::Int, w::Int) where {D}
     n = size(arr, D) - 2halo
     n >= w || throw(ArgumentError("boundary condition needs $w interior cells along dimension $D, the interior has $n"))
     return _halo_window_view(_band_window(s, size(arr, D), halo, w), arr, D, halo)
 end
 @inline _band_view(h::AbstractSingleHaloArray, s::Side, d::Dim, w::Int, ::Nothing) =
-    _band_view(parent(h), s, d, halo_width(h), w)
+    _storage_band_view(parent(h), s, d, halo_width(h), w)
 @inline ghost_view(arr::AbstractArray, s::Side, ::Dim{D}, halo::Int) where {D} =
     _halo_window_view(_recv_window(s, size(arr, D), halo), arr, D, halo)
 
