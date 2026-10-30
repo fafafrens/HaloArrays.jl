@@ -140,3 +140,21 @@ end
         @test parent(ha)[2:5] == [10, 20, 30, 40]
     end
 end
+
+@testset "Mirror: parity as a value, one array type for both parities" begin
+    @test Reflecting() === Mirror(1)
+    @test Antireflecting() === Mirror(-1)
+    @test HaloArrays.to_bc(:reflecting) === Mirror(1)
+    @test HaloArrays.to_bc(Reflecting) === Mirror(1)
+    @test_throws ArgumentError Mirror(2)
+    # even and odd fields side by side: concretely typed container, odd ghost flips sign
+    bcs = [((Mirror(isodd(a) ? -1 : 1), :repeating),) for a in 1:4]
+    u = ArrayOfHaloArray(LocalHaloArray, Float64, (4,), (6,), 1; boundary_conditions = bcs)
+    @test isconcretetype(eltype(parent(u)))
+    for a in 1:4
+        parent(parent(u)[a])[2] = Float64(a)      # first interior cell
+    end
+    synchronize_halo!(u)
+    @test [parent(parent(u)[a])[1] for a in 1:4] == [-1.0, 2.0, -3.0, 4.0]
+    @test @allocated(synchronize_halo!(u)) == 0
+end

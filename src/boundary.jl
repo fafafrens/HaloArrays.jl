@@ -22,8 +22,8 @@ using StaticArrays
 # the index math is slab-local — no global sizes, and (for the mirror) no side
 # branch: reflection about the wall is the same index reversal on either side.
 
-# Mirror the edge band into the ghost band. `scale = 1` → Reflecting (keep sign),
-# `scale = -1` → Antireflecting (flip sign). Cells pair up at equal distance
+# Mirror the edge band into the ghost band. `scale = 1` → even (Reflecting, keep
+# sign), `scale = -1` → odd (Antireflecting, flip sign). Cells pair up at equal distance
 # from the wall, which in slab-local coordinates is a reversal along `dim` —
 # a reversed-range view, so the whole mirror is one fused broadcast.
 @inline function _reflect_into!(ghost::AbstractArray{<:Any,N}, edge,
@@ -76,8 +76,8 @@ It only touches faces that are real domain boundaries (for [`HaloArray`](@ref),
 faces with no MPI neighbour; for [`ThreadedHaloArray`](@ref), the outer tile
 edges), so it is safe to call on a decomposed grid. The condition per
 `(dimension, side)` comes from `u`'s stored boundary condition — see
-[`Periodic`](@ref), [`Reflecting`](@ref), [`Repeating`](@ref),
-[`Antireflecting`](@ref), [`NoBoundaryCondition`](@ref).
+[`Periodic`](@ref), [`Mirror`](@ref) ([`Reflecting`](@ref), [`Antireflecting`](@ref)),
+[`Repeating`](@ref), [`NoBoundaryCondition`](@ref), [`FunctionBC`](@ref).
 """
 function boundary_condition!(halo::AbstractSingleHaloArray{T,N}; threads::Bool=false) where {T,N}
     _foreach_face(boundary_condition!, halo, Val(N))
@@ -105,14 +105,12 @@ end
 # else differs between backends.
 # ============================================================
 
-# ---- Reflecting / Antireflecting / Repeating ------------------
-# Delegate to the shared kernels with this face's ghost/edge views. `S`/`scale`
-# are compile-time, so these inline to the same code as a hand-written per-side
-# method.
-@inline boundary_condition!(h::AbstractSingleHaloArray, s::Side, d::Dim, ::Reflecting, tile=nothing) =
-    _reflect_into!(ghost_view(h, s, d, tile), edge_view(h, s, d, tile), d, 1)
-@inline boundary_condition!(h::AbstractSingleHaloArray, s::Side, d::Dim, ::Antireflecting, tile=nothing) =
-    _reflect_into!(ghost_view(h, s, d, tile), edge_view(h, s, d, tile), d, -1)
+# ---- Mirror (Reflecting / Antireflecting) / Repeating ----------
+# Delegate to the shared kernels with this face's ghost/edge views. `S` is
+# compile-time; the mirror sign is a value of the condition (one multiply per
+# ghost cell), so both parities share one method and one array type.
+@inline boundary_condition!(h::AbstractSingleHaloArray, s::Side, d::Dim, bc::Mirror, tile=nothing) =
+    _reflect_into!(ghost_view(h, s, d, tile), edge_view(h, s, d, tile), d, bc.sign)
 @inline boundary_condition!(h::AbstractSingleHaloArray, s::Side, d::Dim, ::Repeating, tile=nothing) =
     _repeating_into!(ghost_view(h, s, d, tile), edge_view(h, s, d, tile), s, d)
 
@@ -305,6 +303,8 @@ end
 # only, so the one dynamic dispatch through `Val(s)` is irrelevant.
 to_bc(bc::AbstractBoundaryCondition)                  = bc
 to_bc(::Type{T}) where {T<:AbstractBoundaryCondition} = T()
+to_bc(::typeof(Reflecting))                           = Reflecting()     # the bare constructor names
+to_bc(::typeof(Antireflecting))                       = Antireflecting()
 to_bc(s::Symbol)                                      = to_bc(Val(s))
 to_bc(::Val{:reflecting})     = Reflecting()
 to_bc(::Val{:antireflecting}) = Antireflecting()

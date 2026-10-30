@@ -224,7 +224,7 @@ benchmarking, when the halo surface is large.
 
 ## Boundary conditions
 
-Built-in boundary conditions are [`Reflecting`](@ref), [`Antireflecting`](@ref),
+Built-in boundary conditions are [`Mirror`](@ref) (via [`Reflecting`](@ref), [`Antireflecting`](@ref)),
 [`Repeating`](@ref), [`Periodic`](@ref), and [`NoBoundaryCondition`](@ref); the
 symbols `:reflecting`, `:antireflecting`, `:repeating`, `:periodic`,
 `:noboundary` are also accepted.
