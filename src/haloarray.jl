@@ -4,18 +4,53 @@
 Supertype for the rule that fills a physical-edge ghost layer when the halo is
 refreshed (by [`boundary_condition!`](@ref) / [`synchronize_halo!`](@ref)).
 
-Concrete conditions: [`Periodic`](@ref), [`Repeating`](@ref),
-[`Reflecting`](@ref), [`Antireflecting`](@ref), [`NoBoundaryCondition`](@ref).
+Concrete conditions: [`Periodic`](@ref), [`Repeating`](@ref), [`Mirror`](@ref)
+(constructed by [`Reflecting`](@ref) and [`Antireflecting`](@ref)),
+[`NoBoundaryCondition`](@ref), [`FunctionBC`](@ref).
 A condition is given per `(dimension, side)`; constructors also accept the
 symbols `:periodic`, `:repeating`, `:reflecting`, `:antireflecting`.
 """
 abstract type AbstractBoundaryCondition end
 
-"Even/mirror reflection about the wall: `ghost = +interior` (zero-gradient)."
-struct Reflecting       <: AbstractBoundaryCondition end
-"""Odd reflection about the wall: `ghost = -interior` (the field vanishes at the
-wall) — e.g. a velocity component normal to a solid wall. Cf. [`Reflecting`](@ref)."""
-struct Antireflecting  <: AbstractBoundaryCondition end
+"""
+    Mirror(sign)
+
+Reflection about the wall with the parity as a value: each ghost cell is `sign`
+times its mirror image across the wall. `Mirror(1)` is the even reflection
+(`ghost = +interior`, zero-gradient), `Mirror(-1)` the odd one (`ghost = -interior`,
+the field vanishes at the wall); [`Reflecting`](@ref)`()` and
+[`Antireflecting`](@ref)`()` construct these two.
+
+The sign is a field, not a type parameter, so fields of both parities have the
+same array type. A collection that mixes them — the components of a vector or
+tensor at a symmetry axis, with one parity per component — then keeps a
+concretely typed field container, and its halo refresh dispatches statically
+instead of once per field at run time.
+"""
+struct Mirror <: AbstractBoundaryCondition
+    sign::Int8
+    function Mirror(sign::Integer)
+        abs(sign) == 1 || throw(ArgumentError("Mirror sign must be +1 or -1, got $sign"))
+        return new(sign)
+    end
+end
+
+"""
+    Reflecting()
+
+Even/mirror reflection about the wall: `ghost = +interior` (zero-gradient).
+Returns [`Mirror`](@ref)`(1)`.
+"""
+Reflecting() = Mirror(1)
+
+"""
+    Antireflecting()
+
+Odd reflection about the wall: `ghost = -interior` (the field vanishes at the
+wall) — e.g. a velocity component normal to a solid wall. Returns
+[`Mirror`](@ref)`(-1)`. Cf. [`Reflecting`](@ref).
+"""
+Antireflecting() = Mirror(-1)
 "Zero-gradient: each ghost cell copies the nearest interior value."
 struct Repeating       <: AbstractBoundaryCondition end
 "Ghost cells wrap around from the opposite side of the domain (periodic)."

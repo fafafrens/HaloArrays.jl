@@ -70,11 +70,11 @@ end
         @test bc1[2][1] isa HaloArrays.Repeating && bc1[2][2] isa HaloArrays.Repeating
 
         bc2 = HaloArrays.normalize_boundary_condition((:reflecting, :periodic), 2)
-        @test bc2[1][1] isa HaloArrays.Reflecting && bc2[1][2] isa HaloArrays.Reflecting
+        @test bc2[1][1] === HaloArrays.Reflecting() && bc2[1][2] === HaloArrays.Reflecting()   # Mirror(1)
         @test bc2[2][1] isa HaloArrays.Periodic && bc2[2][2] isa HaloArrays.Periodic
 
         bc3 = HaloArrays.normalize_boundary_condition(((:reflecting, :repeating), (:periodic, :periodic)), 2)
-        @test bc3[1][1] isa HaloArrays.Reflecting && bc3[1][2] isa HaloArrays.Repeating
+        @test bc3[1][1] === HaloArrays.Reflecting() && bc3[1][2] isa HaloArrays.Repeating
         @test bc3[2][1] isa HaloArrays.Periodic && bc3[2][2] isa HaloArrays.Periodic
 
         @test_throws ArgumentError HaloArrays.normalize_boundary_condition((:repeating,), 2)
