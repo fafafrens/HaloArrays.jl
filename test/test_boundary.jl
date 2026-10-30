@@ -158,3 +158,37 @@ end
     @test [parent(parent(u)[a])[1] for a in 1:4] == [-1.0, 2.0, -3.0, 4.0]
     @test @allocated(synchronize_halo!(u)) == 0
 end
+
+@testset "Extrapolation: polynomial of order p into the ghosts" begin
+    function ghosts(bc, vals)
+        u = LocalHaloArray(Int, (length(vals),), 2; boundary_condition = ((bc, bc),))
+        interior_view(u) .= vals
+        synchronize_halo!(u)
+        return parent(u)
+    end
+    @test ghosts(Extrapolation(0), [10, 20, 30, 40]) == [10, 10, 10, 20, 30, 40, 40, 40]   # Repeating
+    @test ghosts(Extrapolation(1), [10, 20, 30, 40]) == [-10, 0, 10, 20, 30, 40, 50, 60]   # edge slope
+    @test ghosts(Extrapolation(2), [1, 4, 9, 16]) == [1, 0, 1, 4, 9, 16, 25, 36]            # x^2 exactly
+    @test Extrapolation() === Extrapolation(1)
+    @test HaloArrays.to_bc(:extrapolating) === Extrapolation(1)
+    @test_throws ArgumentError Extrapolation(-1)
+    # order 3 is exact for a cubic; Float64, 2-D, extrapolating along dimension 2 only
+    v = LocalHaloArray(Float64, (3, 4), 1;
+        boundary_condition = ((:repeating, :repeating), (Extrapolation(3), Extrapolation(3))))
+    f(x) = 2.0 - x + 0.5x^2 - 0.25x^3
+    for i in 1:3, j in 1:4
+        interior_view(v)[i, j] = f(j) + i
+    end
+    synchronize_halo!(v)
+    @test parent(v)[2:4, 1] ≈ [f(0) + i for i in 1:3]
+    @test parent(v)[2:4, 6] ≈ [f(5) + i for i in 1:3]
+    @test parent(v)[1, 2:5] ≈ parent(v)[2, 2:5]                     # the repeating sides are untouched
+    # not enough interior cells for the order
+    w = LocalHaloArray(Float64, (2,), 1; boundary_condition = ((Extrapolation(2), Extrapolation(2)),))
+    @test_throws ArgumentError synchronize_halo!(w)
+    # allocation-free
+    u = LocalHaloArray(Float64, (8,), 2; boundary_condition = ((Extrapolation(2), Extrapolation(1)),))
+    interior_view(u) .= 1:8
+    synchronize_halo!(u)
+    @test @allocated(synchronize_halo!(u)) == 0
+end

@@ -225,8 +225,10 @@ benchmarking, when the halo surface is large.
 ## Boundary conditions
 
 Built-in boundary conditions are [`Mirror`](@ref) (via [`Reflecting`](@ref), [`Antireflecting`](@ref)),
-[`Repeating`](@ref), [`Periodic`](@ref), and [`NoBoundaryCondition`](@ref); the
-symbols `:reflecting`, `:antireflecting`, `:repeating`, `:periodic`,
+[`Repeating`](@ref), [`Extrapolation`](@ref) (a polynomial of the given order
+through the interior cells nearest the wall; `Extrapolation(0)` is `Repeating`),
+[`Periodic`](@ref), and [`NoBoundaryCondition`](@ref); the symbols `:reflecting`,
+`:antireflecting`, `:repeating`, `:extrapolating` (linear), `:periodic`,
 `:noboundary` are also accepted.
 
 ```julia

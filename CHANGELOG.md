@@ -27,6 +27,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 - `Mirror(sign)`, exported, with a docstring; `Reflecting()` and
   `Antireflecting()` documented as its two constructors.
+- `Extrapolation(order = 1)`: polynomial extrapolation into the ghost cells.
+  Each ghost cell takes the value of the degree-`order` polynomial through the
+  `order + 1` interior cells nearest the wall (Lagrange weights, integers at the
+  cell positions, so integer arrays are exact); `Extrapolation(0)` is
+  `Repeating`. Works on every backend; the interior, or the tile, must hold
+  `order + 1` cells along that dimension. Symbol `:extrapolating` for the linear
+  case.
 
 ## [0.13.0] — 2026-10-26
 

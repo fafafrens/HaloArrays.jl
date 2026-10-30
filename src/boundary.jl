@@ -44,6 +44,34 @@ end
     return nothing
 end
 
+# Polynomial extrapolation of order p. Each ghost slab at distance k = 1..halo beyond the
+# wall receives the degree-p Lagrange polynomial through the p + 1 interior slabs nearest
+# the wall (distances 0..p), evaluated at -k. At integer points the Lagrange weights are
+# integers (the binomial coefficients of Newton's forward-difference formula), so the kernel
+# is exact for integer arrays; p = 0 is Repeating. `band` is the (p + 1)-wide interior band
+# (`_band_view`), oriented like the edge band: slab 1 nearest the wall on side 1, slab p + 1
+# on side 2.
+@inline _lagrange_weight(j::Int, p::Int, x::Int) =
+    Int(prod(((x - i) // (j - i) for i in 0:p if i != j); init = 1 // 1))
+@inline function _extrapolate_into!(ghost::AbstractArray{<:Any,N}, band,
+        ::Side{S}, ::Dim{dim}, p::Int) where {N,S,dim}
+    hw = size(ghost, dim)
+    for kk in 1:hw
+        k = S == 1 ? hw + 1 - kk : kk                    # distance of ghost slab kk from the wall
+        g = view(ghost, _slice_index(Val(N), dim, kk)...)
+        for j in 0:p
+            b = view(band, _slice_index(Val(N), dim, S == 1 ? j + 1 : p + 1 - j)...)   # distance j
+            w = _lagrange_weight(j, p, -k)
+            if j == 0
+                g .= w .* b
+            else
+                g .+= w .* b
+            end
+        end
+    end
+    return nothing
+end
+
 # Single-process periodic needs no kernel: a side's ghost band IS the opposite
 # side's edge band — the same copy the MPI/tile exchange performs (see the
 # LocalHaloArray Periodic method below).
@@ -113,6 +141,10 @@ end
     _reflect_into!(ghost_view(h, s, d, tile), edge_view(h, s, d, tile), d, bc.sign)
 @inline boundary_condition!(h::AbstractSingleHaloArray, s::Side, d::Dim, ::Repeating, tile=nothing) =
     _repeating_into!(ghost_view(h, s, d, tile), edge_view(h, s, d, tile), s, d)
+
+# ---- Extrapolation (polynomial of order p) ----------------------
+@inline boundary_condition!(h::AbstractSingleHaloArray, s::Side, d::Dim, bc::Extrapolation, tile=nothing) =
+    _extrapolate_into!(ghost_view(h, s, d, tile), _band_view(h, s, d, bc.order + 1, tile), s, d, bc.order)
 
 # ---- Periodic -------------------------------------------------
 # HaloArray (MPI exchange) and ThreadedHaloArray (inter-tile exchange) already
@@ -309,6 +341,7 @@ to_bc(s::Symbol)                                      = to_bc(Val(s))
 to_bc(::Val{:reflecting})     = Reflecting()
 to_bc(::Val{:antireflecting}) = Antireflecting()
 to_bc(::Val{:repeating})      = Repeating()
+to_bc(::Val{:extrapolating})  = Extrapolation(1)
 to_bc(::Val{:periodic})       = Periodic()
 to_bc(::Val{:noboundary})     = NoBoundaryCondition()
 to_bc(::Val{s}) where {s}     = throw(ArgumentError("Unknown boundary condition symbol: :$s"))

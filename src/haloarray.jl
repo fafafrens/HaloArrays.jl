@@ -6,9 +6,10 @@ refreshed (by [`boundary_condition!`](@ref) / [`synchronize_halo!`](@ref)).
 
 Concrete conditions: [`Periodic`](@ref), [`Repeating`](@ref), [`Mirror`](@ref)
 (constructed by [`Reflecting`](@ref) and [`Antireflecting`](@ref)),
-[`NoBoundaryCondition`](@ref), [`FunctionBC`](@ref).
+[`Extrapolation`](@ref), [`NoBoundaryCondition`](@ref), [`FunctionBC`](@ref).
 A condition is given per `(dimension, side)`; constructors also accept the
-symbols `:periodic`, `:repeating`, `:reflecting`, `:antireflecting`.
+symbols `:periodic`, `:repeating`, `:reflecting`, `:antireflecting`,
+`:extrapolating`.
 """
 abstract type AbstractBoundaryCondition end
 
@@ -53,6 +54,27 @@ wall) — e.g. a velocity component normal to a solid wall. Returns
 Antireflecting() = Mirror(-1)
 "Zero-gradient: each ghost cell copies the nearest interior value."
 struct Repeating       <: AbstractBoundaryCondition end
+
+"""
+    Extrapolation(order = 1)
+
+Polynomial extrapolation into the ghost cells: along the boundary normal, each
+ghost cell takes the value of the polynomial of degree `order` through the
+`order + 1` interior cells nearest the wall (open or outflow boundaries,
+far-field edges). `Extrapolation(0)` is [`Repeating`](@ref); `Extrapolation(1)`
+continues the edge slope. The interior (on a threaded array, the tile) must hold
+at least `order + 1` cells along that dimension, or `synchronize_halo!` throws.
+The weights are integers, so integer arrays are extrapolated exactly. The order
+is a field, not a type parameter, so fields of different orders share one array
+type (cf. [`Mirror`](@ref)). The symbol `:extrapolating` gives the linear case.
+"""
+struct Extrapolation <: AbstractBoundaryCondition
+    order::Int
+    function Extrapolation(order::Integer = 1)
+        order >= 0 || throw(ArgumentError("Extrapolation order must be >= 0, got $order"))
+        return new(order)
+    end
+end
 "Ghost cells wrap around from the opposite side of the domain (periodic)."
 struct Periodic        <: AbstractBoundaryCondition end
 "Leave ghost cells untouched; the caller fills them manually (e.g. a custom or characteristic BC)."
@@ -377,6 +399,19 @@ the cells a halo exchange (or a boundary condition) writes. Same shape as
 # Plain-array dispatch (used during buffer construction, before the HaloArray exists).
 @inline edge_view(arr::AbstractArray, s::Side, ::Dim{D}, halo::Int) where {D} =
     _halo_window_view(_send_window(s, size(arr, D), halo), arr, D, halo)
+
+# Interior band of width `w` adjacent to the (side, dim) wall: `edge_view` with a width other
+# than the halo (an extrapolation of order p reads w = p + 1 cells). Cell `1` of the band is
+# nearest the wall on side 1, cell `w` on side 2, like the edge band.
+@inline _band_window(::Side{1}, sd::Int, halo::Int, w::Int) = (halo+1):(halo+w)
+@inline _band_window(::Side{2}, sd::Int, halo::Int, w::Int) = (sd-halo-w+1):(sd-halo)
+@inline function _band_view(arr::AbstractArray, s::Side, ::Dim{D}, halo::Int, w::Int) where {D}
+    n = size(arr, D) - 2halo
+    n >= w || throw(ArgumentError("boundary condition needs $w interior cells along dimension $D, the interior has $n"))
+    return _halo_window_view(_band_window(s, size(arr, D), halo, w), arr, D, halo)
+end
+@inline _band_view(h::AbstractSingleHaloArray, s::Side, d::Dim, w::Int, ::Nothing) =
+    _band_view(parent(h), s, d, halo_width(h), w)
 @inline ghost_view(arr::AbstractArray, s::Side, ::Dim{D}, halo::Int) where {D} =
     _halo_window_view(_recv_window(s, size(arr, D), halo), arr, D, halo)
 
