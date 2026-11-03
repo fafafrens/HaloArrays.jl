@@ -657,6 +657,84 @@ end
         end
     end
 
+    @testset "LinearCellWindow: linear-index launch metadata" begin
+        for (dims, halo) in (((4,), 1), ((4, 5), 1), ((3, 4, 5), 2), ((2, 3, 2, 3), 1))
+            u = LocalHaloArray(Float64, dims, halo; boundary_condition=:repeating)
+            ranges = CellRanges(u)
+            data = parent(u)
+            lin = LinearIndices(size(data))
+            N = length(dims)
+
+            # full window: every interior cell once, same cell as cell_index
+            w = linear_cell_window(u)
+            cw = interior_cell_window(ranges)
+            @test w isa LinearCellWindow{N,0,Int32}
+            @test w.size == cw.size
+            @test cell_strides(w) == Int32.(strides(data))
+            for J in CartesianIndices(w.size)
+                @test @inferred(is_cell_linear_index_inbounds(w, J))
+                i = @inferred(cell_linear_index(w, J))
+                @test i isa Int32
+                @test i == lin[cell_index(cw, J)]
+                @test cell_linear_index(w, Tuple(J)) == i
+            end
+            @test Set(cell_linear_index(w, J) for J in CartesianIndices(w.size)) ==
+                  Set(lin[I] for I in interior_cells(ranges))
+
+            # checkerboard windows: same bound check and cell as the Cartesian API,
+            # every cell of the color exactly once, in every compressed dimension
+            for color in 0:1, cdim in 1:N
+                wc = linear_cell_window(u, color; compressed_dim=cdim)
+                cb = interior_cell_window(ranges, color, cdim)
+                @test wc isa LinearCellWindow{N,cdim,Int32}
+                @test wc.size == cb.size
+                hits = Int32[]
+                for J in CartesianIndices(wc.size)
+                    I = cell_index(cb, J)
+                    ok = @inferred(is_cell_linear_index_inbounds(wc, J))
+                    @test ok == is_cell_index_inbounds(cb, I)
+                    ok || continue
+                    i = @inferred(cell_linear_index(wc, Tuple(J)))
+                    @test i == lin[I]
+                    push!(hits, i)
+                end
+                expected = [lin[I] for I in _cell_subrange_indices(interior_cells(ranges, color))]
+                @test sort(hits) == sort(expected)
+            end
+        end
+
+        u = LocalHaloArray(Float64, (4, 5), 1; boundary_condition=:repeating)
+        lin = LinearIndices(size(parent(u)))
+        w64 = linear_cell_window(CellRanges(u), parent(u); index_type=Int)
+        @test w64 isa LinearCellWindow{2,0,Int}
+        @test cell_linear_index(w64, (1, 1)) == lin[2, 2]
+        @test linear_cell_window(CellRanges(u), parent(u), 1, Dim(2)) isa LinearCellWindow{2,2,Int32}
+        @test_throws ArgumentError linear_cell_window(u, 2)
+        @test_throws ArgumentError linear_cell_window(u, 0; compressed_dim=3)
+        big = LocalHaloArray(Float64, (12, 12), 1; boundary_condition=:repeating)   # 196 > typemax(Int8)
+        @test_throws ArgumentError linear_cell_window(big; index_type=Int8)
+
+        # tiles with an odd storage↔global parity offset keep the GLOBAL color
+        t = ThreadedHaloArray(Float64, (3, 4), 1; dims=(2, 1), boundary_condition=:periodic)
+        @test any(tile_id -> CellRanges(t, tile_id).parity_offset == 1, 1:tile_count(t))
+        for tile_id in 1:tile_count(t)
+            tr = CellRanges(t, tile_id)
+            td = tile_parent(t, tile_id)
+            tlin = LinearIndices(size(td))
+            for color in 0:1
+                wt = linear_cell_window(tr, td, color)
+                cbt = interior_cell_window(tr, color)
+                for J in CartesianIndices(wt.size)
+                    is_cell_linear_index_inbounds(wt, J) || continue
+                    I = cell_index(cbt, J)
+                    @test cell_linear_index(wt, J) == tlin[I]
+                    g = interior_to_global_index(t, tile_id, Tuple(I) .- halo_width(t))
+                    @test mod(sum(g), 2) == color
+                end
+            end
+        end
+    end
+
     @testset "linear/slice indexing is refused with instructive errors" begin
         # The indexing contract (see the guide's Indexing section): full-dims
         # global scalar indexing only. Linear indexing and slices point the

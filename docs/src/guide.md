@@ -576,3 +576,11 @@ KernelAbstractions kernels: [`FaceWindow`](@ref) /
 [`CellCheckerboard`](@ref) for cells (with [`cell_index`](@ref) and
 [`is_cell_index_inbounds`](@ref) to map a launch index to a storage cell). See
 `examples/tutorials/gpu.jl`.
+
+For stencil kernels, [`linear_cell_window`](@ref) gives the same cell regions
+as a [`LinearCellWindow`](@ref) addressed by storage **linear** index:
+[`cell_linear_index`](@ref) converts the launch index once per cell and
+[`cell_strides`](@ref) are the neighbour offsets (`x[i + sμ]`, `x[i - sμ]`), so
+the kernel does not redo the Cartesian→linear conversion for every neighbour
+read — 1.4–2× faster on Metal for nearest-neighbour stencils in 4D. The index
+type is `Int32` by default (`index_type=Int` for storages above 2³¹ elements).
