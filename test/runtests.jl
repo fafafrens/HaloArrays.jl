@@ -62,6 +62,13 @@ include_test(name) = include(joinpath(@__DIR__, name))
         else
             @info "Skipping Adapt tests (JLArrays not in this environment; run via Pkg.test)"
         end
+        # KernelAbstractions extension: the GPU face-copy kernels, exercised on
+        # JLArrays' backend (both test extras; skipped on a bare --project=. run).
+        if all(p -> Base.find_package(p) !== nothing, ("JLArrays", "KernelAbstractions"))
+            include_test("test_kernelabstractions_ext.jl")
+        else
+            @info "Skipping KernelAbstractions extension tests (JLArrays/KernelAbstractions not in this environment; run via Pkg.test)"
+        end
         # LinearSolve/KrylovKit extensions: available under Pkg.test, skipped on a
         # bare --project=. run (same as Aqua).
         if all(p -> Base.find_package(p) !== nothing, ("LinearSolve", "KrylovKit", "OrdinaryDiffEq"))

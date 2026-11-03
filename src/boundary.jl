@@ -108,6 +108,7 @@ edges), so it is safe to call on a decomposed grid. The condition per
 [`Repeating`](@ref), [`NoBoundaryCondition`](@ref), [`FunctionBC`](@ref).
 """
 function boundary_condition!(halo::AbstractSingleHaloArray{T,N}; threads::Bool=false) where {T,N}
+    _fused_periodic_fill!(halo) && return halo     # GPU storage, every face periodic: one kernel (extension)
     _foreach_face(boundary_condition!, halo, Val(N))
     return halo
 end
@@ -151,7 +152,41 @@ end
 # wrap the edges → no-op. LocalHaloArray must physically wrap the interior data.
 boundary_condition!(::Union{HaloArray,ThreadedHaloArray}, ::Side, ::Dim, ::Periodic, tile=nothing) = nothing
 @inline boundary_condition!(halo::LocalHaloArray, ::Side{S}, d::Dim, ::Periodic, tile=nothing) where {S} =
-    (ghost_view(halo, Side(S), d) .= edge_view(halo, Side(3 - S), d); nothing)
+    (_copy_slab!(ghost_view(halo, Side(S), d), edge_view(halo, Side(3 - S), d)); nothing)
+
+# ============================================================
+# GPU seams
+#
+# The face copies — the periodic ghost fill above and the exchange-buffer
+# pack/unpack in mpi_support.jl — are broadcasts on views. On GPU storage a
+# broadcast on two SubArrays costs ~20 µs of launch work per face while the
+# faces carry almost no data, so a refresh is launch-bound (0.17 ms for the 8
+# faces of a 48⁴ block on Metal). The KernelAbstractions extension
+# (ext/HaloArraysKernelAbstractionsExt.jl) specialises the seams below for
+# non-CPU backends: one kernel per slab copy, one fused kernel for an
+# all-periodic single block (0.06 ms for the same block), and a device
+# synchronization between packing the send buffers and posting the MPI sends,
+# which read device memory directly and are otherwise not ordered after the
+# pack kernels. Without the extension, or on CPU storage, everything below is
+# the plain broadcast it always was.
+# ============================================================
+
+"""
+    _copy_slab!(dest, src)
+
+`dest .= src` for a face slab (a ghost/edge view of the storage, or an exchange
+buffer). The KernelAbstractions extension turns it into one kernel on GPU storage.
+"""
+@inline _copy_slab!(dest, src) = _copy_slab!(_slab_backend(dest, src), dest, src)
+@inline _slab_backend(dest, src) = nothing
+@inline _copy_slab!(::Nothing, dest, src) = (dest .= src; nothing)
+
+# Wait for the device queue that writes `storage` (no-op on the CPU).
+@inline _device_synchronize(storage) = nothing
+
+# Fill every face of an all-periodic single block in one launch; `false` means
+# "not handled, take the per-face path".
+@inline _fused_periodic_fill!(halo) = false
 
 # ---- NoBoundaryCondition ----------------------------------------
 # Ghost cells are left unchanged; the user fills them via a custom function.

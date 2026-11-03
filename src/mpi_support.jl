@@ -157,23 +157,31 @@ end
 # ntuple closures so the pinned roots are unambiguous local parameters.
 # ============================================================
 
-# Copy recv buffer → ghost slab (blocking-exchange unpack).
-@inline function _copy_from_recv_buf!(recv_bufs, halo, ::Val{D}, ::Val{S}) where {D, S}
+# Pack one face: edge slab → send buffer (`_copy_slab!`: a kernel on GPU
+# storage). Every face is packed before any send is posted, so one device
+# synchronization covers all the packs (see the GPU seams in boundary.jl).
+@inline function _pack_face!(halo, ::Side{S}, ::Dim{D}) where {D,S}
     halo.topology.neighbors[D][S] == MPI.PROC_NULL && return nothing
-    copyto!(ghost_view(halo, Side(S), Dim(D)), recv_bufs[D][S])
+    _copy_slab!(halo.send_bufs[D][S], edge_view(halo, Side(S), Dim(D)))
     return nothing
 end
 
-# Pack + post using the flat request index (blocking exchange: one Waitall).
+# Copy recv buffer → ghost slab (blocking-exchange unpack).
+@inline function _copy_from_recv_buf!(recv_bufs, halo, ::Val{D}, ::Val{S}) where {D, S}
+    halo.topology.neighbors[D][S] == MPI.PROC_NULL && return nothing
+    _copy_slab!(ghost_view(halo, Side(S), Dim(D)), recv_bufs[D][S])
+    return nothing
+end
+
+# Post using the flat request index (blocking exchange: one Waitall).
 # recv_state = (UnsafeMultiRequest, recv_bufs),  send_state = (UnsafeMultiRequest, send_bufs)
-@inline function _pack_post_flat_unsafe!(halo, recv_state, send_state, comm,
+@inline function _post_flat_unsafe!(halo, recv_state, send_state, comm,
         ::Val{D}, ::Val{S}) where {D, S}
     recv_reqs, recv_bufs = recv_state
     send_reqs, send_bufs = send_state
     nbrank = halo.topology.neighbors[D][S]
     nbrank == MPI.PROC_NULL && return nothing
     idx = tag_send(Val(D), Val(S))
-    copyto!(send_bufs[D][S], edge_view(halo, Side(S), Dim(D)))
     GC.@preserve recv_state MPI.Irecv!(recv_bufs[D][S], comm, recv_reqs[idx];
         source=nbrank, tag=tag_recv(Val(D), Val(S)))
     GC.@preserve send_state MPI.Isend(send_bufs[D][S], comm, send_reqs[idx];
@@ -181,15 +189,14 @@ end
     return nothing
 end
 
-# Pack + post using the per-face request index (split exchange: start).
+# Post using the per-face request index (split exchange: start).
 # recv_state = (NTuple{N,Vector{UnsafeRequest}}, recv_bufs),  same for send.
-@inline function _pack_post_vv_unsafe!(halo, recv_state, send_state, comm,
+@inline function _post_vv_unsafe!(halo, recv_state, send_state, comm,
         ::Val{D}, ::Val{S}) where {D, S}
     recv_reqs, recv_bufs = recv_state
     send_reqs, send_bufs = send_state
     nbrank = halo.topology.neighbors[D][S]
     nbrank == MPI.PROC_NULL && return nothing
-    copyto!(send_bufs[D][S], edge_view(halo, Side(S), Dim(D)))
     GC.@preserve recv_state MPI.Irecv!(recv_bufs[D][S], comm, recv_reqs[D][S];
         source=nbrank, tag=tag_recv(Val(D), Val(S)))
     GC.@preserve send_state MPI.Isend(send_bufs[D][S], comm, send_reqs[D][S];
@@ -205,7 +212,7 @@ end
     nbrank = halo.topology.neighbors[D][S]
     nbrank == MPI.PROC_NULL && return nothing
     GC.@preserve recv_state MPI.Wait(recv_reqs[D][S])
-    copyto!(ghost_view(halo, Side(S), Dim(D)), recv_bufs[D][S])
+    _copy_slab!(ghost_view(halo, Side(S), Dim(D)), recv_bufs[D][S])
     GC.@preserve send_state MPI.Wait(send_state[D][S])
     return nothing
 end
@@ -217,17 +224,20 @@ end
 # compile-time-unrolled, closure-free recursion — see haloarray.jl). Each
 # adapter below is a thin `(halo, Side, Dim)` shim that pulls its request and
 # buffer state from `halo` and delegates to a per-face helper above.
+# Packing is a separate pass before posting: on GPU storage the sends read
+# device memory directly, and nothing but an explicit device synchronization
+# orders them after the pack kernels (`_device_synchronize`, a no-op on CPU).
 # ============================================================
 
 @inline _unpack_face!(halo, ::Side{S}, ::Dim{D}) where {D,S} =
     _copy_from_recv_buf!(halo.receive_bufs, halo, Val(D), Val(S))
 
 @inline _post_face_waitall_unsafe!(halo, ::Side{S}, ::Dim{D}) where {D,S} =
-    _pack_post_flat_unsafe!(halo, (halo.comm_state.unsafe_recv_reqs, halo.receive_bufs),
+    _post_flat_unsafe!(halo, (halo.comm_state.unsafe_recv_reqs, halo.receive_bufs),
         (halo.comm_state.unsafe_send_reqs, halo.send_bufs), halo.topology.cart_comm, Val(D), Val(S))
 
 @inline _post_face_async_unsafe!(halo, ::Side{S}, ::Dim{D}) where {D,S} =
-    _pack_post_vv_unsafe!(halo, (halo.comm_state.unsafe_recv_reqs_vv, halo.receive_bufs),
+    _post_vv_unsafe!(halo, (halo.comm_state.unsafe_recv_reqs_vv, halo.receive_bufs),
         (halo.comm_state.unsafe_send_reqs_vv, halo.send_bufs), halo.topology.cart_comm, Val(D), Val(S))
 
 @inline _finish_face_async_unsafe!(halo, ::Side{S}, ::Dim{D}) where {D,S} =
@@ -237,6 +247,8 @@ end
 function halo_exchange_waitall_unsafe!(halo::HaloArray{T,N}) where {T,N}
     recv_state = (halo.comm_state.unsafe_recv_reqs, halo.receive_bufs)
     send_state = (halo.comm_state.unsafe_send_reqs, halo.send_bufs)
+    _foreach_face(_pack_face!, halo, Val(N))
+    _device_synchronize(parent(halo))
     _foreach_face(_post_face_waitall_unsafe!, halo, Val(N))
     GC.@preserve recv_state MPI.Waitall(halo.comm_state.unsafe_recv_reqs)
     _foreach_face(_unpack_face!, halo, Val(N))
@@ -245,6 +257,8 @@ function halo_exchange_waitall_unsafe!(halo::HaloArray{T,N}) where {T,N}
 end
 
 function start_halo_exchange_async_unsafe!(halo::HaloArray{T,N}) where {T,N}
+    _foreach_face(_pack_face!, halo, Val(N))
+    _device_synchronize(parent(halo))
     _foreach_face(_post_face_async_unsafe!, halo, Val(N))
     return nothing
 end

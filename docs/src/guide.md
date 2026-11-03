@@ -584,3 +584,9 @@ as a [`LinearCellWindow`](@ref) addressed by storage **linear** index:
 the kernel does not redo the Cartesian→linear conversion for every neighbour
 read — 1.4–2× faster on Metal for nearest-neighbour stencils in 4D. The index
 type is `Int32` by default (`index_type=Int` for storages above 2³¹ elements).
+
+With `using KernelAbstractions` the ghost refresh itself runs as kernels on GPU
+storage: `synchronize_halo!` on an all-periodic `LocalHaloArray` fills every
+face in one launch, other boundary conditions and the MPI exchange buffers use
+one kernel per face, and the MPI exchange synchronizes the device before posting
+its sends. Nothing changes for CPU storage.
