@@ -6,6 +6,25 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-11-03
+
+### Added
+- `LinearCellWindow` with `linear_cell_window`, `cell_linear_index`,
+  `is_cell_linear_index_inbounds` and `cell_strides`: launch metadata for GPU
+  cell kernels that address the storage by linear index (`Int32` by default),
+  so a stencil reads its neighbours at `i ± sμ` with one add each instead of
+  redoing the Cartesian→linear conversion for every `x[I + eμ]`. Same regions,
+  compressed colored launch and global parity per tile as `interior_cell_window`.
+  Measured on Metal (48⁴, Float32): colored Metropolis 2.1×, force kernel 1.4×,
+  bit-identical results.
+- `benchmark/gpu_linear_cell_window.jl`: Cartesian vs linear addressing and
+  `mod` vs `& 1`, Metal or CUDA, 2D–4D, with a bit-identity check.
+
+### Changed
+- `cell_index(::CellCheckerboard)` computes the parity shift with `& 1`
+  instead of `mod(·, 2)` (identical for every signed `Int`): 1.45× on a Metal
+  colored kernel, no API change.
+
 ## [0.14.0] — 2026-10-30
 
 ### Changed

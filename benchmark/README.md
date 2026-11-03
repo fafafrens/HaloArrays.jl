@@ -212,6 +212,38 @@ compressed launch is ~1.24× faster than the naive full launch with a parity
 branch. The hardcoded manual kernels are ~0.9× (slightly slower), confirming
 the generic helper path is competitive.
 
+## GPU Linear Cell Window
+
+`gpu_linear_cell_window.jl` times the two ways of addressing a halo array from a
+GPU stencil kernel, in 2D, 3D and 4D: Cartesian (`cell_index`, neighbours at
+`I ± eμ`) and linear-index (`linear_cell_window`, neighbours at `i ± sμ`), and
+the main-branch `mod(·, 2)` colored map against the current `& 1`. Every variant
+does the same arithmetic in the same order and the script checks that the
+results are bit-identical. Metal (`--project=examples`) or CUDA:
+
+```sh
+julia --project=examples benchmark/gpu_linear_cell_window.jl
+# CUDA: an environment with CUDA.jl, once, from the repository root
+julia -e 'using Pkg; Pkg.activate("haloarrays-cuda"; shared=true); Pkg.add(["CUDA", "KernelAbstractions", "MPI"]); Pkg.develop(path=".")'
+julia --project=@haloarrays-cuda benchmark/gpu_linear_cell_window.jl --backend=cuda --eltypes=Float32,Float64
+```
+
+Options: `--dims=2,3,4`, `--sizes=1024,128,48` (one per dim), `--eltypes=…`,
+`--steps=20`, `--samples=10`, `--warmups=3`, `--csv=…`.
+
+Reference (Apple M4 Max, Float32, default sizes; median speedups, results
+bit-identical):
+
+| case | colored: `& 1` vs `mod` | colored: linear vs `mod` | full pass: linear vs Cartesian |
+|---|---|---|---|
+| 2D 1024² | 1.6× | 2.1× | 1.6× |
+| 3D 128³ | 1.3× | 2.1× | 2.5× |
+| 4D 48⁴ | 1.2× | 2.1× | 3.5× |
+
+The full-pass gain grows with the dimension (more neighbours per site, no
+parity work to dilute it); smaller gains are expected on GPUs with native 64-bit
+integer multiply (CUDA).
+
 ## Checkerboard: in-place vs out-of-place
 
 Measures the cost of the red-black coloring in a checkerboard stencil sweep, on
