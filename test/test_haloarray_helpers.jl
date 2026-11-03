@@ -733,6 +733,16 @@ end
                 end
             end
         end
+
+        # the shorthand addresses the tile storage, not `parent` (a vector of
+        # tiles on ThreadedHaloArray): works with one tile, refuses more
+        t1 = ThreadedHaloArray(Float64, (4,), 1; dims=(1,), boundary_condition=:periodic)
+        @test tile_count(t1) == 1
+        @test linear_cell_window(t1) == linear_cell_window(CellRanges(t1, 1), tile_parent(t1, 1))
+        @test linear_cell_window(t1, 1) == linear_cell_window(CellRanges(t1, 1), tile_parent(t1, 1), 1)
+        @test cell_linear_index(linear_cell_window(t1), (1,)) == 2
+        @test_throws ArgumentError linear_cell_window(t)
+        @test_throws ArgumentError linear_cell_window(t, 0)
     end
 
     @testset "linear/slice indexing is refused with instructive errors" begin

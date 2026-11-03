@@ -228,8 +228,10 @@ array, or [`tile_parent`](@ref) of a tile), for all cells or for one checkerboar
 `color` — the launch is then compressed by two in `compressed_dim`, like
 [`interior_cell_window`](@ref), and kernels check
 [`is_cell_linear_index_inbounds`](@ref). `linear_cell_window(u, ...)` is the
-single-tile shorthand for `linear_cell_window(CellRanges(u), parent(u), ...)`.
-`index_type` must hold `length(data)`.
+one-tile shorthand for `linear_cell_window(CellRanges(u), tile_parent(u, 1), ...)`
+(a `LocalHaloArray`, an MPI `HaloArray`, or a `ThreadedHaloArray` with one
+tile); with more tiles build one window per tile. `index_type` must hold
+`length(data)`.
 
 ```julia
 w = linear_cell_window(u, color)              # host, once per color
@@ -268,10 +270,21 @@ end
                            kwargs...) where {D} =
     linear_cell_window(ranges, data, color; compressed_dim=D, kwargs...)
 
+# The shorthand addresses the one tile's padded storage: `parent` of a
+# ThreadedHaloArray is the vector of tiles, `tile_parent(u, 1)` is the storage on
+# every backend. More tiles need one window per tile (each has its own storage
+# and parity offset).
+function _single_tile_storage(u::AbstractSingleHaloArray)
+    tile_count(u) == 1 || throw(ArgumentError(
+        "linear_cell_window(u, ...) addresses one tile's storage, but u has $(tile_count(u)) tiles; " *
+        "build one window per tile: linear_cell_window(CellRanges(u, tile_id), tile_parent(u, tile_id), ...)"))
+    return tile_parent(u, 1)
+end
+
 @inline linear_cell_window(u::AbstractSingleHaloArray; kwargs...) =
-    linear_cell_window(CellRanges(u), parent(u); kwargs...)
+    linear_cell_window(CellRanges(u), _single_tile_storage(u); kwargs...)
 @inline linear_cell_window(u::AbstractSingleHaloArray, color::Integer; kwargs...) =
-    linear_cell_window(CellRanges(u), parent(u), color; kwargs...)
+    linear_cell_window(CellRanges(u), _single_tile_storage(u), color; kwargs...)
 
 function _linear_cell_window(region::CellCheckerboard{N,C}, data::AbstractArray{<:Any,N},
                              ::Type{T}) where {N,C,T}
