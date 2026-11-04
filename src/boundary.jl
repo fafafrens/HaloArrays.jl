@@ -248,16 +248,40 @@ end
 
 @inline function boundary_condition!(h::AbstractSingleHaloArray, s::Side, d::Dim,
         bc::AbstractBoundaryCondition, tile=nothing)
+    face = _prepare_face(h, s, d, bc, tile)
+    face === nothing && return nothing
+    _traverse!(_face_backend(_tile_storage(h, tile)), _tile_storage(h, tile), face[2], face[1])
+    return nothing
+end
+
+# The prepared face `(geometry, rule)`, or `nothing` when there is nothing to
+# fill (halo width 0, an empty block). Validates the interior extent the rule
+# reads. Shared by the per-face fill above and the fused launch of the extension.
+@inline function _prepare_face(h::AbstractSingleHaloArray, s::Side, d::Dim,
+        bc::AbstractBoundaryCondition, tile=nothing)
     a = _tile_storage(h, tile)
     # the halo width is a type parameter of `h`: passed as a Val, the geometry
     # and the stencil specialise on it without relying on constant propagation
     g = FaceGeometry(a, s, d, Val(halo_width(h)), ghost_origin(h, s, d, tile))
-    isempty(g.ghosts) && return nothing          # halo width 0, or an empty block: nothing to fill
+    isempty(g.ghosts) && return nothing
     need = _cells_needed(bc, Val(halo_width(h)))
     g.n >= need || throw(ArgumentError(
         "boundary condition needs $need interior cells along dimension $(face_dim(g)), the interior has $(g.n)"))
-    _traverse!(_face_backend(a), a, prepare_boundary(bc, g), g)
-    return nothing
+    return (g, prepare_boundary(bc, g))
+end
+
+# The condition a single-block fill applies on face (s, d), or `nothing` when
+# the face is not filled by a rule: a `NoBoundaryCondition` face, and on an
+# MPI `HaloArray` an exchange face (a neighbour rank, which includes periodic
+# faces: the topology wraps them). This is the face list of the fused launch.
+@inline function _rule_condition(h::LocalHaloArray, ::Side{S}, ::Dim{D}) where {S,D}
+    bc = h.boundary_condition[D][S]
+    return bc isa NoBoundaryCondition ? nothing : bc
+end
+@inline function _rule_condition(h::HaloArray, ::Side{S}, ::Dim{D}) where {S,D}
+    bc = h.boundary_condition[D][S]
+    (h.topology.neighbors[D][S] < 0 && !(bc isa Periodic) && !(bc isa NoBoundaryCondition)) || return nothing
+    return bc
 end
 
 # One ghost cell: its accessor and distance, then the rule.
@@ -310,7 +334,7 @@ edges), so it is safe to call on a decomposed grid. The condition per
 `bc(u, k)` (see [`AbstractBoundaryCondition`](@ref)).
 """
 function boundary_condition!(halo::AbstractSingleHaloArray{T,N}; threads::Bool=false) where {T,N}
-    _fused_periodic_fill!(halo) && return halo     # GPU storage, every face periodic: one kernel (extension)
+    _fused_fill!(halo) && return halo              # GPU storage: every rule face in one launch (extension)
     _foreach_face(boundary_condition!, halo, Val(N))
     return halo
 end
@@ -371,9 +395,9 @@ GPU storage.
 # Wait for the device queue that writes `storage` (no-op on the CPU).
 @inline _device_synchronize(storage) = nothing
 
-# Fill every face of an all-periodic single block in one launch; `false` means
-# "not handled, take the per-face path".
-@inline _fused_periodic_fill!(halo) = false
+# Fill every rule face of a single block in one launch; `false` means "not
+# handled, take the per-face path".
+@inline _fused_fill!(halo) = false
 
 # ---- NoBoundaryCondition ----------------------------------------
 # Ghost cells are left unchanged; the user fills them via a custom function.

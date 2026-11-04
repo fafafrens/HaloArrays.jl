@@ -7,7 +7,7 @@ module HaloArraysKernelAbstractionsExt
 # broadcast path.
 
 import HaloArrays
-using HaloArrays: LocalHaloArray, Periodic, halo_width
+using HaloArrays: LocalHaloArray, HaloArray, Periodic, halo_width, Side, Dim
 using KernelAbstractions
 using GPUArraysCore: AbstractGPUArray
 const KA = KernelAbstractions
@@ -79,12 +79,16 @@ function HaloArrays._traverse!(backend::KA.Backend, a, rule, g::HaloArrays.FaceG
     return nothing
 end
 
-# ---- all-periodic single block: every face in one launch ----------------
-# Work item i → (face, cell in the face) from the cumulative face sizes, then
-# the ghost cell and its periodic source (the opposite edge) by offsets. The
-# faces are disjoint (corner ghosts belong to no face), so the order is free.
-# Int32 throughout: the unravelling costs N integer divisions per cell, which
-# GPUs emulate in 64-bit (the Int64 kernel is slower than the broadcasts).
+# ---- every rule face of a block in one launch ----------------------------
+# Work item i → (face f, cell c in the face) from the cumulative face sizes,
+# then the face's prepared rule on that ghost cell — the same `_fill_cell!` as
+# the per-face kernel and the CPU loop. The faces are disjoint (corner ghosts
+# belong to no face), so the order is free. The face selection is unrolled at
+# compile time over the face tuple, so each branch sees one concrete
+# (geometry, rule) type and the kernel specialises once per combination of
+# conditions; the branch is uniform within a face. The scan and the
+# unravelling are Int32: N integer divisions per cell, which GPUs emulate in
+# 64-bit.
 
 @inline function _unravel(j::Int32, ext::NTuple{N,Int32}) where {N}
     c = ntuple(_ -> Int32(0), Val(N))
@@ -96,11 +100,80 @@ end
     return c
 end
 
+@inline _face_extent(::Nothing) = nothing
+@inline _face_extent(face) = Int32.(size(face[1].ghosts))
+@inline _face_count(::Nothing) = Int32(0)
+@inline _face_count(face) = Int32(length(face[1].ghosts))
+
+# Apply the selected face's rule: one `if f == q` branch per face, emitted at
+# compile time (a generated function; a closure over the scan variables would
+# be boxed, and a Val recursion is widened by inference — neither compiles on
+# a GPU). An inactive face is `nothing` and its branch is dead code.
+@generated function _apply_face!(a, faces::NTuple{F,Any}, exts, f, j) where {F}
+    branches = map(1:F) do q
+        quote
+            @inbounds face = faces[$q]
+            if face !== nothing && f == $q
+                g = face[1]
+                @inbounds c = _unravel(j, exts[$q])
+                HaloArrays._fill_cell!(a, face[2], g, first(g.ghosts) + CartesianIndex(map(Int, c)))
+            end
+        end
+    end
+    return Expr(:block, branches..., :(return nothing))
+end
+
+@kernel function _faces_kernel!(a, faces, exts, counts, ::Val{F}) where {F}
+    i = Int32(@index(Global, Linear)) - Int32(1)
+    # cumulative scan: advance to face k+1 only while still at face k (the faces
+    # have different sizes on a non-cubic block, so a later count may be smaller)
+    f = Int32(1)
+    base = Int32(0)
+    for k in 1:F-1
+        @inbounds if f == k && i >= base + counts[k]
+            base += counts[k]
+            f = Int32(k + 1)
+        end
+    end
+    _apply_face!(a, faces, exts, f, i - base)
+end
+
+# The prepared face (geometry, rule) for face f of `halo`, or nothing when the
+# face is not filled by a rule. `f` is a type parameter so Side/Dim are static.
+@inline function _prepared_face(halo, ::Val{f}) where {f}
+    d = (f + 1) ÷ 2
+    s = f - 2(d - 1)
+    bc = HaloArrays._rule_condition(halo, Side(s), Dim(d))
+    bc === nothing && return nothing
+    return HaloArrays._prepare_face(halo, Side(s), Dim(d), bc, nothing)
+end
+
+function HaloArrays._fused_fill!(halo::Union{LocalHaloArray{T,N},HaloArray{T,N}}) where {T,N}
+    a = parent(halo)
+    backend = _ka_backend(a)
+    (backend === nothing || backend isa KA.CPU) && return false
+    length(a) <= typemax(Int32) || return false            # larger blocks take the per-face kernels
+    halo isa LocalHaloArray && _fused_periodic_fill!(halo, backend, a) && return true
+    faces = ntuple(f -> _prepared_face(halo, Val(f)), Val(2N))
+    counts = map(_face_count, faces)
+    total = Int(sum(counts))
+    total == 0 && return true
+    exts = map(f -> f === nothing ? ntuple(_ -> Int32(0), Val(N)) : _face_extent(f), faces)
+    _faces_kernel!(backend)(a, faces, exts, counts, Val(2N); ndrange=total)
+    return true
+end
+
+
+# ---- all-periodic single block: every face in one launch, Int32 ----------
+# Work item i → (face, cell in the face) as in the generic kernel, then the
+# ghost cell and its periodic source (the opposite edge) as Int32 index
+# tuples, no CartesianIndex. Kept beside the generic launch because it is
+# measurably faster for this (common) case: 48⁴ Metal, halo 2, 0.114 vs
+# 0.139 ms. `false` means "not this case".
+
 @kernel function _periodic_faces_kernel!(a, n::NTuple{N,Int32}, h::Int32, counts, ::Val{N}) where {N}
     i = Int32(@index(Global, Linear)) - Int32(1)
     @inbounds begin
-        # cumulative scan: advance to face k+1 only while still at face k (the faces
-        # have different sizes on a non-cubic block, so a later count may be smaller)
         f = Int32(1)
         base = Int32(0)
         for k in 1:2N-1
@@ -121,12 +194,8 @@ end
     end
 end
 
-function HaloArrays._fused_periodic_fill!(halo::LocalHaloArray{T,N}) where {T,N}
-    a = parent(halo)
-    backend = _ka_backend(a)
-    (backend === nothing || backend isa KA.CPU) && return false
+function _fused_periodic_fill!(halo::LocalHaloArray{T,N}, backend, a) where {T,N}
     all(bc -> bc[1] isa Periodic && bc[2] isa Periodic, halo.boundary_condition) || return false
-    length(a) <= typemax(Int32) || return false            # larger blocks take the per-face kernels
     h = halo_width(halo)
     n = size(halo)
     counts = ntuple(k -> Int32(h * prod(ntuple(μ -> μ == (k + 1) ÷ 2 ? 1 : n[μ], Val(N)))), 2N)

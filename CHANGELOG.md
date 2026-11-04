@@ -22,6 +22,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   called as it is. One method
   runs on the CPU, in a kernel on GPU storage, per tile and on MPI physical
   faces.
+- On GPU storage, `synchronize_halo!` fills every rule face of a block in
+  **one launch**: the KernelAbstractions extension scans the prepared faces
+  (`FaceGeometry` + prepared rule) in a single kernel and applies each face's
+  stencil or custom rule — any mix of conditions, `NoBoundaryCondition` and
+  exchange faces skipped, on `LocalHaloArray` and on the physical faces of an
+  MPI `HaloArray`. The all-periodic `LocalHaloArray` keeps its Int32 kernel,
+  which is still the fastest for that case. Metal, 48⁴ Float32, mixed
+  conditions: 0.070 ms per refresh (halo 2: 0.139), 128³: 0.013 ms, vs
+  0.06–0.17 ms with one launch per face; bit-identical to the CPU.
 - `HaloArraysKernelAbstractionsExt` (loads with KernelAbstractions and
   GPUArraysCore, i.e. with any GPU array package): the face copies of
   `synchronize_halo!` on GPU storage run as kernels instead
