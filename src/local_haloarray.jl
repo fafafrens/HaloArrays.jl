@@ -37,7 +37,21 @@ end
 
 function LocalHaloArray(data::AbstractArray{T,N}, halo::Int, boundary_condition) where {T,N}
     bc = normalize_boundary_condition(boundary_condition, N)
+    _check_periodic_extent(size(data), halo, bc)
     return LocalHaloArray{T,N,typeof(data),halo,typeof(bc)}(data, bc)
+end
+
+# A periodic ghost slab is a copy of the opposite interior edge, `halo` wide:
+# with fewer interior cells than that the "edge" reaches into the ghosts and
+# the fill reads what it writes. Reject the geometry rather than fill garbage.
+function _check_periodic_extent(fullsize::NTuple{N,Int}, halo::Int, bc) where {N}
+    for d in 1:N
+        (bc[d][1] isa Periodic || bc[d][2] isa Periodic) || continue
+        interior = fullsize[d] - 2halo
+        interior >= halo || throw(ArgumentError(
+            "periodic dimension $d has $interior interior cells, fewer than the halo width $halo"))
+    end
+    return nothing
 end
 
 function LocalHaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int; boundary_condition=:repeating) where {T,N}

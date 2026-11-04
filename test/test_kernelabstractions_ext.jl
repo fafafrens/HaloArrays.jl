@@ -46,4 +46,26 @@ const KA = KernelAbstractions
     @test HaloArrays._slab_backend(view(zeros(4, 4), 1:2, 1:2), zeros(2, 2)) === nothing
     @test HaloArrays._device_synchronize(zeros(2)) === nothing
     @test HaloArrays._device_synchronize(JLArray(zeros(2))) === nothing
+
+    # storage without a KernelAbstractions backend (BitArray) keeps working with the extension loaded
+    bits = LocalHaloArray(falses(6, 6), 1, :periodic)
+    interior_view(bits) .= true
+    @test HaloArrays._device_synchronize(parent(bits)) === nothing
+    synchronize_halo!(bits)
+    @test all(parent(bits)[2:5, 1]) && all(parent(bits)[1, 2:5]) && !parent(bits)[1, 1]
+
+    # stepped-view storage: the offset kernels do not apply, the broadcast path does
+    base = rand(12, 9)
+    ref = LocalHaloArray(copy(base)[1:2:12, :], 1, bc)
+    synchronize_halo!(ref)
+    dbase = JLArray(copy(base))
+    strided = LocalHaloArray(view(dbase, 1:2:12, :), 1, bc)
+    @test HaloArrays._slab_backend(ghost_view(strided, Side(1), Dim(1)), edge_view(strided, Side(2), Dim(1))) === nothing
+    synchronize_halo!(strided)
+    @test Array(dbase)[1:2:12, :] == parent(ref)
+
+    # fewer interior cells than the halo width is not a periodic geometry
+    @test_throws ArgumentError LocalHaloArray(zeros(5, 8), 2, :periodic)
+    @test_throws ArgumentError LocalHaloArray(JLArray(zeros(5, 8)), 2, :periodic)
+    @test LocalHaloArray(zeros(5, 8), 2, :repeating) isa LocalHaloArray
 end

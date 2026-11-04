@@ -10,22 +10,39 @@ using KernelAbstractions
 const KA = KernelAbstractions
 
 # ---- which queue writes this storage ------------------------------------
+# The kernels index the storage array by offsets, so a view qualifies only
+# when every index is a contiguous range over a dense parent (every HaloArrays
+# face view is one). Anything else — stepped views, host arrays, storage with
+# no KernelAbstractions backend (e.g. `BitArray`) — keeps the broadcast path.
 
 _storage(x::SubArray) = parent(x)
 _storage(x::DenseArray) = x
-_offset(x::SubArray) = map(r -> first(r) - 1, x.indices)      # the face views are built from ranges
+_offset(x::SubArray) = map(r -> first(r) - 1, x.indices)
 _offset(x::DenseArray) = ntuple(_ -> 0, ndims(x))
 
-_ka_backend(::Array) = nothing                                 # host storage: broadcast path of src/
-_ka_backend(x::AbstractArray) = KA.get_backend(x)
+_unit_indexed(x::DenseArray) = true
+_unit_indexed(x::SubArray) = parent(x) isa DenseArray && all(r -> r isa AbstractUnitRange, x.indices)
 
-HaloArrays._slab_backend(dest::Union{DenseArray,SubArray}, src) = _ka_backend(_storage(dest))
+_ka_backend(::Array) = nothing                                 # host storage: broadcast path of src/
+function _ka_backend(x::AbstractArray)
+    try
+        KA.get_backend(x)
+    catch err
+        err isa ArgumentError ? nothing : rethrow()            # no backend registered for this storage
+    end
+end
+
+HaloArrays._slab_backend(dest::Union{DenseArray,SubArray}, src::Union{DenseArray,SubArray}) =
+    _unit_indexed(dest) && _unit_indexed(src) ? _ka_backend(_storage(dest)) : nothing
 
 # ---- one slab copy = one kernel ------------------------------------------
 
 HaloArrays._copy_slab!(::KA.CPU, dest, src) = (dest .= src; nothing)
 
-@kernel function _slab_copy_kernel!(dest, d0, @Const(src), s0)
+# No `@Const` on `src`: a periodic ghost fill copies between two slabs of the
+# same storage array, so `dest` and `src` may be the same object (disjoint
+# ranges, but `@Const` promises no aliasing at all).
+@kernel function _slab_copy_kernel!(dest, d0, src, s0)
     J = @index(Global, NTuple)
     @inbounds dest[(J .+ d0)...] = src[(J .+ s0)...]
 end
@@ -41,9 +58,9 @@ end
 
 # The MPI sends read device memory directly: the pack kernels must have run.
 # A backend without `synchronize` (JLArrays' reference backend) executes eagerly.
-HaloArrays._device_synchronize(::Array) = nothing
 function HaloArrays._device_synchronize(x::AbstractArray)
-    backend = KA.get_backend(x)
+    backend = _ka_backend(x)
+    backend === nothing && return nothing
     applicable(KA.synchronize, backend) && KA.synchronize(backend)
     return nothing
 end
