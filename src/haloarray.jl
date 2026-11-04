@@ -87,16 +87,18 @@ far-field edges). `Extrapolation(0)` is [`Repeating`](@ref); `Extrapolation(1)`
 continues the edge slope. The interior (on a threaded array, the tile) must hold
 at least `order + 1` cells along that dimension, or `synchronize_halo!` throws.
 The weights are integers, so integer arrays are extrapolated exactly. The order
-is a field, not a type parameter, so fields of different orders share one array
-type (cf. [`Mirror`](@ref)). The symbol `:extrapolating` gives the linear case.
+is a type parameter, `Extrapolation{order}`, so the stencil it lowers to is
+sized at compile time for any order; `Extrapolation(order)` constructs it. The
+symbol `:extrapolating` gives the linear case.
 """
-struct Extrapolation <: AbstractBoundaryCondition
-    order::Int
-    function Extrapolation(order::Integer = 1)
-        order >= 0 || throw(ArgumentError("Extrapolation order must be >= 0, got $order"))
-        return new(order)
+struct Extrapolation{P} <: AbstractBoundaryCondition
+    function Extrapolation{P}() where {P}
+        P isa Integer && P >= 0 || throw(ArgumentError("Extrapolation order must be >= 0, got $P"))
+        return new{P}()
     end
 end
+Extrapolation(order::Integer = 1) = Extrapolation{Int(order)}()
+Base.show(io::IO, ::Extrapolation{P}) where {P} = print(io, "Extrapolation(", P, ")")
 "Ghost cells wrap around from the opposite side of the domain (periodic)."
 struct Periodic        <: AbstractBoundaryCondition end
 "Leave ghost cells untouched; the caller fills them manually (e.g. a custom or characteristic BC)."

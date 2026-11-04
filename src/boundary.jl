@@ -27,8 +27,8 @@ the offset from storage to global indices. Type parameters: `N` dimensions,
 field's element type. A prepared rule ([`prepare_boundary`](@ref)) is built
 from it.
 """
-struct FaceGeometry{N,D,S,H,R,T}       # T: the field's element type (the stencil weights follow it)
-    ghosts::R                   # CartesianIndices of the face's ghost cells
+struct FaceGeometry{N,D,S,H,T}         # T: the field's element type (the stencil weights follow it)
+    ghosts::CartesianIndices{N,NTuple{N,UnitRange{Int}}}   # the face's ghost cells
     wall::Int                   # storage index along D of the interior cell touching the wall
     n::Int                      # interior cells along D
     shift::CartesianIndex{N}    # global index = storage index + shift
@@ -39,13 +39,13 @@ function FaceGeometry(a::AbstractArray{T,N}, ::Side{S}, ::Dim{D}, ::Val{H},
     sd = size(a, D)
     ghosts = CartesianIndices(ntuple(i -> i == D ? _recv_window(Side(S), sd, H) : (H+1):(size(a, i)-H), Val(N)))
     wall = S == 1 ? H + 1 : sd - H
-    return FaceGeometry{N,D,S,H,typeof(ghosts),T}(ghosts, wall, sd - 2H, origin - first(ghosts))
+    return FaceGeometry{N,D,S,H,T}(ghosts, wall, sd - 2H, origin - first(ghosts))
 end
 
 # the same face with no ghost cells: a face the fill does not own, in a form
 # of the same type (so a tuple of faces stays concrete)
-@inline _empty_face(g::FaceGeometry{N,D,S,H,R,T}) where {N,D,S,H,R,T} =
-    FaceGeometry{N,D,S,H,R,T}(CartesianIndices(ntuple(i -> 1:0, Val(N))), g.wall, g.n, g.shift)
+@inline _empty_face(g::FaceGeometry{N,D,S,H,T}) where {N,D,S,H,T} =
+    FaceGeometry{N,D,S,H,T}(CartesianIndices(ntuple(_ -> 1:0, Val(N))), g.wall, g.n, g.shift)
 
 @inline face_dim(::FaceGeometry{N,D}) where {N,D} = D
 @inline face_side(::FaceGeometry{N,D,S}) where {N,D,S} = S
@@ -104,8 +104,8 @@ meaningful on single-block storage only.
 """
 @inline far(u::FaceCells) = FaceCells(u.a, _far_geometry(u.g), u.I)
 # the same face seen from the opposite wall: side flipped, wall moved across the interior
-@inline _far_geometry(g::FaceGeometry{N,D,S,H,R,T}) where {N,D,S,H,R,T} =
-    FaceGeometry{N,D,3 - S,H,R,T}(g.ghosts, _far_wall(g), g.n, g.shift)
+@inline _far_geometry(g::FaceGeometry{N,D,S,H,T}) where {N,D,S,H,T} =
+    FaceGeometry{N,D,3 - S,H,T}(g.ghosts, _far_wall(g), g.n, g.shift)
 
 """
     global_index(u::FaceCells) -> CartesianIndex
@@ -134,11 +134,10 @@ included), for position-dependent rules.
     w = Base.checked_mul(binomial(k + p, p - j), binomial(k + j - 1, j))
     return isodd(j) ? -w : w
 end
-@inline function (bc::Extrapolation)(u::FaceCells, k)
-    p = bc.order
-    v = _lagrange_weight(0, p, k) * u(0)
-    for j in 1:p
-        v += _lagrange_weight(j, p, k) * u(j)
+@inline function (::Extrapolation{P})(u::FaceCells, k) where {P}
+    v = _lagrange_weight(0, P, k) * u(0)
+    for j in 1:P
+        v += _lagrange_weight(j, P, k) * u(j)
     end
     return v
 end
@@ -165,20 +164,17 @@ on the halo width and the geometry) rather than per cell.
     Stencil{H,C,W}
 
 A weighted rule tabulated per ghost layer: ghost layer `k` (distance `1:H`
-from the wall) is `Σ_t w[k][t] · u(t - 1)` over the `count` interior cells
-nearest the wall, `C` the capacity (entries past `count` are unused), `W` the
-weight type (the field's scalar type for a floating-point field, `Int`
-otherwise). `Extrapolation(p)` lowers to it in [`prepare_boundary`](@ref):
-`p + 1` entries with the Lagrange weights.
+from the wall) is `Σ_t w[k][t] · u(t - 1)` over the `C` interior cells nearest
+the wall, `W` the weight type (the field's scalar type for a floating-point
+field, `Int` otherwise). `Extrapolation(p)` lowers to it in
+[`prepare_boundary`](@ref): `C = p + 1` entries with the Lagrange weights.
 """
 struct Stencil{H,C,W}
-    count::Int
     w::NTuple{H,NTuple{C,W}}
     # explicit parameters only: with H = 0 the implicit constructor could not
-    # infer C and W from empty tuples (Aqua's unbound-parameter check)
-    Stencil{H,C,W}(count, w) where {H,C,W} = new{H,C,W}(count, w)
+    # infer C and W from an empty tuple (Aqua's unbound-parameter check)
+    Stencil{H,C,W}(w) where {H,C,W} = new{H,C,W}(w)
 end
-const _STENCIL_CAPACITY = 8
 
 # The weights are exact integers; they are stored in the type the traversal
 # multiplies with — the field's scalar type for a floating-point field (so a
@@ -197,28 +193,25 @@ const _STENCIL_CAPACITY = 8
     return x
 end
 
-@inline function (s::Stencil)(u::FaceCells, k)
+@inline function (s::Stencil{H,C})(u::FaceCells, k) where {H,C}
     @inbounds wk = s.w[k]
     v = wk[1] * u(0)
-    for t in 2:s.count
+    for t in 2:C
         @inbounds v += wk[t] * u(t - 1)
     end
     return v
 end
 
-@inline function prepare_boundary(bc::Extrapolation, g::FaceGeometry{N,D,S,H,R,T}) where {N,D,S,H,R,T}
-    p = bc.order
-    p < _STENCIL_CAPACITY || throw(ArgumentError(
-        "Extrapolation order $p exceeds the stencil capacity ($(_STENCIL_CAPACITY) cells, order ≤ $(_STENCIL_CAPACITY - 1))"))
+@inline function prepare_boundary(::Extrapolation{P}, ::FaceGeometry{N,D,S,H,T}) where {P,N,D,S,H,T}
     W = _weight_type(T)
-    return Stencil{H,_STENCIL_CAPACITY,W}(p + 1, _extrapolation_weights(Val(H), Val(_STENCIL_CAPACITY), W, p))
+    return Stencil{H,P + 1,W}(_extrapolation_weights(Val(H), Val(P), W))
 end
 
-# The H × C weight table as literal tuple expressions (a generated function):
-# nested `ntuple` closures over `p` are allocation-free on current Julia but
-# allocate their environment on 1.10 when the enclosing function also throws.
-@generated function _extrapolation_weights(::Val{H}, ::Val{C}, ::Type{W}, p::Int) where {H,C,W}
-    layer(k) = Expr(:tuple, (:($t - 1 <= p ? _weight($W, _lagrange_weight($t - 1, p, $k)) : zero($W)) for t in 1:C)...)
+# The H × (P + 1) weight table as literal tuple expressions (a generated
+# function): nested `ntuple` closures are allocation-free on current Julia but
+# allocated their environment on 1.10 in an earlier form of this code.
+@generated function _extrapolation_weights(::Val{H}, ::Val{P}, ::Type{W}) where {H,P,W}
+    layer(k) = Expr(:tuple, (:(_weight($W, _lagrange_weight($j, $P, $k))) for j in 0:P)...)
     return Expr(:tuple, (layer(k) for k in 1:H)...)
 end
 
@@ -229,7 +222,7 @@ end
 @inline _cells_needed(::AbstractBoundaryCondition, ::Val{H}) where {H} = 1
 @inline _cells_needed(::Mirror, ::Val{H}) where {H} = H                 # u(k - 1), k = 1:H
 @inline _cells_needed(::Periodic, ::Val{H}) where {H} = H               # the far wall's k - 1
-@inline _cells_needed(bc::Extrapolation, ::Val{H}) where {H} = bc.order + 1
+@inline _cells_needed(::Extrapolation{P}, ::Val{H}) where {P,H} = P + 1
 
 # ---- the fill: every rule, every single-block backend ----------
 # `tile` selects the storage: nothing (whole block) or a ThreadedHaloArray tile.

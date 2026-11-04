@@ -56,16 +56,16 @@ end
         g = FaceGeometry(parent(ref), Side(1), Dim(1), Val(2), CartesianIndex(-1, 1))
         @test prepare_boundary(Periodic(), g) === Periodic()         # the copy conditions are their own rule
         @test prepare_boundary(Mirror(-1), g) === Mirror(-1)
-        @test prepare_boundary(Extrapolation(3), g) isa Stencil{2,8,Float64}
+        @test prepare_boundary(Extrapolation(3), g) isa Stencil{2,4,Float64}   # order 3: 4 cells per layer
         @test prepare_boundary(DirichletRule(1.0), g) isa DirichletRule
         # the weights follow the field's scalar type: Float32 field → Float32 weights, Int field → Int
         g32 = FaceGeometry(zeros(Float32, 6, 6), Side(1), Dim(1), Val(2), CartesianIndex(-1, 1))
-        @test prepare_boundary(Extrapolation(1), g32) isa Stencil{2,8,Float32}
+        @test prepare_boundary(Extrapolation(1), g32) isa Stencil{2,2,Float32}
         @test prepare_boundary(Extrapolation(1), g32).w[1][1] === 2.0f0
         gi = FaceGeometry(zeros(Int, 6, 6), Side(1), Dim(1), Val(2), CartesianIndex(-1, 1))
-        @test prepare_boundary(Extrapolation(2), gi) isa Stencil{2,8,Int}
+        @test prepare_boundary(Extrapolation(2), gi) isa Stencil{2,3,Int}
         gv = FaceGeometry(zeros(SVector{2,Float32}, 6, 6), Side(1), Dim(1), Val(2), CartesianIndex(-1, 1))
-        @test prepare_boundary(Extrapolation(1), gv) isa Stencil{2,8,Float32}
+        @test prepare_boundary(Extrapolation(1), gv) isa Stencil{2,2,Float32}
         # a weight Float32 cannot represent exactly is rejected at preparation
         @test_throws InexactError HaloArrays._weight(Float32, 2^24 + 1)
         @test HaloArrays._weight(Float32, 2^24) === Float32(2^24)
@@ -95,7 +95,7 @@ end
         @test parent(d) == parent(a) == [-2, -1, 1, 2, 3, 4, -4, -3]
     end
 
-    @testset "extrapolation weights: exact, overflow-checked, capacity" begin
+    @testset "extrapolation weights: exact, overflow-checked, any order" begin
         # order 7 on a degree-7 polynomial, halo 3: exact in Float64 and in Int
         f(x) = sum(x^m for m in 0:7)
         u = LocalHaloArray(Int, (10,), 3; boundary_condition = Extrapolation(7))
@@ -107,7 +107,13 @@ end
         @test all(==(5), parent(c))
         @test HaloArrays._lagrange_weight(0, 1, 1) == 2 && HaloArrays._lagrange_weight(1, 1, 1) == -1
         @test_throws OverflowError HaloArrays._lagrange_weight(3, 7, 10^17)
-        @test_throws ArgumentError synchronize_halo!(LocalHaloArray(Float64, (12,), 1; boundary_condition = Extrapolation(8)))
+        # the order is a type parameter: the stencil is sized for any order (order 8, degree-8 polynomial, halo 1)
+        f8(x) = sum(x^m for m in 0:8)
+        u8 = LocalHaloArray(Int, (10,), 1; boundary_condition = Extrapolation(8))
+        interior_view(u8) .= f8.(1:10); synchronize_halo!(u8)
+        @test parent(u8)[1] == f8(0) && parent(u8)[12] == f8(11)
+        @test Extrapolation(2) === Extrapolation{2}() && repr(Extrapolation(2)) == "Extrapolation(2)"
+        @test_throws ArgumentError Extrapolation(-1)
     end
 
     @testset "interior extent: a rule never reads a ghost" begin

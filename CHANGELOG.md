@@ -64,8 +64,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   checking (the previous product form overflowed for high orders). The slab
   helpers `_reflect_into!`, `_repeating_into!`, `_extrapolate_into!` and
   `_band_view` are gone (internal).
-- **Breaking:** `Extrapolation` orders are limited to 7 (an 8-cell stencil);
-  `synchronize_halo!` throws `ArgumentError` above that.
+- **Breaking:** the extrapolation order is a type parameter,
+  `Extrapolation{order}` (`Extrapolation(order)` still constructs it; the
+  `order` field is gone): the stencil it lowers to is sized at compile time,
+  for any order. Conditions of different orders in one `ArrayOfHaloArray` are
+  different types (unlike the two `Mirror` parities).
 
 ### Fixed
 - MPI `HaloArray` on GPU storage: the sends read device memory directly, and
