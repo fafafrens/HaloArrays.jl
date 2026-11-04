@@ -6,6 +6,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Every reduction is written once: the local part (per tile) followed by
+  `_global(r, op, communicator(u))`, which is the identity on the serial
+  backends and one `Allreduce` on an MPI `HaloArray`. The eleven
+  `HaloArray`-specific copies in `mpi_support.jl` (`mapreduce`, the folds,
+  `any`/`all`/`==`, `dot`/`norm`/`sum`, `dots!`) are gone; the `zip` forms are
+  one method. `dot` and `norm` on a multi-field state combine across ranks
+  **once** (they did one `Allreduce` per field), so a Krylov inner product on
+  a collection is one collective.
+
 ### Fixed
 - Scalar indexing of a `LocalHaloArray` (`u[i, j]`, `u[i, j] = v`) allocated
   80 bytes per access through a boxed `Union{Nothing, Tuple}` splat; it is

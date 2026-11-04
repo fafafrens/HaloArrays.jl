@@ -26,10 +26,11 @@ Base.:*(x::Number, halo::AbstractSingleHaloArray) = x .* halo
 # ---- norm (global reduction) ------------------------------------------------
 # The 2-norm (the Krylov hot path) is its own branch-free method; the general-`p`
 # method carries the `p == Inf` / else dispatch and reuses the 2-norm for p == 2.
-LinearAlgebra.norm(halo::AbstractSingleHaloArray) = sqrt(_local_sum(_elt_abs2, halo))
+LinearAlgebra.norm(halo::AbstractSingleHaloArray) =
+    sqrt(_global(_local_sum(_elt_abs2, halo), +, communicator(halo)))
 # Expressed in GLOBAL primitives (mapreduce), not the _local_* helpers, so the
-# MPI HaloArray inherits a globally-correct p-norm through its Allreduce-backed
-# mapreduce — only the hot 2-norm gets a specialized MPI method.
+# p-norm is globally correct on every backend through mapreduce's combine —
+# only the hot 2-norm is written on the local part directly.
 # `norm` (not `abs`) per element: for a scalar `norm(x::Number) == abs(x)`, so the
 # numeric result is unchanged, while a vector-valued cell contributes its own
 # Euclidean length — matching Base's `norm(::Array{<:AbstractVector}, p)`.
@@ -44,16 +45,18 @@ function LinearAlgebra.norm(halo::AbstractSingleHaloArray, p::Real)
     return mapreduce(x -> norm(x)^p, +, halo)^(1 / p)
 end
 # The 2-norm above IS the fast path: `_local_sum` runs the contiguous-aware
-# `_interior_acc` per tile (single-block inline, threaded across the backend);
-# the MPI HaloArray method (mpi_support.jl) Allreduces the same local part.
+# `_interior_acc` per tile (single-block inline, threaded across the backend),
+# then one combine across ranks (`_global`, reduction.jl).
 
-# Collections: combine the per-field norms (each field already does its own global
-# reduction — MPI Allreduce / tile combine). Forwarding per field avoids Base's
-# generic `norm`, which iterates the collection through its scalar `AbstractArray`
-# interface and allocates O(N) every call (a hot-path leak in any Krylov solve on a
-# collection state). Mirrors the per-field `dot` below. ‖x‖₂ = √Σ_f ‖x_f‖²,
+# Collections: the 2-norm sums the fields' local parts and combines ONCE
+# (one Allreduce per norm on an MPI state, not one per field — this is in every
+# Krylov iteration on a collection state); the p-norms combine the per-field
+# global norms, each already a global reduction. Forwarding per field avoids
+# Base's generic `norm`, which iterates the collection through its scalar
+# `AbstractArray` interface and allocates O(N) every call. ‖x‖₂ = √Σ_f ‖x_f‖²,
 # ‖x‖_∞ = maxₚ ‖x_f‖_∞, ‖x‖_p = (Σ_f ‖x_f‖_p^p)^{1/p}.
-LinearAlgebra.norm(x::AbstractHaloCollection) = sqrt(sum(f -> norm(f)^2, eachfield(x)))
+LinearAlgebra.norm(x::AbstractHaloCollection) =
+    sqrt(_global(sum(f -> _local_sum(_elt_abs2, f), eachfield(x)), +, communicator(x)))
 function LinearAlgebra.norm(x::AbstractHaloCollection, p::Real)
     p == 2    && return norm(x)
     p == 1    && return sum(f -> norm(f, 1), eachfield(x))
@@ -68,15 +71,15 @@ end
 # backend rather than the two-argument `mapreduce(dot, +, x, y)`: Base's
 # multi-iterator `mapreduce` materializes `map(dot, …)` into a full interior-sized
 # array, allocating O(N) every call — and `dot` is in every Krylov inner loop.
-# The interior dot is allocation-free (BLAS-backed for contiguous storage) and
-# globally correct (MPI Allreduce; per-tile / per-field combine).
-LinearAlgebra.dot(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray) = _local_dot(x, y)
-# Tuple broadcast, not `zip`/`map`/`foreach` over the two field tuples: those
-# silently stop at the shorter tuple, so two collections with different field
-# counts would combine a partial result. Broadcasting two tuples checks their
-# lengths (`DimensionMismatch`), unrolls at compile time and allocates nothing.
+# The interior dot is allocation-free (BLAS-backed for contiguous storage); the
+# combine across ranks is one Allreduce (`_global`), for a collection too: its
+# local part sums the fields (`_local_dot`, reduction.jl, which also rejects a
+# field-count mismatch), so a Krylov inner product on a multi-field state is
+# one collective, not one per field.
+LinearAlgebra.dot(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray) =
+    _global(_local_dot(x, y), +, communicator(x))
 LinearAlgebra.dot(x::AbstractHaloCollection, y::AbstractHaloCollection) =
-    sum(dot.(eachfield(x), eachfield(y)))
+    _global(_local_dot(x, y), +, communicator(x))
 # MaybeHaloArray: forward to the inner array (its own dot/norm already do the right
 # global reduction); an inactive value contributes nothing. Without these, `dot`
 # hits the two-arg-mapreduce fallback below and `norm` hits Base's generic path —
@@ -293,15 +296,14 @@ function dots!(h, V, w, j)
     end
     return h
 end
-dots!(h, V, w::AbstractSingleHaloArray, j) = _dots!(h, V, w, j, communicator(w))
-# A collection reduces once too (`_local_dot` over its fields, reduction.jl;
-# `communicator` from its fields, abstract_haloarray.jl).
-dots!(h, V, w::AbstractHaloCollection, j) = _dots!(h, V, w, j, communicator(w))
-# Serial backends: `_local_dot` is the whole reduction (tile-parallel on ThreadedHaloArray).
-function _dots!(h, V, w, j, ::Nothing)
+# The j local products (a collection's over all its fields), then ONE combine
+# of the j numbers: in place on an MPI communicator, nothing on the serial
+# backends (`_global`, reduction.jl).
+function dots!(h, V, w::Union{AbstractSingleHaloArray,AbstractHaloCollection}, j)
     for i in 1:j
         h[i] = _local_dot(V[i], w)
     end
+    _global(view(h, 1:j), +, communicator(w))
     return h
 end
 

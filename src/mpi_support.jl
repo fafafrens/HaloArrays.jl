@@ -286,26 +286,18 @@ end
 # Reductions
 # ============================================================
 
-# `mapreduce` (and through it `sum`/`prod`/`maximum`/`minimum`) supports the
-# `dims=` keyword: it runs a transient `DimReductionPlan` (built, used, and
-# released within the call) and returns a fresh reduced array every time. The
-# result has the reduced dimensions DROPPED and lives on the coordinate-0 slice
-# of the topology (a `MaybeHaloArray`, inactive elsewhere) — same semantics as
-# `mapreduce(…; dims)`, unlike Base's kept-singleton-dims shape. The
-# result owns its sub-communicator: `free!` it when reducing in a loop.
-function Base.mapreduce(
-        f::F, op::OP, halo::HaloArray, etc::Vararg{HaloArray}; kws...,
-    ) where {F,OP}
-    dims = _dims_kwarg(kws, 1 + length(etc))
-    dims === nothing || return _mapreduce_dims(f, op, halo, dims)
-    comm   = communicator(halo)
-    rlocal = _local_mapreduce(mapreduce, f, op, (halo, etc...))  # shared local part (no init)
-    # Normalize AFTER the local part (add_sum's integer widening already
-    # happened in rlocal): the builtin MPI_SUM/MPI_PROD then applies — required
-    # on non-Intel, where MPI.jl cannot register custom reduction ops.
-    r = _allreduce(rlocal, _normalize_reduction_op(op), comm; iscommutative=true)
-    return _apply_init(op, r, kws)  # seed once, after Allreduce
-end
+# Every reduction (`mapreduce` and through it `sum`/`maximum`/…, the folds,
+# `any`/`all`/`==`, `dot`/`norm`/`dots!`) is written once in reduction.jl /
+# vector_space.jl on the local part plus `_global`, which on a HaloArray is
+# the `_allreduce` below. `mapreduce(…; dims=)` runs a transient
+# `DimReductionPlan` (reduction.jl): the result has the reduced dimensions
+# DROPPED and lives on the coordinate-0 slice of the topology (a
+# `MaybeHaloArray`, inactive elsewhere); it owns its sub-communicator, `free!`
+# it when reducing in a loop.
+#
+# The op is normalized AFTER the local part (add_sum's integer widening has
+# happened): the builtin MPI_SUM/MPI_PROD then applies — required on
+# non-Intel, where MPI.jl cannot register custom reduction ops.
 
 # MPI.jl sends an AbstractArray value down its strided-buffer path, which a
 # static array cannot serve (`strides(::SVector)` is undefined), so `sum` of
@@ -333,72 +325,12 @@ function _allreduce(x::StaticArray, op, comm; iscommutative)
     return MPI.Allreduce(_MPICell(x), MPI.Op(+, _MPICell{typeof(x)}; iscommutative=true), comm).x
 end
 
-for func in (:mapfoldl, :mapfoldr)
-    @eval function Base.$func(
-            f::F, op::OP, halo::HaloArray, etc::Vararg{HaloArray}; kws...,
-        ) where {F,OP}
-        :dims in keys(kws) && throw(ArgumentError(
-            "`$($(string(func)))` with `dims=` is not supported on a distributed HaloArray: " *
-            "a per-slice reduction across ranks reorders the fold. Use `mapreduce`/`sum`/… " *
-            "with `dims=` (commutative ops only)."))
-        comm   = communicator(halo)
-        rlocal = _local_mapreduce($func, f, op, (halo, etc...); kws...)  # shared local part
-        _allreduce(rlocal, op, comm; iscommutative=false)
-    end
-end
-
-for func in (:mapreduce, :mapfoldl, :mapfoldr)
-    @eval function Base.$func(
-            f::F, op::OP, z::Iterators.Zip{<:Tuple{HaloArray,Vararg{HaloArray}}}; kws...,
-        ) where {F,OP}
-        g(args...) = f(args)
-        $func(g, op, z.is...; kws...)
-    end
-end
-
 # Base's reduction kwargs arrive as its internal wrappers; unwrap them so
 # MPI.Op resolves to the builtin MPI_SUM/MPI_PROD instead of registering a
 # custom callback op on every call.
 @inline _normalize_reduction_op(op) = op
 @inline _normalize_reduction_op(::typeof(Base.add_sum)) = +
 @inline _normalize_reduction_op(::typeof(Base.mul_prod)) = *
-
-function Base.any(f::F, u::HaloArray) where {F}
-    MPI.Allreduce(_local_any(f, u) :: Bool, |, communicator(u))
-end
-
-function Base.all(f::F, u::HaloArray) where {F}
-    MPI.Allreduce(_local_all(f, u) :: Bool, &, communicator(u))
-end
-
-# Collective equality: every rank compares its own interior, then combines with
-# a logical-AND Allreduce, so all ranks agree (see the note in reduction.jl).
-function Base.:(==)(x::HaloArray, y::HaloArray)
-    size(x) == size(y) || return false
-    MPI.Allreduce(_local_equal(x, y) :: Bool, &, communicator(x))
-end
-
-# Global inner product / norm / sum: the SAME contiguous-aware local part every
-# backend uses (`_local_dot`/`_local_sum`, reduction.jl — for this rank's single
-# tile that is `_interior_dot`/`_interior_acc` over the padded parent), then a
-# single Allreduce. These stay in every Krylov inner loop, so both the SIMD
-# reduction and the single collective matter.
-LinearAlgebra.dot(x::HaloArray, y::HaloArray) =
-    MPI.Allreduce(_local_dot(x, y), +, communicator(x))
-# `dots!`: the j local products, then ONE Allreduce of the j numbers.
-function _dots!(h, V, w, j, comm::MPI.Comm)
-    for i in 1:j
-        h[i] = _local_dot(V[i], w)
-    end
-    _allreduce(view(h, 1:j), +, comm; iscommutative = true)
-    return h
-end
-LinearAlgebra.norm(u::HaloArray) =
-    sqrt(MPI.Allreduce(_local_sum(_elt_abs2, u), +, communicator(u)))
-Base.sum(u::HaloArray) =
-    _allreduce(_local_sum(identity, u), +, communicator(u); iscommutative=true)
-
-# _mapreduce_dims (all backends + collections) lives in reduction.jl.
 
 
 # ============================================================
