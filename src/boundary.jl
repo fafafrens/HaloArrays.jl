@@ -257,8 +257,8 @@ end
 # them). A NoBoundaryCondition face is owned and left alone by its no-op
 # method; the fused launch gives it an empty geometry.
 @inline _rule_owns(::LocalHaloArray, ::Side, ::Dim) = true
-@inline _rule_owns(h::HaloArray, ::Side{S}, ::Dim{D}) where {S,D} =
-    h.topology.neighbors[D][S] < 0 && !(h.boundary_condition[D][S] isa Periodic)
+@inline _rule_owns(h::HaloArray, s::Side{S}, d::Dim{D}) where {S,D} =
+    !_has_neighbor(h, s, d) && !(h.boundary_condition[D][S] isa Periodic)
 
 # One ghost cell: its accessor and distance, then the rule.
 @inline function _fill_cell!(a, rule, g::FaceGeometry, I::CartesianIndex)
@@ -417,8 +417,7 @@ collection, delegates to its first field. Use it to apply a physical boundary
 condition only where one belongs.
 """
 @inline is_physical_boundary(::LocalHaloArray, ::Side, ::Dim) = true
-@inline is_physical_boundary(halo::HaloArray, ::Side{S}, ::Dim{D}) where {S,D} =
-    halo.topology.neighbors[D][S] < 0
+@inline is_physical_boundary(halo::HaloArray, s::Side, d::Dim) = !_has_neighbor(halo, s, d)
 # Threaded: a domain edge exists if any boundary tile has no neighbour (id 0).
 @inline is_physical_boundary(h::ThreadedHaloArray, ::Side{S}, ::Dim{D}) where {S,D} =
     any(t -> neighbor_tile_id(h, t, D, S) == 0, 1:tile_count(h))

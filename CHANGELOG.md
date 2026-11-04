@@ -15,6 +15,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   one method. `dot` and `norm` on a multi-field state combine across ranks
   **once** (they did one `Allreduce` per field), so a Krylov inner product on
   a collection is one collective.
+- The MPI exchange keeps one request per face and direction (`HaloCommState`
+  is two `UnsafeMultiRequest`s): the blocking exchange waits on all slots, the
+  split exchange on one face's slot, which MPI.jl's multi-request items make
+  directly waitable. The parallel per-face request vectors, the state-tuple
+  shims and the `*_unsafe!` layer are gone; the exchange is four per-face
+  steps (`_pack_face!`, `_post_face!`, `_unpack_face!`, `_finish_face!`) and
+  three drivers. `_has_neighbor` is the one place that knows `PROC_NULL`.
 
 ### Fixed
 - Scalar indexing of a `LocalHaloArray` (`u[i, j]`, `u[i, j] = v`) allocated

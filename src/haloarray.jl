@@ -181,7 +181,7 @@ end
 #   B           buffer type (recv_bufs / send_bufs)
 #   BCondition  boundary condition type
 #   Topo        topology type (CartesianTopology{N,C} when MPI is loaded)
-#   CS          comm-state type (HaloCommState{N} when MPI is loaded)
+#   CS          comm-state type (HaloCommState)
 """
     HaloArray(T, owned_dims, halo, topology; boundary_condition=:repeating)
     HaloArray(T, owned_dims, halo; boundary_condition=:repeating)   # builds a topology

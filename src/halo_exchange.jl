@@ -1,14 +1,10 @@
-# MPI message tags — shared with the MPI exchange functions in mpi_support.jl
-@inline tag_send(dim::Int, side::Int) = 2 * (dim - 1) + side
-@inline tag_recv(dim::Int, side::Int) = tag_send(dim, 3 - side)
-
+# MPI message tags: a message carries the SENDER's face number, which is also
+# that face's request slot (mpi_support.jl); the receiver of face (D, S)
+# expects the neighbour's opposite face.
 @inline tag_send(::Val{D}, ::Val{S}) where {D,S} = 2 * (D - 1) + S
 @inline tag_recv(::Val{D}, ::Val{S}) where {D,S} = tag_send(Val{D}(), Val{3 - S}())
 
-# HaloArray (MPI) exchange functions live in mpi_support.jl:
-#   halo_exchange!(::HaloArray)
-#   start_halo_exchange!(::HaloArray)  /  finish_halo_exchange!(::HaloArray)
-#   synchronize_halo!(::HaloArray)
+# The HaloArray (MPI) exchange lives in mpi_support.jl.
 
 # ---- LocalHaloArray (no-ops, BC only) ---------------------------------
 
@@ -80,14 +76,4 @@ function synchronize_halo!(halo::AbstractHaloCollection; threads::Bool=false)
     halo_exchange!(halo; threads)
     boundary_condition!(halo; threads)
     return halo
-end
-
-function start_halo_exchange_async_unsafe!(halo::AbstractHaloCollection)
-    foreach_field!(start_halo_exchange_async_unsafe!, halo)
-    return nothing
-end
-
-function end_halo_exchange_async_wait_unsafe!(halo::AbstractHaloCollection)
-    foreach_field!(end_halo_exchange_async_wait_unsafe!, halo)
-    return nothing
 end
