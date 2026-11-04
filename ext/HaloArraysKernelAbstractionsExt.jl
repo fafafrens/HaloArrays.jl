@@ -1,19 +1,22 @@
 module HaloArraysKernelAbstractionsExt
 
 # GPU implementations of the face-copy seams of src/boundary.jl and
-# src/mpi_support.jl (see the "GPU seams" block in boundary.jl). Loaded with
-# `using KernelAbstractions`; host (`Array`) storage keeps the broadcast path.
+# src/mpi_support.jl (see the "GPU seams" block in boundary.jl). Loads with
+# KernelAbstractions and GPUArraysCore, i.e. with any GPU array package; only
+# `AbstractGPUArray` storage takes the kernels, everything else keeps the
+# broadcast path.
 
 import HaloArrays
 using HaloArrays: LocalHaloArray, Periodic, halo_width
 using KernelAbstractions
+using GPUArraysCore: AbstractGPUArray
 const KA = KernelAbstractions
 
 # ---- which queue writes this storage ------------------------------------
 # The kernels index the storage array by offsets, so a view qualifies only
 # when every index is a contiguous range over a dense parent (every HaloArrays
-# face view is one). Anything else — stepped views, host arrays, storage with
-# no KernelAbstractions backend (e.g. `BitArray`) — keeps the broadcast path.
+# face view is one). Anything else — stepped views, host arrays, storage that
+# is not a GPU array (`BitArray`, ...) — keeps the broadcast path.
 
 _storage(x::SubArray) = parent(x)
 _storage(x::DenseArray) = x
@@ -23,14 +26,8 @@ _offset(x::DenseArray) = ntuple(_ -> 0, ndims(x))
 _unit_indexed(x::DenseArray) = true
 _unit_indexed(x::SubArray) = parent(x) isa DenseArray && all(r -> r isa AbstractUnitRange, x.indices)
 
-_ka_backend(::Array) = nothing                                 # host storage: broadcast path of src/
-function _ka_backend(x::AbstractArray)
-    try
-        KA.get_backend(x)
-    catch err
-        err isa ArgumentError ? nothing : rethrow()            # no backend registered for this storage
-    end
-end
+_ka_backend(x::AbstractGPUArray) = KA.get_backend(x)
+_ka_backend(::AbstractArray) = nothing                         # host storage: broadcast path of src/
 
 HaloArrays._slab_backend(dest::Union{DenseArray,SubArray}, src::Union{DenseArray,SubArray}) =
     _unit_indexed(dest) && _unit_indexed(src) ? _ka_backend(_storage(dest)) : nothing

@@ -7,8 +7,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
-- `HaloArraysKernelAbstractionsExt` (loaded with `using KernelAbstractions`):
-  the face copies of `synchronize_halo!` on GPU storage run as kernels instead
+- `HaloArraysKernelAbstractionsExt` (loads with KernelAbstractions and
+  GPUArraysCore, i.e. with any GPU array package): the face copies of
+  `synchronize_halo!` on GPU storage run as kernels instead
   of broadcasts on views — one kernel per slab for the exchange-buffer
   pack/unpack and for mixed boundary conditions, one fused kernel for an
   all-periodic `LocalHaloArray`. A refresh of a 48⁴ Float32 block on Metal goes
