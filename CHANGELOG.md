@@ -14,9 +14,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ghost cell's distance from the wall. The built-ins are one line each; a
   custom condition is a type with one call method, or a bare function
   `(u, k) -> value` in the condition tuple (wrapped as `FunctionBC`). The
-  built-ins lower to a `Stencil` in `prepare_boundary(bc, ::FaceGeometry)`
-  (weighted interior cells per ghost layer, built once per face), so all four
-  run through one evaluator; a custom rule is called as it is. One method
+  built-ins lower to prepared rules in `prepare_boundary(bc, ::FaceGeometry)`,
+  built once per face: `CopyStencil` for `Periodic`, `Repeating` and `Mirror`
+  (the source cell per ghost layer, returned as it is — a copy, so a `BigFloat`
+  field keeps its precision whatever the current default), `Stencil` for
+  `Extrapolation` (weighted interior cells per ghost layer); a custom rule is
+  called as it is. One method
   runs on the CPU, in a kernel on GPU storage, per tile and on MPI physical
   faces.
 - `HaloArraysKernelAbstractionsExt` (loads with KernelAbstractions and

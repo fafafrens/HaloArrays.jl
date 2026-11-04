@@ -158,15 +158,34 @@ halo width and the geometry) rather than per cell.
 @inline prepare_boundary(bc, ::FaceGeometry) = bc
 
 """
+    CopyStencil{H}
+
+A copy rule tabulated per ghost layer: ghost layer `k` (distance `1:H` from
+the wall) takes the cell at storage index `idx[k]` along the face normal,
+negated when `sign == -1`. `Periodic` (the opposite wall), `Repeating` (the
+wall cell) and `Mirror` (the mirror cell, with its sign) lower to it in
+[`prepare_boundary`](@ref). The value is returned as it is, not multiplied by
+one: a copy must preserve the element exactly (a `BigFloat` field keeps its
+precision whatever the current default is; a unit multiply would not).
+"""
+struct CopyStencil{H}
+    sign::Int
+    idx::NTuple{H,Int}
+end
+@inline function (s::CopyStencil)(u::FaceCells, k)
+    @inbounds x = _cell(u, s.idx[k])
+    return s.sign < 0 ? -x : x
+end
+
+"""
     Stencil{H,C,W}
 
-A linear rule tabulated per ghost layer: ghost layer `k` (distance `1:H` from
-the wall) is `Σ_t w[k][t] · a[idx[k][t]]`, `idx` a storage index along the face
-normal, `C` the capacity (entries past `count` are unused). `Periodic`,
-`Repeating`, `Mirror` and `Extrapolation` lower to it in
-[`prepare_boundary`](@ref), so every built-in runs through one evaluator —
-`Periodic` is one entry at the opposite wall, `Extrapolation(p)` is `p + 1`
-entries with the Lagrange weights.
+A weighted rule tabulated per ghost layer: ghost layer `k` (distance `1:H`
+from the wall) is `Σ_t w[k][t] · a[idx[k][t]]`, `idx` a storage index along the
+face normal, `C` the capacity (entries past `count` are unused), `W` the
+weight type (the field's scalar type for a floating-point field, `Int`
+otherwise). `Extrapolation(p)` lowers to it in [`prepare_boundary`](@ref):
+`p + 1` entries with the Lagrange weights. Copies take [`CopyStencil`](@ref).
 """
 struct Stencil{H,C,W}
     count::Int
@@ -197,20 +216,12 @@ end
     return v
 end
 
-# One entry per layer: index `at(k)` with weight `w`, in the weight type of `T`.
-@inline function _stencil1(::Type{T}, ::Val{H}, at::F, w::Int) where {T,H,F}
-    W = _weight_type(T)
-    return Stencil{H,_STENCIL_CAPACITY,W}(1,
-        ntuple(k -> ntuple(t -> t == 1 ? at(k) : 0, Val(_STENCIL_CAPACITY)), Val(H)),
-        ntuple(k -> ntuple(t -> t == 1 ? _weight(W, w) : zero(W), Val(_STENCIL_CAPACITY)), Val(H)))
-end
-
-@inline prepare_boundary(::Repeating, g::FaceGeometry{N,D,S,H,R,T}) where {N,D,S,H,R,T} =
-    _stencil1(T, Val(H), k -> g.wall, 1)
-@inline prepare_boundary(bc::Mirror, g::FaceGeometry{N,D,S,H,R,T}) where {N,D,S,H,R,T} =
-    _stencil1(T, Val(H), k -> g.wall + _into(g) * (k - 1), Int(bc.sign))
-@inline prepare_boundary(::Periodic, g::FaceGeometry{N,D,S,H,R,T}) where {N,D,S,H,R,T} =
-    _stencil1(T, Val(H), k -> _far_wall(g) - _into(g) * (k - 1), 1)
+@inline prepare_boundary(::Repeating, g::FaceGeometry{N,D,S,H}) where {N,D,S,H} =
+    CopyStencil{H}(1, ntuple(k -> g.wall, Val(H)))
+@inline prepare_boundary(bc::Mirror, g::FaceGeometry{N,D,S,H}) where {N,D,S,H} =
+    CopyStencil{H}(Int(bc.sign), ntuple(k -> g.wall + _into(g) * (k - 1), Val(H)))
+@inline prepare_boundary(::Periodic, g::FaceGeometry{N,D,S,H}) where {N,D,S,H} =
+    CopyStencil{H}(1, ntuple(k -> _far_wall(g) - _into(g) * (k - 1), Val(H)))
 @inline function prepare_boundary(bc::Extrapolation, g::FaceGeometry{N,D,S,H,R,T}) where {N,D,S,H,R,T}
     p = bc.order
     p < _STENCIL_CAPACITY || throw(ArgumentError(
