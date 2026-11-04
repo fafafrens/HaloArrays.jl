@@ -55,8 +55,19 @@ end
         # the built-ins lower to stencils; a custom rule stays itself
         g = FaceGeometry(parent(ref), Side(1), Dim(1), Val(2), CartesianIndex(-1, 1))
         @test prepare_boundary(Periodic(), g) isa Stencil
-        @test prepare_boundary(Extrapolation(3), g) isa Stencil
+        @test prepare_boundary(Extrapolation(3), g) isa Stencil{2,8,Float64}
         @test prepare_boundary(DirichletRule(1.0), g) isa DirichletRule
+        # the weights follow the field's scalar type: Float32 field → Float32 weights, Int field → Int
+        g32 = FaceGeometry(zeros(Float32, 6, 6), Side(1), Dim(1), Val(2), CartesianIndex(-1, 1))
+        @test prepare_boundary(Mirror(-1), g32) isa Stencil{2,8,Float32}
+        @test prepare_boundary(Mirror(-1), g32).w[1][1] === -1.0f0
+        gi = FaceGeometry(zeros(Int, 6, 6), Side(1), Dim(1), Val(2), CartesianIndex(-1, 1))
+        @test prepare_boundary(Extrapolation(2), gi) isa Stencil{2,8,Int}
+        gv = FaceGeometry(zeros(SVector{2,Float32}, 6, 6), Side(1), Dim(1), Val(2), CartesianIndex(-1, 1))
+        @test prepare_boundary(Repeating(), gv) isa Stencil{2,8,Float32}
+        # a weight Float32 cannot represent exactly is rejected at preparation
+        @test_throws InexactError HaloArrays._weight(Float32, 2^24 + 1)
+        @test HaloArrays._weight(Float32, 2^24) === Float32(2^24)
     end
 
     @testset "zero Dirichlet == Antireflecting on every ghost layer" begin

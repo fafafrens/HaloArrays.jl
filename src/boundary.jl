@@ -23,10 +23,11 @@ One face of a block as the fill sees it, built once per face by
 [`boundary_condition!`](@ref): the ghost cells to write, the storage index of
 the interior cell touching the wall, the interior extent along the normal and
 the offset from storage to global indices. Type parameters: `N` dimensions,
-`D` the normal, `S` the side (1 low, 2 high), `H` the halo width. A prepared
-rule ([`prepare_boundary`](@ref)) is built from it.
+`D` the normal, `S` the side (1 low, 2 high), `H` the halo width, `T` the
+field's element type. A prepared rule ([`prepare_boundary`](@ref)) is built
+from it.
 """
-struct FaceGeometry{N,D,S,H,R}
+struct FaceGeometry{N,D,S,H,R,T}       # T: the field's element type (the stencil weights follow it)
     ghosts::R                   # CartesianIndices of the face's ghost cells
     wall::Int                   # storage index along D of the interior cell touching the wall
     n::Int                      # interior cells along D
@@ -38,7 +39,7 @@ function FaceGeometry(a::AbstractArray{T,N}, ::Side{S}, ::Dim{D}, ::Val{H},
     sd = size(a, D)
     ghosts = CartesianIndices(ntuple(i -> i == D ? _recv_window(Side(S), sd, H) : (H+1):(size(a, i)-H), Val(N)))
     wall = S == 1 ? H + 1 : sd - H
-    return FaceGeometry{N,D,S,H,typeof(ghosts)}(ghosts, wall, sd - 2H, origin - first(ghosts))
+    return FaceGeometry{N,D,S,H,typeof(ghosts),T}(ghosts, wall, sd - 2H, origin - first(ghosts))
 end
 
 @inline face_dim(::FaceGeometry{N,D}) where {N,D} = D
@@ -174,6 +175,18 @@ struct Stencil{H,C,W}
 end
 const _STENCIL_CAPACITY = 8
 
+# The weights are exact integers; they are stored in the type the traversal
+# multiplies with — the field's scalar type for a floating-point field (so a
+# Float32 field sees Float32 weights, converted once here, not per cell and
+# not as a 64-bit integer in a kernel), Int for an integer field — with an
+# exactness check, so a weight the type cannot represent fails here.
+@inline _weight_type(::Type{T}) where {T} = eltype(T) <: AbstractFloat ? eltype(T) : Int
+@inline function _weight(::Type{W}, w::Int) where {W}
+    x = W(w)
+    x == w || throw(InexactError(:Stencil, W, w))
+    return x
+end
+
 @inline function (s::Stencil)(u::FaceCells, k)
     @inbounds ik = s.idx[k]
     @inbounds wk = s.w[k]
@@ -184,25 +197,28 @@ const _STENCIL_CAPACITY = 8
     return v
 end
 
-# One entry per layer: index `at(k)` with weight `w`.
-@inline _stencil1(::Val{H}, at::F, w) where {H,F} =
-    Stencil{H,_STENCIL_CAPACITY,typeof(w)}(1,
+# One entry per layer: index `at(k)` with weight `w`, in the weight type of `T`.
+@inline function _stencil1(::Type{T}, ::Val{H}, at::F, w::Int) where {T,H,F}
+    W = _weight_type(T)
+    return Stencil{H,_STENCIL_CAPACITY,W}(1,
         ntuple(k -> ntuple(t -> t == 1 ? at(k) : 0, Val(_STENCIL_CAPACITY)), Val(H)),
-        ntuple(k -> ntuple(t -> t == 1 ? w : zero(w), Val(_STENCIL_CAPACITY)), Val(H)))
+        ntuple(k -> ntuple(t -> t == 1 ? _weight(W, w) : zero(W), Val(_STENCIL_CAPACITY)), Val(H)))
+end
 
-@inline prepare_boundary(::Repeating, g::FaceGeometry) =
-    _stencil1(Val(halo_width(g)), k -> g.wall, 1)
-@inline prepare_boundary(bc::Mirror, g::FaceGeometry) =
-    _stencil1(Val(halo_width(g)), k -> g.wall + _into(g) * (k - 1), Int(bc.sign))
-@inline prepare_boundary(::Periodic, g::FaceGeometry) =
-    _stencil1(Val(halo_width(g)), k -> _far_wall(g) - _into(g) * (k - 1), 1)
-@inline function prepare_boundary(bc::Extrapolation, g::FaceGeometry)
+@inline prepare_boundary(::Repeating, g::FaceGeometry{N,D,S,H,R,T}) where {N,D,S,H,R,T} =
+    _stencil1(T, Val(H), k -> g.wall, 1)
+@inline prepare_boundary(bc::Mirror, g::FaceGeometry{N,D,S,H,R,T}) where {N,D,S,H,R,T} =
+    _stencil1(T, Val(H), k -> g.wall + _into(g) * (k - 1), Int(bc.sign))
+@inline prepare_boundary(::Periodic, g::FaceGeometry{N,D,S,H,R,T}) where {N,D,S,H,R,T} =
+    _stencil1(T, Val(H), k -> _far_wall(g) - _into(g) * (k - 1), 1)
+@inline function prepare_boundary(bc::Extrapolation, g::FaceGeometry{N,D,S,H,R,T}) where {N,D,S,H,R,T}
     p = bc.order
     p < _STENCIL_CAPACITY || throw(ArgumentError(
         "Extrapolation order $p exceeds the stencil capacity ($(_STENCIL_CAPACITY) cells, order ≤ $(_STENCIL_CAPACITY - 1))"))
-    return Stencil{halo_width(g),_STENCIL_CAPACITY,Int}(p + 1,
-        ntuple(k -> ntuple(t -> g.wall + _into(g) * (t - 1), Val(_STENCIL_CAPACITY)), Val(halo_width(g))),
-        ntuple(k -> ntuple(t -> t - 1 <= p ? _lagrange_weight(t - 1, p, k) : 0, Val(_STENCIL_CAPACITY)), Val(halo_width(g))))
+    W = _weight_type(T)
+    return Stencil{H,_STENCIL_CAPACITY,W}(p + 1,
+        ntuple(k -> ntuple(t -> g.wall + _into(g) * (t - 1), Val(_STENCIL_CAPACITY)), Val(H)),
+        ntuple(k -> ntuple(t -> t - 1 <= p ? _weight(W, _lagrange_weight(t - 1, p, k)) : zero(W), Val(_STENCIL_CAPACITY)), Val(H)))
 end
 
 # Interior cells a rule reads along the normal at halo width H — checked once
