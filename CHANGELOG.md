@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-11-04
+
 ### Added
 - The rule contract for boundary conditions: a condition is callable as
   `bc(u, k)` and returns one ghost cell's value, `u` a `FaceCells` accessor
