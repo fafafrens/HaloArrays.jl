@@ -22,6 +22,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   shims and the `*_unsafe!` layer are gone; the exchange is four per-face
   steps (`_pack_face!`, `_post_face!`, `_unpack_face!`, `_finish_face!`) and
   three drivers. `_has_neighbor` is the one place that knows `PROC_NULL`.
+- The in-place BLAS-1 updates are one kernel: `_interior_map!(f, dest, rng[, src])`
+  (a contiguous `@simd` loop on a dense `Array` parent, a broadcast over the
+  interior views on anything else) and its two-output form `_interior_map2!`;
+  `rmul!`/`lmul!`/`axpy!`/`axpby!`/`swap!`/`rotate!`/`reflect!` are one
+  closure each instead of twelve hand-written loops and fallbacks, at the same
+  speed (256³: identical timings) and allocation-free. `lmul!(s, x)` now
+  multiplies on the left (it was `rmul!`, wrong for a non-commutative cell
+  type). Tested on device storage (JLArrays) against the CPU.
+- `LocalHaloArray` and `HaloArray` are the two single-block kinds
+  (`_SingleBlock`, one alias instead of three spellings): `interior_view`,
+  `edge_view`/`ghost_view`, scalar indexing and `show` are written once on
+  the union (the MPI kind adds its warning, error text and topology line
+  through three one-line hooks); `ghost_origin` is one method for every
+  single kind and threaded tile; `halo_width(u)` one instance method. Gone:
+  the duplicated `versors`/`map`, `full_range`, `full_tile_size`, the
+  tile-first `boundary_condition!(t, tile, side, dim)` nothing called.
+  `HaloArray`'s `show` uses the `LocalHaloArray` wording.
 
 ### Fixed
 - Scalar indexing of a `LocalHaloArray` (`u[i, j]`, `u[i, j] = v`) allocated

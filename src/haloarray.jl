@@ -226,26 +226,12 @@ end
 The ghost-cell width on each side (the same in every dimension). Encoded in the
 type, so it is a compile-time constant. Also callable on the type.
 """
-@inline halo_width(::HaloArray{T,N,A,Halo}) where {T,N,A,Halo} = Halo
 @inline halo_width(::Type{<:HaloArray{T,N,A,Halo}}) where {T,N,A,Halo} = Halo
 
 # eltype/ndims come from AbstractArray{T,N}; parent from AbstractSingleHaloArray.
-
-# storage_size / interior_size / interior_range come from AbstractSingleHaloArray.
-
-"""
-    interior_view(u) -> view
-
-A mutable view of `u`'s interior (ghost-free) cells. The usual way to read/write
-initial data: `interior_view(u) .= ...`. For [`ThreadedHaloArray`](@ref) pass a
-tile id: `interior_view(u, tile_id)`. See also [`interior_range`](@ref).
-"""
-@inline function interior_view(halo::HaloArray)
-    @views halo.data[interior_range(halo)...]
-end
-
-# size, axes, length, interior_axes, eachindex, iterate, versors, similar dispatchers,
-# map!/map inherited from AbstractSingleHaloArray
+# storage_size / interior_size / interior_range come from AbstractSingleHaloArray;
+# interior_view, edge_view/ghost_view, scalar indexing and show from the
+# single-block union in local_haloarray.jl.
 
 # ---- global / topology accessors (pure field access, no MPI calls) ----
 
@@ -272,17 +258,17 @@ function interior_to_global_index(halo::HaloArray{T,N}, owned_idx::NTuple{N,<:In
     ntuple(i -> coords[i]*owned_dims[i] + owned_idx[i], Val(N))
 end
 
-# Global CartesianIndex of the first ghost cell (`ghost_view(·,s,d)[1]`) on the
-# (side, dim) face — the ghost analog of `interior_to_global_index`. Along `dim`
-# the ghost sits outside the interior (local index `1-hw` on the low side,
-# `owned+1` on the high side); along every other dim it starts at the first
-# interior cell (local 1). `ghost[J]` then maps to `origin - oneunit + J`.
-@inline function ghost_origin(halo::HaloArray{T,N}, ::Side{S}, ::Dim{D}) where {T,N,S,D}
-    coords = halo.topology.cart_coords
-    owned  = interior_size(halo)
-    hw     = halo_width(halo)
-    CartesianIndex(ntuple(i -> coords[i]*owned[i] +
-        (i == D ? (S == 1 ? 1 - hw : owned[i] + 1) : 1), Val(N)))
+# Global CartesianIndex of the first ghost cell (`ghost_view(·,s,d[,tile])[1]`)
+# on the (side, dim) face — the ghost analog of `interior_to_global_index`,
+# for every single-block kind and for a ThreadedHaloArray tile: the block's
+# first interior cell, moved outside the interior along `dim` (`1-hw` on the
+# low side, `n+1` on the high side). `ghost[J]` then maps to `origin - oneunit + J`.
+@inline function ghost_origin(halo::AbstractSingleHaloArray{T,N}, ::Side{S}, ::Dim{D},
+        tile=nothing) where {T,N,S,D}
+    t = tile === nothing ? 1 : tile
+    first_cell = interior_to_global_index(halo, t, ntuple(_ -> 1, Val(N)))
+    shift = S == 1 ? -halo_width(halo) : length(interior_range(halo, t)[D])
+    return CartesianIndex(Base.setindex(first_cell, first_cell[D] + shift, D))
 end
 
 function global_to_storage_index(halo::HaloArray{T,N}, global_idx::NTuple{N,<:Integer}) where {T,N}
@@ -293,27 +279,6 @@ function global_to_storage_index(halo::HaloArray{T,N}, global_idx::NTuple{N,<:In
     owner_coords != coords && return nothing
     interior_idx = ntuple(i -> global_idx[i] - coords[i]*owned_dims[i], Val(N))
     ntuple(i -> interior_idx[i] + h, Val(N))
-end
-
-@inline function _owned_global_to_storage_index(halo::HaloArray, I)
-    idx = _check_global_scalar_indices(halo, I)
-    storage_idx = global_to_storage_index(halo, idx)
-    storage_idx === nothing &&
-        throw(ArgumentError("Global index $idx is not in this MPI rank's interior region; HaloArray scalar indexing is local-only."))
-    return storage_idx
-end
-
-function Base.getindex(halo::HaloArray, I::Vararg{Integer})
-    @warn "Global scalar getindex on HaloArray is local-only (diagnostics only, not for hot loops)." maxlog=1
-    storage_idx = _owned_global_to_storage_index(halo, I)
-    @inbounds return parent(halo)[storage_idx...]
-end
-
-function Base.setindex!(halo::HaloArray, value, I::Vararg{Integer})
-    @warn "Global scalar setindex! on HaloArray is local-only (diagnostics only, not for hot loops)." maxlog=1
-    storage_idx = _owned_global_to_storage_index(halo, I)
-    @inbounds parent(halo)[storage_idx...] = value
-    return halo
 end
 
 # A distributed HaloArray reports its GLOBAL shape (`size`/`axes`/`length`) for
@@ -336,8 +301,6 @@ Base.collect(::HaloArray)          = error(_HALOARRAY_MATERIALIZE_MSG)
 @inline function versors(::Val{N}) where {N}
     ntuple(i -> ntuple(j -> ifelse(i==j, 1, 0), Val(N)), Val(N))
 end
-
-@inline versors(::HaloArray{T,N}) where {T,N} = versors(Val(N))
 
 # ---- send/recv buffer views -------------------------------------------
 #
@@ -396,8 +359,7 @@ For a [`ThreadedHaloArray`](@ref) pass the tile id as the last argument;
 `tile = nothing` means the whole array, so one coupled-BC method can pass its
 `tile` straight through on every backend.
 """
-@inline edge_view(a::HaloArray{T,N,A,Halo}, s::Side, ::Dim{D}) where {D,T,N,A,Halo} =
-    _halo_window_view(_send_window(s, storage_size(a, D), Halo), parent(a), D, Halo)
+function edge_view end
 
 """
     ghost_view(u, side, dim[, tile]) -> view
@@ -407,14 +369,12 @@ the cells a halo exchange (or a boundary condition) writes. Same shape as
 [`edge_view`](@ref) on that side, so a BC can pair them cell-by-cell.
 `tile` as in [`edge_view`](@ref).
 """
-@inline ghost_view(a::HaloArray{T,N,A,Halo}, s::Side, ::Dim{D}) where {D,T,N,A,Halo} =
-    _halo_window_view(_recv_window(s, storage_size(a, D), Halo), parent(a), D, Halo)
+function ghost_view end
 
 # tile = nothing ⇒ whole array (single-block backends), so coupled-BC code can
-# pass its tile argument through uniformly (ghost_origin likewise).
+# pass its tile argument through uniformly (ghost_origin takes `tile` itself).
 @inline edge_view(a::AbstractHaloArray, s::Side, d::Dim, ::Nothing)  = edge_view(a, s, d)
 @inline ghost_view(a::AbstractHaloArray, s::Side, d::Dim, ::Nothing) = ghost_view(a, s, d)
-@inline ghost_origin(a::AbstractHaloArray, s::Side, d::Dim, ::Nothing) = ghost_origin(a, s, d)
 
 # Plain-array dispatch (used during buffer construction, before the HaloArray exists).
 @inline edge_view(arr::AbstractArray, s::Side, ::Dim{D}, halo::Int) where {D} =
@@ -461,22 +421,4 @@ end
 # (abstract_haloarray.jl); interior_to_global_index below supplies the rank offset.
 
 
-# ---- show -------------------------------------------------------------
-
-function Base.show(io::IO, obj::HaloArray)
-    print(io, "HaloArray of global size ", size(obj),
-          " (interior: ", interior_size(obj), ", storage: ", storage_size(obj),
-          "), halo=", halo_width(obj), "\n")
-    print(io, "  eltype: ", eltype(obj), "\n")
-    print(io, "  topology: ", obj.topology, "\n")
-    print(io, "  boundary_condition: ", obj.boundary_condition, "\n")
-end
-
-function Base.show(io::IO, mime::MIME"text/plain", obj::HaloArray)
-    println(io, "HaloArray (storage: ", storage_size(obj), ", halo=", halo_width(obj), ")")
-    println(io, "  eltype: ", eltype(obj))
-    println(io, "  topology: ", obj.topology)
-    println(io, "  boundary_condition: ", obj.boundary_condition)
-    println(io, "  interior data preview:")
-    show(io, mime, interior_view(obj))
-end
+# show: the single-block method in local_haloarray.jl (with the topology line).

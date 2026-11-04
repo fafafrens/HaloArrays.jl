@@ -301,6 +301,8 @@ function is_root end
 # a ThreadedHaloArray (many tiles, which overrides these two methods).
 @inline tile_count(::AbstractSingleHaloArray) = 1
 @inline tile_parent(halo::AbstractSingleHaloArray, ::Integer) = parent(halo)
+# the halo width is a type parameter of every single kind: one instance method
+@inline halo_width(halo::AbstractSingleHaloArray) = halo_width(typeof(halo))
 @inline interior_range(halo::AbstractSingleHaloArray, ::Integer) = interior_range(halo)
 @inline interior_view(halo::AbstractSingleHaloArray, ::Integer) = interior_view(halo)
 

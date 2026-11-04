@@ -43,7 +43,8 @@ end
     plain(x) = repr(MIME("text/plain"), x)
     @test occursin("storage size: (6, 5), halo width: 1", plain(u))
     @test occursin("global size : (12, 3)", plain(t)) && occursin("6 (layout (6, 1))", plain(t)) && occursin("more tile", plain(t))
-    @test occursin("storage: (6, 5), halo=1", plain(h)) && occursin("topology", plain(h))
+    @test occursin("HaloArray (storage size: (6, 5), halo width: 1", plain(h)) && occursin("topology", plain(h))
+    @test !occursin("topology", plain(u))                      # one show method, the topology line only on HaloArray
     @test occursin("MultiHaloArray", plain(m))
     @test occursin("global size (4, 3)", repr(u)) && occursin("6 tiles of (2, 3)", repr(t)) && occursin("global size (4, 3)", repr(h))
 end

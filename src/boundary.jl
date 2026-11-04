@@ -225,13 +225,11 @@ end
 @inline _cells_needed(::Extrapolation{P}, ::Val{H}) where {P,H} = P + 1
 
 # ---- the fill: every rule, every single-block backend ----------
-# `tile` selects the storage: nothing (whole block) or a ThreadedHaloArray tile.
-@inline _tile_storage(h::AbstractSingleHaloArray, ::Nothing) = parent(h)
-@inline _tile_storage(h::ThreadedHaloArray, tile::Integer) = tile_parent(h, tile)
-
+# `tile` selects the storage (`_cell_storage`, field_access.jl): nothing for
+# the whole block, a ThreadedHaloArray tile id otherwise.
 @inline function boundary_condition!(h::AbstractSingleHaloArray, s::Side, d::Dim,
         bc::AbstractBoundaryCondition, tile=nothing)
-    a = _tile_storage(h, tile)
+    a = _cell_storage(h, tile)
     g = _face_geometry(h, s, d, bc, tile)
     isempty(g.ghosts) && return nothing          # halo width 0, or an empty block: nothing to fill
     _traverse!(_face_backend(a), a, prepare_boundary(bc, g), g)
@@ -243,7 +241,7 @@ end
 # the stencil specialise on it without relying on constant propagation.
 @inline function _face_geometry(h::AbstractSingleHaloArray, s::Side, d::Dim,
         bc::AbstractBoundaryCondition, tile=nothing)
-    g = FaceGeometry(_tile_storage(h, tile), s, d, Val(halo_width(h)), ghost_origin(h, s, d, tile))
+    g = FaceGeometry(_cell_storage(h, tile), s, d, Val(halo_width(h)), ghost_origin(h, s, d, tile))
     isempty(g.ghosts) && return g
     need = _cells_needed(bc, Val(halo_width(h)))
     g.n >= need || throw(ArgumentError(
@@ -282,7 +280,7 @@ end
 # predicate, so face ownership is decided in one place.
 # ============================================================
 
-function boundary_condition!(halo::Union{LocalHaloArray,HaloArray}, s::Side{S}, dim::Dim{D}) where {S,D}
+function boundary_condition!(halo::_SingleBlock, s::Side{S}, dim::Dim{D}) where {S,D}
     _rule_owns(halo, s, dim) && boundary_condition!(halo, s, dim, halo.boundary_condition[D][S])
     return halo
 end
