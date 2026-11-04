@@ -60,8 +60,8 @@ struct DirichletExt{T} <: HaloArrays.AbstractBoundaryCondition; value::T; end
         h = HaloArray(Float64, (6, 7), 1, topo; boundary_condition = bch)
         interior_view(h) .= rand(6, 7)
         hd = adapt(JLArray, h)
-        @test HaloArrays._rule_condition(hd, Side(1), Dim(1)) === nothing      # periodic: exchanged, not filled
-        @test HaloArrays._rule_condition(hd, Side(2), Dim(2)) isa Extrapolation
+        @test !HaloArrays._rule_owns(hd, Side(1), Dim(1))                      # periodic: exchanged, not filled
+        @test HaloArrays._rule_owns(hd, Side(2), Dim(2))
         @test HaloArrays._fused_fill!(hd)
         synchronize_halo!(h)
         @test Array(parent(hd))[2:end-1, 1] == parent(h)[2:end-1, 1]

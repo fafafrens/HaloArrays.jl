@@ -42,6 +42,11 @@ function FaceGeometry(a::AbstractArray{T,N}, ::Side{S}, ::Dim{D}, ::Val{H},
     return FaceGeometry{N,D,S,H,typeof(ghosts),T}(ghosts, wall, sd - 2H, origin - first(ghosts))
 end
 
+# the same face with no ghost cells: a face the fill does not own, in a form
+# of the same type (so a tuple of faces stays concrete)
+@inline _empty_face(g::FaceGeometry{N,D,S,H,R,T}) where {N,D,S,H,R,T} =
+    FaceGeometry{N,D,S,H,R,T}(CartesianIndices(ntuple(i -> 1:0, Val(N))), g.wall, g.n, g.shift)
+
 @inline face_dim(::FaceGeometry{N,D}) where {N,D} = D
 @inline face_side(::FaceGeometry{N,D,S}) where {N,D,S} = S
 @inline halo_width(::FaceGeometry{N,D,S,H}) where {N,D,S,H} = H
@@ -140,6 +145,9 @@ end
 
 # FunctionBC: the rule as a plain function (see the docstring in haloarray.jl).
 @inline (bc::FunctionBC)(u::FaceCells, k) = bc.f(u, k)
+# NoBoundaryCondition: keep the ghost as it is. Never applied (its faces are
+# skipped), defined so a face tuple holding it compiles.
+@inline (::NoBoundaryCondition)(u::FaceCells, k) = @inbounds u.a[u.I]
 
 # ---- prepared rules --------------------------------------------
 """
@@ -157,16 +165,18 @@ on the halo width and the geometry) rather than per cell.
     Stencil{H,C,W}
 
 A weighted rule tabulated per ghost layer: ghost layer `k` (distance `1:H`
-from the wall) is `Σ_t w[k][t] · a[idx[k][t]]`, `idx` a storage index along the
-face normal, `C` the capacity (entries past `count` are unused), `W` the
+from the wall) is `Σ_t w[k][t] · u(t - 1)` over the `count` interior cells
+nearest the wall, `C` the capacity (entries past `count` are unused), `W` the
 weight type (the field's scalar type for a floating-point field, `Int`
 otherwise). `Extrapolation(p)` lowers to it in [`prepare_boundary`](@ref):
 `p + 1` entries with the Lagrange weights.
 """
 struct Stencil{H,C,W}
     count::Int
-    idx::NTuple{H,NTuple{C,Int}}
     w::NTuple{H,NTuple{C,W}}
+    # explicit parameters only: with H = 0 the implicit constructor could not
+    # infer C and W from empty tuples (Aqua's unbound-parameter check)
+    Stencil{H,C,W}(count, w) where {H,C,W} = new{H,C,W}(count, w)
 end
 const _STENCIL_CAPACITY = 8
 
@@ -175,7 +185,12 @@ const _STENCIL_CAPACITY = 8
 # Float32 field sees Float32 weights, converted once here, not per cell and
 # not as a 64-bit integer in a kernel), Int for an integer field — with an
 # exactness check, so a weight the type cannot represent fails here.
-@inline _weight_type(::Type{T}) where {T} = eltype(T) <: AbstractFloat ? eltype(T) : Int
+# By dispatch, not a branch on types: a branch is a runtime type on older
+# Julia (1.10 infers a Union and `Stencil{H,C,W}` becomes a dynamic apply_type).
+@inline _weight_type(::Type{T}) where {T<:AbstractFloat} = T
+@inline _weight_type(::Type{T}) where {T} = _scalar_weight_type(eltype(T))   # a container (SVector, ...): its scalar
+@inline _scalar_weight_type(::Type{T}) where {T<:AbstractFloat} = T
+@inline _scalar_weight_type(::Type) = Int
 @inline function _weight(::Type{W}, w::Int) where {W}
     x = W(w)
     x == w || throw(InexactError(:Stencil, W, w))
@@ -183,11 +198,10 @@ const _STENCIL_CAPACITY = 8
 end
 
 @inline function (s::Stencil)(u::FaceCells, k)
-    @inbounds ik = s.idx[k]
     @inbounds wk = s.w[k]
-    v = wk[1] * _cell(u, ik[1])
+    v = wk[1] * u(0)
     for t in 2:s.count
-        @inbounds v += wk[t] * _cell(u, ik[t])
+        @inbounds v += wk[t] * u(t - 1)
     end
     return v
 end
@@ -197,9 +211,15 @@ end
     p < _STENCIL_CAPACITY || throw(ArgumentError(
         "Extrapolation order $p exceeds the stencil capacity ($(_STENCIL_CAPACITY) cells, order ≤ $(_STENCIL_CAPACITY - 1))"))
     W = _weight_type(T)
-    return Stencil{H,_STENCIL_CAPACITY,W}(p + 1,
-        ntuple(k -> ntuple(t -> g.wall + _into(g) * (t - 1), Val(_STENCIL_CAPACITY)), Val(H)),
-        ntuple(k -> ntuple(t -> t - 1 <= p ? _weight(W, _lagrange_weight(t - 1, p, k)) : zero(W), Val(_STENCIL_CAPACITY)), Val(H)))
+    return Stencil{H,_STENCIL_CAPACITY,W}(p + 1, _extrapolation_weights(Val(H), Val(_STENCIL_CAPACITY), W, p))
+end
+
+# The H × C weight table as literal tuple expressions (a generated function):
+# nested `ntuple` closures over `p` are allocation-free on current Julia but
+# allocate their environment on 1.10 when the enclosing function also throws.
+@generated function _extrapolation_weights(::Val{H}, ::Val{C}, ::Type{W}, p::Int) where {H,C,W}
+    layer(k) = Expr(:tuple, (:($t - 1 <= p ? _weight($W, _lagrange_weight($t - 1, p, $k)) : zero($W)) for t in 1:C)...)
+    return Expr(:tuple, (layer(k) for k in 1:H)...)
 end
 
 # Interior cells a rule reads along the normal at halo width H — checked once
@@ -218,42 +238,34 @@ end
 
 @inline function boundary_condition!(h::AbstractSingleHaloArray, s::Side, d::Dim,
         bc::AbstractBoundaryCondition, tile=nothing)
-    face = _prepare_face(h, s, d, bc, tile)
-    face === nothing && return nothing
     a = _tile_storage(h, tile)
-    _traverse!(_face_backend(a), a, face[2], face[1])
+    g = _face_geometry(h, s, d, bc, tile)
+    isempty(g.ghosts) && return nothing          # halo width 0, or an empty block: nothing to fill
+    _traverse!(_face_backend(a), a, prepare_boundary(bc, g), g)
     return nothing
 end
 
-# The prepared face `(geometry, rule)`, or `nothing` when there is nothing to
-# fill (halo width 0, an empty block). Validates the interior extent the rule
-# reads. Shared by the per-face fill above and the fused launch of the extension.
-@inline function _prepare_face(h::AbstractSingleHaloArray, s::Side, d::Dim,
+# The face's geometry, validated for the interior extent the rule reads.
+# The halo width is a type parameter of `h`: passed as a Val, the geometry and
+# the stencil specialise on it without relying on constant propagation.
+@inline function _face_geometry(h::AbstractSingleHaloArray, s::Side, d::Dim,
         bc::AbstractBoundaryCondition, tile=nothing)
-    a = _tile_storage(h, tile)
-    # the halo width is a type parameter of `h`: passed as a Val, the geometry
-    # and the stencil specialise on it without relying on constant propagation
-    g = FaceGeometry(a, s, d, Val(halo_width(h)), ghost_origin(h, s, d, tile))
-    isempty(g.ghosts) && return nothing
+    g = FaceGeometry(_tile_storage(h, tile), s, d, Val(halo_width(h)), ghost_origin(h, s, d, tile))
+    isempty(g.ghosts) && return g
     need = _cells_needed(bc, Val(halo_width(h)))
     g.n >= need || throw(ArgumentError(
         "boundary condition needs $need interior cells along dimension $(face_dim(g)), the interior has $(g.n)"))
-    return (g, prepare_boundary(bc, g))
+    return g
 end
 
-# The condition a single-block fill applies on face (s, d), or `nothing` when
-# the face is not filled by a rule: a `NoBoundaryCondition` face, and on an
-# MPI `HaloArray` an exchange face (a neighbour rank, which includes periodic
-# faces: the topology wraps them). This is the face list of the fused launch.
-@inline function _rule_condition(h::LocalHaloArray, ::Side{S}, ::Dim{D}) where {S,D}
-    bc = h.boundary_condition[D][S]
-    return bc isa NoBoundaryCondition ? nothing : bc
-end
-@inline function _rule_condition(h::HaloArray, ::Side{S}, ::Dim{D}) where {S,D}
-    bc = h.boundary_condition[D][S]
-    (h.topology.neighbors[D][S] < 0 && !(bc isa Periodic) && !(bc isa NoBoundaryCondition)) || return nothing
-    return bc
-end
+# Whether a single-block fill owns face (s, d): every face of a LocalHaloArray;
+# on an MPI HaloArray the physical, non-periodic ones (an exchange face has a
+# neighbour rank, and periodic faces are exchange faces: the topology wraps
+# them). A NoBoundaryCondition face is owned and left alone by its no-op
+# method; the fused launch gives it an empty geometry.
+@inline _rule_owns(::LocalHaloArray, ::Side, ::Dim) = true
+@inline _rule_owns(h::HaloArray, ::Side{S}, ::Dim{D}) where {S,D} =
+    h.topology.neighbors[D][S] < 0 && !(h.boundary_condition[D][S] isa Periodic)
 
 # One ghost cell: its accessor and distance, then the rule.
 @inline function _fill_cell!(a, rule, g::FaceGeometry, I::CartesianIndex)
@@ -264,7 +276,7 @@ end
 # Seam: the KernelAbstractions extension launches the loop below as a kernel on
 # GPU storage (`_face_backend` returns the backend there); host storage loops.
 @inline _face_backend(a) = nothing
-function _traverse!(::Nothing, a, rule, g::FaceGeometry)
+@inline function _traverse!(::Nothing, a, rule, g::FaceGeometry)      # inlined: a prepared rule stays in the caller's frame
     @inbounds for I in g.ghosts
         _fill_cell!(a, rule, g, I)
     end
@@ -272,15 +284,13 @@ function _traverse!(::Nothing, a, rule, g::FaceGeometry)
 end
 
 # ============================================================
-# Per-face dispatcher of the single-block types: fill the face if a rule owns
-# it (`_rule_condition`: not a NoBoundaryCondition face, and on an MPI
-# HaloArray a physical, non-periodic one). The fused launch of the extension
-# uses the same predicate, so face ownership is decided in one place.
+# Per-face dispatcher of the single-block types: fill the face if the fill
+# owns it (`_rule_owns`). The fused launch of the extension uses the same
+# predicate, so face ownership is decided in one place.
 # ============================================================
 
-function boundary_condition!(halo::Union{LocalHaloArray,HaloArray}, s::Side, dim::Dim)
-    bc = _rule_condition(halo, s, dim)
-    bc === nothing || boundary_condition!(halo, s, dim, bc)
+function boundary_condition!(halo::Union{LocalHaloArray,HaloArray}, s::Side{S}, dim::Dim{D}) where {S,D}
+    _rule_owns(halo, s, dim) && boundary_condition!(halo, s, dim, halo.boundary_condition[D][S])
     return halo
 end
 

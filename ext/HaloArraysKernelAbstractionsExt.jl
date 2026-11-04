@@ -7,7 +7,7 @@ module HaloArraysKernelAbstractionsExt
 # broadcast path.
 
 import HaloArrays
-using HaloArrays: LocalHaloArray, HaloArray, Periodic, halo_width, Side, Dim
+using HaloArrays: LocalHaloArray, HaloArray, Periodic, NoBoundaryCondition, halo_width, Side, Dim, prepare_boundary
 using KernelAbstractions
 using GPUArraysCore: AbstractGPUArray
 const KA = KernelAbstractions
@@ -93,9 +93,8 @@ end
 
 @inline _apply_face!(a, ::Tuple{}, f, j, q) = nothing
 @inline function _apply_face!(a, faces::Tuple, f, j, q)
-    face = first(faces)
-    if face !== nothing && f == q          # `face !== nothing` is decided by the element type
-        g, rule, ext = face
+    if f == q
+        g, rule, ext = first(faces)
         c = _unravel(j, ext)
         HaloArrays._fill_cell!(a, rule, g, first(g.ghosts) + CartesianIndex(map(Int, c)))
     end
@@ -117,14 +116,16 @@ end
     _apply_face!(a, faces, f, i - base, Int32(1))
 end
 
-# `faces`: a tuple of prepared faces `(geometry, rule)`, `nothing` for a face
-# with nothing to fill. Each face is handed to the kernel with its Int32 extent
-# (computed once here: in the kernel it would be Int64 arithmetic per cell).
+# `faces`: a tuple of prepared faces `(geometry, rule)`; a face with nothing to
+# fill has an empty geometry (zero cells, so the scan never selects it) rather
+# than a different type, so the tuple is concrete whatever the face list is.
+# Each face is handed to the kernel with its Int32 extent (computed once here:
+# in the kernel it would be Int64 arithmetic per cell).
 function _launch_faces!(backend::KA.Backend, a, faces::NTuple{F,Any}) where {F}
-    counts = map(face -> face === nothing ? Int32(0) : Int32(length(face[1].ghosts)), faces)
+    counts = map(face -> Int32(length(face[1].ghosts)), faces)
     total = Int(sum(counts))
     total == 0 && return nothing
-    device_faces = map(face -> face === nothing ? nothing : (face[1], face[2], Int32.(size(face[1].ghosts))), faces)
+    device_faces = map(face -> (face[1], face[2], Int32.(size(face[1].ghosts))), faces)
     _faces_kernel!(backend)(a, device_faces, counts, Val(F); ndrange=total)
     return nothing
 end
@@ -133,14 +134,16 @@ end
 HaloArrays._traverse!(backend::KA.Backend, a, rule, g::HaloArrays.FaceGeometry) =
     _launch_faces!(backend, a, ((g, rule),))
 
-# The prepared face (geometry, rule) for face f of `halo`, or nothing when the
-# face is not filled by a rule. `f` is a type parameter so Side/Dim are static.
+# The prepared face (geometry, rule) for face f of `halo`; a face the fill does
+# not own (an exchange face, a NoBoundaryCondition face) gets the empty
+# geometry. `f` is a type parameter so Side/Dim are static.
 @inline function _prepared_face(halo, ::Val{f}) where {f}
     d = (f + 1) ÷ 2
     s = f - 2(d - 1)
-    bc = HaloArrays._rule_condition(halo, Side(s), Dim(d))
-    bc === nothing && return nothing
-    return HaloArrays._prepare_face(halo, Side(s), Dim(d), bc, nothing)
+    bc = halo.boundary_condition[d][s]
+    g = HaloArrays._face_geometry(halo, Side(s), Dim(d), bc, nothing)
+    owned = HaloArrays._rule_owns(halo, Side(s), Dim(d)) && !(bc isa NoBoundaryCondition)
+    return (owned ? g : HaloArrays._empty_face(g), prepare_boundary(bc, g))
 end
 
 # every rule face of the block
