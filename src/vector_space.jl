@@ -154,110 +154,69 @@ LinearAlgebra.ldiv!(out::AbstractHaloArray, J::UniformScaling, b::AbstractHaloAr
 LinearAlgebra.ldiv!(J::UniformScaling, b::AbstractHaloArray) = (b .= b ./ J.λ; b)
 LinearAlgebra.rdiv!(b::AbstractHaloArray, J::UniformScaling) = (b .= b ./ J.λ; b)
 
-# contiguous @simd over the leading (contiguous) dim of a dense Array parent …
-@inline function _interior_scal!(p::Array, rng::Tuple, s)
+# The one kernel behind every in-place elementwise update of one tile's
+# interior: `_interior_map!(f, dest, rng[, src])` writes `dest[I] = f(dest[I][, src[I]])`,
+# `_interior_map2!(f, px, py, rng)` writes `(px[I], py[I]) = f(px[I], py[I])` in
+# one fused pass (both outputs from both old inputs, no temporary). On a dense
+# `Array` parent: a contiguous `@simd` loop over the leading dimension (the
+# closure inlines; same speed as the hand-written loops it replaces). On any
+# other parent (GPU): a broadcast over the interior views, so device parents
+# keep their on-device kernels — the two-output form needs one temporary there.
+@inline function _interior_map!(f::F, dest::Array, rng::Tuple) where {F}
     inner = rng[1]; outer = CartesianIndices(Base.tail(rng))
     @inbounds for J in outer
-        @simd for i in inner; p[i, J] *= s; end
+        @simd for i in inner; dest[i, J] = f(dest[i, J]); end
     end
+    return nothing
 end
-@inline function _interior_axpy!(py::Array, px::Array, rng::Tuple, s)
+@inline function _interior_map!(f::F, dest::Array, rng::Tuple, src::Array) where {F}
     inner = rng[1]; outer = CartesianIndices(Base.tail(rng))
     @inbounds for J in outer
-        @simd for i in inner; py[i, J] += s * px[i, J]; end
+        @simd for i in inner; dest[i, J] = f(dest[i, J], src[i, J]); end
     end
+    return nothing
 end
-@inline function _interior_axpby!(py::Array, px::Array, rng::Tuple, s, t)
-    inner = rng[1]; outer = CartesianIndices(Base.tail(rng))
-    @inbounds for J in outer
-        @simd for i in inner; py[i, J] = s * px[i, J] + t * py[i, J]; end
+@inline function _interior_map2!(f::F, px::Array, py::Array, rng::Tuple) where {F}
+    @inbounds for I in CartesianIndices(rng)
+        px[I], py[I] = f(px[I], py[I])
     end
+    return nothing
 end
-# … and the GPU / non-dense fallback: broadcast over the interior view.
-@inline _interior_scal!(p::AbstractArray, rng::Tuple, s) = (@views p[rng...] .*= s; nothing)
-@inline _interior_axpy!(py::AbstractArray, px::AbstractArray, rng::Tuple, s) =
-    (@views py[rng...] .+= s .* px[rng...]; nothing)
-@inline _interior_axpby!(py::AbstractArray, px::AbstractArray, rng::Tuple, s, t) =
-    (@views py[rng...] .= s .* px[rng...] .+ t .* py[rng...]; nothing)
+@inline _interior_map!(f::F, dest::AbstractArray, rng::Tuple) where {F} =
+    (@views dest[rng...] .= f.(dest[rng...]); nothing)
+@inline _interior_map!(f::F, dest::AbstractArray, rng::Tuple, src::AbstractArray) where {F} =
+    (@views dest[rng...] .= f.(dest[rng...], src[rng...]); nothing)
+@inline function _interior_map2!(f::F, px::AbstractArray, py::AbstractArray, rng::Tuple) where {F}
+    @views xi = px[rng...]; @views yi = py[rng...]
+    t = f.(xi, yi)                        # the pairs, one temporary
+    xi .= first.(t); yi .= last.(t)
+    return nothing
+end
 
 # Per-tile driving goes through `_foreach_tile` (abstract_haloarray.jl, next to
 # the one-tile decomposition trait it is built on). The two-array kernels index
 # BOTH parents with x's range under @inbounds, so they must pass the shared
 # geometry guard first (an unchecked mismatch is an out-of-bounds read/write).
 LinearAlgebra.rmul!(x::AbstractSingleHaloArray, s::Number) =
-    (_foreach_tile(t -> _interior_scal!(tile_parent(x, t), interior_range(x, t), s), x); x)
-LinearAlgebra.lmul!(s::Number, x::AbstractSingleHaloArray) =
-    (_foreach_tile(t -> _interior_scal!(tile_parent(x, t), interior_range(x, t), s), x); x)
+    (_foreach_tile(t -> _interior_map!(v -> v * s, tile_parent(x, t), interior_range(x, t)), x); x)
+LinearAlgebra.lmul!(s::Number, x::AbstractSingleHaloArray) =           # s on the left: not `rmul!` for a non-commutative cell type
+    (_foreach_tile(t -> _interior_map!(v -> s * v, tile_parent(x, t), interior_range(x, t)), x); x)
 function LinearAlgebra.axpy!(s::Number, x::AbstractSingleHaloArray, y::AbstractSingleHaloArray)
     _check_same_geometry(x, y, "axpy!")
-    _foreach_tile(t -> _interior_axpy!(tile_parent(y, t), tile_parent(x, t), interior_range(x, t), s), x)
+    _foreach_tile(t -> _interior_map!((yv, xv) -> yv + s * xv, tile_parent(y, t), interior_range(x, t), tile_parent(x, t)), x)
     return y
 end
 function LinearAlgebra.axpby!(s::Number, x::AbstractSingleHaloArray, t::Number, y::AbstractSingleHaloArray)
     _check_same_geometry(x, y, "axpby!")
-    _foreach_tile(tt -> _interior_axpby!(tile_parent(y, tt), tile_parent(x, tt), interior_range(x, tt), s, t), x)
+    _foreach_tile(tt -> _interior_map!((yv, xv) -> s * xv + t * yv, tile_parent(y, tt), interior_range(x, tt), tile_parent(x, tt)), x)
     return y
 end
 
 # ---- swap + Givens/Householder on two vectors (elementwise, MPI-safe) --------
 # These complete the BLAS-1 surface (SSWAP, SROT). Each mixes two whole vectors
-# elementwise — no reduction — so it is correct local-per-rank/tile (MPI-safe).
-# Both outputs depend on both old inputs, so each cell is updated through scalar
-# locals in a single fused pass: no temporary vector, no extra traversal.
-#
-# A single-tile kernel does the cell math on one raw padded array over
-# `interior_range` (so no scalar-getindex on the halo array itself); the shared
-# `_foreach_tile` driver runs it inline on a single-block array (Local/MPI) or
-# across the thread backend on a ThreadedHaloArray — one method per operation.
+# elementwise — no reduction — so it is correct local-per-rank/tile (MPI-safe);
+# each is one pair-valued cell function through `_interior_map2!` above.
 # Collections delegate per field, so each field picks its own driver.
-
-# Dense Array parents (CPU): scalar fused pass — no temporary, both outputs from
-# the two scalar locals. Non-Array (GPU) parents take the broadcast fallbacks
-# below: each is an in-place two-output op, so it needs one temp (copy of old x);
-# scalar-indexing a GPUArray would error / crawl. Same Array-gating as the other
-# BLAS-1 ops; keeps the CPU path 0-alloc, the GPU path correct.
-@inline function _swap_tile!(px::Array, py::Array, rng)
-    @inbounds for I in CartesianIndices(rng)
-        px[I], py[I] = py[I], px[I]
-    end
-end
-# Givens rotation:  x .= c*x + s*y,  y .= -conj(s)*x + c*y
-@inline function _rotate_tile!(px::Array, py::Array, rng, c, s)
-    @inbounds for I in CartesianIndices(rng)
-        a = px[I]; b = py[I]
-        px[I] = c * a + s * b
-        py[I] = c * b - conj(s) * a
-    end
-end
-# Householder reflection:  x .= c*x + s*y,  y .= conj(s)*x − c*y
-@inline function _reflect_tile!(px::Array, py::Array, rng, c, s)
-    @inbounds for I in CartesianIndices(rng)
-        a = px[I]; b = py[I]
-        px[I] = c * a + s * b
-        py[I] = conj(s) * a - c * b
-    end
-end
-
-# --- GPU / non-dense fallbacks: broadcast over the interior views (one temp) ---
-@inline function _swap_tile!(px::AbstractArray, py::AbstractArray, rng)
-    @views xi = px[rng...]; @views yi = py[rng...]
-    tmp = copy(xi); xi .= yi; yi .= tmp
-    return nothing
-end
-@inline function _rotate_tile!(px::AbstractArray, py::AbstractArray, rng, c, s)
-    @views xi = px[rng...]; @views yi = py[rng...]
-    a = copy(xi)                          # old x (both outputs need it)
-    @. xi = c * a + s * yi
-    @. yi = c * yi - conj(s) * a
-    return nothing
-end
-@inline function _reflect_tile!(px::AbstractArray, py::AbstractArray, rng, c, s)
-    @views xi = px[rng...]; @views yi = py[rng...]
-    a = copy(xi)
-    @. xi = c * a + s * yi
-    @. yi = conj(s) * a - c * yi
-    return nothing
-end
 
 """
     swap!(x, y) -> (x, y)
@@ -270,7 +229,7 @@ backend and is MPI-safe (each rank/tile swaps its own cells). On a
 """
 function swap!(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray)
     _check_same_geometry(x, y, "swap!")
-    _foreach_tile(t -> _swap_tile!(tile_parent(x, t), tile_parent(y, t), interior_range(x, t)), x)
+    _foreach_tile(t -> _interior_map2!((a, b) -> (b, a), tile_parent(x, t), tile_parent(y, t), interior_range(x, t)), x)
     return x, y
 end
 
@@ -307,15 +266,19 @@ function dots!(h, V, w::Union{AbstractSingleHaloArray,AbstractHaloCollection}, j
     return h
 end
 
+# Givens rotation:  x .= c*x + s*y,  y .= -conj(s)*x + c*y
 function LinearAlgebra.rotate!(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray, c, s)
     _check_same_geometry(x, y, "rotate!")
-    _foreach_tile(t -> _rotate_tile!(tile_parent(x, t), tile_parent(y, t), interior_range(x, t), c, s), x)
+    _foreach_tile(t -> _interior_map2!((a, b) -> (c * a + s * b, c * b - conj(s) * a),
+                                       tile_parent(x, t), tile_parent(y, t), interior_range(x, t)), x)
     return x, y
 end
 
+# Householder reflection:  x .= c*x + s*y,  y .= conj(s)*x − c*y
 function LinearAlgebra.reflect!(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray, c, s)
     _check_same_geometry(x, y, "reflect!")
-    _foreach_tile(t -> _reflect_tile!(tile_parent(x, t), tile_parent(y, t), interior_range(x, t), c, s), x)
+    _foreach_tile(t -> _interior_map2!((a, b) -> (c * a + s * b, conj(s) * a - c * b),
+                                       tile_parent(x, t), tile_parent(y, t), interior_range(x, t)), x)
     return x, y
 end
 
