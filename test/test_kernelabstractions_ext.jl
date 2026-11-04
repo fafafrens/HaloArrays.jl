@@ -2,7 +2,11 @@ using Test
 using HaloArrays
 using JLArrays            # GPUArrays' CPU reference backend: a KernelAbstractions non-CPU backend
 using KernelAbstractions
+using MPI, Adapt
 const KA = KernelAbstractions
+
+struct DirichletExt{T} <: HaloArrays.AbstractBoundaryCondition; value::T; end
+(bc::DirichletExt)(u, k) = 2bc.value - u(0)
 
 @testset "KernelAbstractions extension: GPU face copies" begin
     # JLArray storage must take the kernel path for these tests to mean anything
@@ -14,22 +18,68 @@ const KA = KernelAbstractions
         ref = LocalHaloArray(copy(x), h, :periodic)
         synchronize_halo!(ref)
         dev = LocalHaloArray(JLArray(copy(x)), h, :periodic)
-        @test HaloArrays._fused_periodic_fill!(dev)               # handled by the fused kernel
+        @test HaloArrays._fused_fill!(dev)                        # handled by the fused kernel
         @test Array(parent(dev)) == parent(ref)
         dev2 = LocalHaloArray(JLArray(copy(x)), h, :periodic)
         synchronize_halo!(dev2)                                    # the public entry point
         @test Array(parent(dev2)) == parent(ref)
     end
 
-    # mixed conditions: the per-face path, periodic faces through the slab kernel
+    # mixed conditions: one fused launch over all rule faces
     x = rand(8, 9)
     bc = ((Periodic(), Periodic()), (Repeating(), Repeating()))
     ref = LocalHaloArray(copy(x), 1, bc)
     synchronize_halo!(ref)
     dev = LocalHaloArray(JLArray(copy(x)), 1, bc)
-    @test !HaloArrays._fused_periodic_fill!(dev)
-    synchronize_halo!(dev)
+    @test HaloArrays._fused_fill!(dev)
     @test Array(parent(dev)) == parent(ref)
+    dev2 = LocalHaloArray(JLArray(copy(x)), 1, bc)
+    synchronize_halo!(dev2)
+    @test Array(parent(dev2)) == parent(ref)
+
+    # NoBoundaryCondition faces are skipped by the fused launch: their ghosts keep the sentinel
+    x = rand(7, 6, 5); x[1, :, :] .= -7.0; x[end, :, :] .= -7.0
+    bcn = ((NoBoundaryCondition(), NoBoundaryCondition()), (Mirror(1), Extrapolation(1)), (Periodic(), Periodic()))
+    ref = LocalHaloArray(copy(x), 1, bcn); synchronize_halo!(ref)
+    dev = LocalHaloArray(JLArray(copy(x)), 1, bcn)
+    @test HaloArrays._fused_fill!(dev)
+    @test Array(parent(dev)) == parent(ref)
+    @test all(==(-7.0), Array(parent(dev))[1, 2:end-1, 2:end-1]) && all(==(-7.0), Array(parent(dev))[end, 2:end-1, 2:end-1])
+    # a block with no rule face at all is handled trivially
+    @test HaloArrays._fused_fill!(LocalHaloArray(JLArray(zeros(4, 4)), 1, :noboundary))
+
+    # the per-face kernel is still the path for a single face
+    dev = LocalHaloArray(JLArray(copy(x)), 1, bcn)
+    boundary_condition!(dev, Side(1), Dim(2))
+    @test Array(parent(dev))[2:end-1, 1, 2:end-1] == parent(ref)[2:end-1, 1, 2:end-1]
+
+    # MPI HaloArray on one rank, device storage: physical faces fused, periodic faces are exchange faces
+    if MPI.Comm_size(MPI.COMM_WORLD) == 1
+        topo = CartesianTopology(MPI.COMM_WORLD, (0, 0); periodic = (true, false))
+        bch = ((Periodic(), Periodic()), (Mirror(-1), Extrapolation(2)))
+        h = HaloArray(Float64, (6, 7), 1, topo; boundary_condition = bch)
+        interior_view(h) .= rand(6, 7)
+        hd = adapt(JLArray, h)
+        @test !HaloArrays._rule_owns(hd, Side(1), Dim(1))                      # periodic: exchanged, not filled
+        @test HaloArrays._rule_owns(hd, Side(2), Dim(2))
+        @test HaloArrays._fused_fill!(hd)
+        synchronize_halo!(h)
+        @test Array(parent(hd))[2:end-1, 1] == parent(h)[2:end-1, 1]
+        @test Array(parent(hd))[2:end-1, end] == parent(h)[2:end-1, end]
+    end
+
+    # rules on the device: built-ins, a custom type and a closure, fused, vs the CPU fill
+    for (dims, h) in (((7,), 2), ((6, 5), 1), ((4, 5, 6), 2), ((3, 4, 3, 4), 1))
+        x = rand(dims .+ 2h...)
+        bcr = ntuple(d -> d == 1 ? (Mirror(-1), Extrapolation(2)) :
+                          d == 2 ? (Repeating(), DirichletExt(0.5)) :
+                          d == 3 ? ((u, k) -> u(0) + 0.1k, Periodic()) :
+                                   (Periodic(), Mirror(1)), length(dims))
+        ref = LocalHaloArray(copy(x), h, bcr); synchronize_halo!(ref)
+        dev = LocalHaloArray(JLArray(copy(x)), h, bcr)
+        @test HaloArrays._fused_fill!(dev)
+        @test Array(parent(dev)) ≈ parent(ref)
+    end
 
     # slab copy between a view and a dense buffer, both directions, and the shape check
     a = JLArray(rand(6, 7))
@@ -68,4 +118,24 @@ const KA = KernelAbstractions
     @test_throws ArgumentError LocalHaloArray(zeros(5, 8), 2, :periodic)
     @test_throws ArgumentError LocalHaloArray(JLArray(zeros(5, 8)), 2, :periodic)
     @test LocalHaloArray(zeros(5, 8), 2, :repeating) isa LocalHaloArray
+
+    # a rule capturing an array: the capture is adapted with the halo array
+    # (host table → device table) and again at launch (device table → kernel form)
+    table_rule(table) = FunctionBC((u, k) -> table[k] + u(0))
+    x = rand(12); x[3:10] .= 1:8                      # 8 interior cells, halo 2
+    ref = LocalHaloArray(copy(x), 2, ((table_rule([10.0, 20.0]), Repeating()),))
+    synchronize_halo!(ref)
+    @test parent(ref)[1:2] == [20.0 + 1, 10.0 + 1]      # storage index 1 is the ghost at distance 2
+    host_captured = LocalHaloArray(JLArray(copy(x)), 2, ((table_rule([10.0, 20.0]), Repeating()),))
+    moved = adapt(JLArray, host_captured)
+    @test moved.boundary_condition[1][1].f.table isa JLArray
+    @test moved.boundary_condition[1][2] === Repeating()
+    synchronize_halo!(moved)
+    @test Array(parent(moved)) == parent(ref)
+    device_captured = LocalHaloArray(JLArray(copy(x)), 2, ((table_rule(JLArray([10.0, 20.0])), Repeating()),))
+    synchronize_halo!(device_captured)
+    @test Array(parent(device_captured)) == parent(ref)
+    @test adapt(Array, moved).boundary_condition[1][1].f.table isa Vector{Float64}
+    th = adapt(JLArray, ThreadedHaloArray(LocalHaloArray(copy(x), 2, ((table_rule([10.0, 20.0]), Repeating()),)); dims=(2,)))
+    @test th.boundary_condition[1][1].f.table isa JLArray
 end

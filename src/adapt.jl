@@ -9,22 +9,32 @@
 # REBUILD the buffers from it: `make_*_buffers` does `similar(data-view, …)`, so a
 # device parent yields device buffers automatically. This reuses the exact
 # construction path, so the result is indistinguishable from a natively
-# device-constructed `HaloArray`. Topology / boundary condition are device-agnostic
-# metadata and pass through unchanged; the transient `comm_state` is recreated.
+# device-constructed `HaloArray`. The topology is device-agnostic metadata and
+# passes through unchanged; the transient `comm_state` is recreated.
+#
+# The boundary conditions move too: a rule runs inside the fill kernel on GPU
+# storage, so an array it captures (a lookup table, an inflow profile) has to
+# be a device array. `adapt` rebuilds a closure with adapted captures, and the
+# `FunctionBC` method below passes that through; the built-in conditions hold
+# no arrays and come back unchanged. A custom rule type with array fields
+# defines its own `Adapt.adapt_structure` method, like any other struct.
+
+Adapt.adapt_structure(to, bc::FunctionBC) = FunctionBC(Adapt.adapt(to, bc.f))
 
 Adapt.adapt_structure(to, h::LocalHaloArray) =
-    LocalHaloArray(Adapt.adapt(to, h.data), halo_width(h), h.boundary_condition)
+    LocalHaloArray(Adapt.adapt(to, h.data), halo_width(h), Adapt.adapt(to, h.boundary_condition))
 
 Adapt.adapt_structure(to, h::HaloArray) =
     build_haloarray_from_data(Adapt.adapt(to, h.data), halo_width(h),
-                              h.topology, h.boundary_condition)
+                              h.topology, Adapt.adapt(to, h.boundary_condition))
 
 # ThreadedHaloArray: adapt each tile's storage. The outer `Vector` stays a host
 # vector — it just holds device-array handles, one per tile.
 function Adapt.adapt_structure(to, h::ThreadedHaloArray{T,N,A,Halo,Topo,BC,TB}) where {T,N,A,Halo,Topo,BC,TB}
     newdata = map(t -> Adapt.adapt(to, t), h.data)
-    return ThreadedHaloArray{T,N,eltype(newdata),Halo,Topo,BC,TB}(
-        newdata, h.tile_size, h.topology, h.boundary_condition, h.backend)
+    newbc = Adapt.adapt(to, h.boundary_condition)
+    return ThreadedHaloArray{T,N,eltype(newdata),Halo,Topo,typeof(newbc),TB}(
+        newdata, h.tile_size, h.topology, newbc, h.backend)
 end
 
 # Collections and Maybe wrappers: without these, Adapt's generic AbstractArray

@@ -90,7 +90,7 @@ function run_riemann(; K=400, N=3, t_end=3.0, cfl=0.5, report_at=(0.5, 1.0, 2.0,
     # one element per site, nodal values as the element type; the inflow
     # boundary (large ρ) keeps the initial state, the outflow boundary copies
     # its neighbour — both far from the waves for t ≤ 3
-    inflow = FunctionBC((ghost, edge, side, dim, hw, origin) -> (ghost .= Ref(SVector{P}(fill(U_L, P))); nothing))
+    inflow = FunctionBC((u, k) -> SVector{P}(fill(U_L, P)))
     u = LocalHaloArray(SVector{P,Float64}, (K,), 1;
         boundary_condition=((Repeating(), inflow),))
     g = cell_geometry(u, UniformAxis(0, ρ_MAX))

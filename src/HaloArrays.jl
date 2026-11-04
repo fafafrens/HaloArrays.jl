@@ -72,6 +72,13 @@ export HaloArray,
     Periodic,
     NoBoundaryCondition,
     FunctionBC,
+    FaceCells,
+    FaceGeometry,
+    Stencil,
+    prepare_boundary,
+    face_dim,
+    far,
+    global_index,
     Side,
     Dim
 
