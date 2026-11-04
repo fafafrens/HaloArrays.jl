@@ -112,8 +112,11 @@ A boundary condition from a per-cell function `f(u, k)` — the rule contract of
 global index) and `k` the ghost cell's distance from the wall; `f` returns the
 ghost value. A bare function in a boundary-condition tuple is wrapped
 automatically. It runs on every backend like a built-in — a loop on the CPU, a
-kernel on GPU storage (so `f` must be isbits: capture scalars, not host
-arrays), per tile, on the physical faces of an MPI `HaloArray`.
+kernel on GPU storage, per tile, on the physical faces of an MPI `HaloArray`.
+In a kernel `f` runs with its captures as kernel arguments: scalars, or arrays
+on the device — an array captured by `f` (a lookup table, an inflow profile)
+moves with the halo array under `adapt(CuArray, u)` and is converted to its
+device form at launch, like the storage itself.
 
 ```julia
 dirichlet(g)  = FunctionBC((u, k) -> 2g - u(k - 1))             # wall value g, any halo width

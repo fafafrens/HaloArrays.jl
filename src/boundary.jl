@@ -377,9 +377,12 @@ boundary_condition!(::AbstractSingleHaloArray, ::Side, ::Dim, ::NoBoundaryCondit
 # ============================================================
 
 function boundary_condition!(c::AbstractHaloCollection; threads::Bool=false)
-    foreach_field!(f -> boundary_condition!(f; threads), c)
+    # two constant calls rather than a closure over `threads`: the closure
+    # allocates 16 bytes per call under coverage tracking on Julia 1.10
+    threads ? foreach_field!(_boundary_condition_threaded!, c) : foreach_field!(boundary_condition!, c)
     return c
 end
+_boundary_condition_threaded!(f) = boundary_condition!(f; threads=true)
 
 # ============================================================
 # Coupled boundary conditions

@@ -41,6 +41,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   all-periodic `LocalHaloArray`. A refresh of a 48⁴ Float32 block on Metal goes
   from 0.17 ms to 0.06 ms (halo 2: 0.37 → 0.11 ms), bit-identical. CPU storage,
   and any run without the extension, keep the previous broadcasts.
+- `adapt` moves the boundary conditions with the halo array: a `FunctionBC`
+  adapts its captures (`Adapt.adapt_structure(to, ::FunctionBC)`), so a rule
+  that reads a lookup table or an inflow profile stored in an array runs in
+  the GPU fill kernel — the table captured on the host moves to the device
+  with `adapt(CuArray, u)`, a device table captured directly is converted to
+  its kernel form at launch. The built-in conditions hold no arrays and are
+  unchanged; a custom rule type with array fields defines its own
+  `Adapt.adapt_structure` method.
 
 ### Changed
 - **Breaking:** `FunctionBC(f)` takes the per-cell rule `f(u, k) -> value`

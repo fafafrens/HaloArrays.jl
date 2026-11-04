@@ -118,4 +118,24 @@ struct DirichletExt{T} <: HaloArrays.AbstractBoundaryCondition; value::T; end
     @test_throws ArgumentError LocalHaloArray(zeros(5, 8), 2, :periodic)
     @test_throws ArgumentError LocalHaloArray(JLArray(zeros(5, 8)), 2, :periodic)
     @test LocalHaloArray(zeros(5, 8), 2, :repeating) isa LocalHaloArray
+
+    # a rule capturing an array: the capture is adapted with the halo array
+    # (host table → device table) and again at launch (device table → kernel form)
+    table_rule(table) = FunctionBC((u, k) -> table[k] + u(0))
+    x = rand(12); x[3:10] .= 1:8                      # 8 interior cells, halo 2
+    ref = LocalHaloArray(copy(x), 2, ((table_rule([10.0, 20.0]), Repeating()),))
+    synchronize_halo!(ref)
+    @test parent(ref)[1:2] == [20.0 + 1, 10.0 + 1]      # storage index 1 is the ghost at distance 2
+    host_captured = LocalHaloArray(JLArray(copy(x)), 2, ((table_rule([10.0, 20.0]), Repeating()),))
+    moved = adapt(JLArray, host_captured)
+    @test moved.boundary_condition[1][1].f.table isa JLArray
+    @test moved.boundary_condition[1][2] === Repeating()
+    synchronize_halo!(moved)
+    @test Array(parent(moved)) == parent(ref)
+    device_captured = LocalHaloArray(JLArray(copy(x)), 2, ((table_rule(JLArray([10.0, 20.0])), Repeating()),))
+    synchronize_halo!(device_captured)
+    @test Array(parent(device_captured)) == parent(ref)
+    @test adapt(Array, moved).boundary_condition[1][1].f.table isa Vector{Float64}
+    th = adapt(JLArray, ThreadedHaloArray(LocalHaloArray(copy(x), 2, ((table_rule([10.0, 20.0]), Repeating()),)); dims=(2,)))
+    @test th.boundary_condition[1][1].f.table isa JLArray
 end

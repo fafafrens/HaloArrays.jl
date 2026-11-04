@@ -260,8 +260,12 @@ u = LocalHaloArray(Float64, (64, 64), 1;
 ```
 
 One method runs everywhere: a loop over the face on the CPU, a kernel on GPU
-storage (the condition must then be isbits — scalars, not host arrays), per
-tile on a `ThreadedHaloArray`, on the physical faces of an MPI `HaloArray`.
+storage, per tile on a `ThreadedHaloArray`, on the physical faces of an MPI
+`HaloArray`. In a kernel the condition travels as a kernel argument: scalar
+fields and captures as they are, an array it holds (a lookup table, an inflow
+profile) as a device array — `adapt(CuArray, u)` moves the conditions with the
+storage (a `FunctionBC` adapts its captures; a custom type with array fields
+defines its own `Adapt.adapt_structure`).
 `global_index(u)` gives the ghost cell's global index for position-dependent
 rules. See [`AbstractBoundaryCondition`](@ref) and [`FaceCells`](@ref).
 
