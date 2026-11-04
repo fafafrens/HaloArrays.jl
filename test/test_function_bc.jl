@@ -1,6 +1,6 @@
 using HaloArrays
 using Test
-import HaloArrays: _reflect_into!, _repeating_into!, ghost_origin
+import HaloArrays: ghost_origin
 
 # Collect every physical-boundary ghost value (interior span in the off-axis dims),
 # so two backends over the same global domain can be compared.
@@ -24,17 +24,21 @@ end
 
     @testset "reproduces built-ins bit-for-bit (Local, hw=$hw)" for hw in (1, 2)
         data = reshape(collect(1.0:64.0), 8, 8)
-        # Reflecting via the shared kernel, fed the edge (send) view
+        # Reflecting on the slab: the ghost band is the edge band reversed along d
         ub = LocalHaloArray(Float64, (8, 8), hw; boundary_condition = Reflecting())
         uf = LocalHaloArray(Float64, (8, 8), hw;
-                boundary_condition = FunctionBC((g, e, s, d, h, o) -> _reflect_into!(g, e, d, 1)))
+                boundary_condition = FunctionBC((g, e, s, d, h, o) -> (g .= reverse(e; dims = typeof(d).parameters[1]); nothing)))
         interior_view(ub) .= data; interior_view(uf) .= data
         boundary_condition!(ub); boundary_condition!(uf)
         @test parent(uf) == parent(ub)
-        # Repeating
+        # Repeating on the slab: every ghost takes the wall cell of the edge band
         rb = LocalHaloArray(Float64, (8, 8), hw; boundary_condition = Repeating())
         rf = LocalHaloArray(Float64, (8, 8), hw;
-                boundary_condition = FunctionBC((g, e, s, d, h, o) -> _repeating_into!(g, e, s, d)))
+                boundary_condition = FunctionBC((g, e, s, d, h, o) -> begin
+                    D = typeof(d).parameters[1]
+                    w = s isa Side{1} ? 1 : size(e, D)
+                    g .= selectdim(e, D, w:w); nothing
+                end))
         interior_view(rb) .= data; interior_view(rf) .= data
         boundary_condition!(rb); boundary_condition!(rf)
         @test parent(rf) == parent(rb)

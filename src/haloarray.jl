@@ -6,10 +6,32 @@ refreshed (by [`boundary_condition!`](@ref) / [`synchronize_halo!`](@ref)).
 
 Concrete conditions: [`Periodic`](@ref), [`Repeating`](@ref), [`Mirror`](@ref)
 (constructed by [`Reflecting`](@ref) and [`Antireflecting`](@ref)),
-[`Extrapolation`](@ref), [`NoBoundaryCondition`](@ref), [`FunctionBC`](@ref).
-A condition is given per `(dimension, side)`; constructors also accept the
-symbols `:periodic`, `:repeating`, `:reflecting`, `:antireflecting`,
-`:extrapolating`.
+[`Extrapolation`](@ref), [`NoBoundaryCondition`](@ref), [`CellBC`](@ref),
+[`FunctionBC`](@ref). A condition is given per `(dimension, side)`; constructors
+also accept the symbols `:periodic`, `:repeating`, `:reflecting`,
+`:antireflecting`, `:extrapolating`, and a bare function `(u, k) -> value`.
+
+# The rule contract
+
+A condition is a callable `bc(u, k)` returning the value of **one ghost cell**:
+`u` is a [`FaceCells`](@ref) — `u(j)` reads the interior cell `j` in from the
+wall (`u(0)` touches it), [`far`](@ref)`(u)(j)` the same from the opposite
+wall, [`global_index`](@ref)`(u)` is the ghost cell's global index — and `k` is
+the ghost cell's distance from the wall, `1:halo`. The built-ins are one line
+each (`Repeating` is `u(0)`, `Mirror(s)` is `s * u(k - 1)`, `Periodic` is
+`far(u)(k - 1)`), and a custom condition is a type with one method:
+
+```julia
+struct Dirichlet{T} <: AbstractBoundaryCondition; value::T; end
+(bc::Dirichlet)(u, k) = 2bc.value - u(0)          # the wall sits halfway between u(0) and the ghost
+```
+
+The same method runs on every backend: a loop over the face on the CPU, a
+kernel on GPU storage (through the KernelAbstractions extension), per tile on a
+[`ThreadedHaloArray`](@ref), on the physical faces of an MPI [`HaloArray`](@ref).
+Rules read interior cells only, so the fill is order-free. Two conditions are
+not rules: [`NoBoundaryCondition`](@ref) (leave the ghosts alone) and
+[`FunctionBC`](@ref) (a function on the whole face slab).
 """
 abstract type AbstractBoundaryCondition end
 
@@ -400,18 +422,6 @@ the cells a halo exchange (or a boundary condition) writes. Same shape as
 @inline edge_view(arr::AbstractArray, s::Side, ::Dim{D}, halo::Int) where {D} =
     _halo_window_view(_send_window(s, size(arr, D), halo), arr, D, halo)
 
-# Interior band of width `w` adjacent to the (side, dim) wall: `edge_view` with a width other
-# than the halo (an extrapolation of order p reads w = p + 1 cells). Cell `1` of the band is
-# nearest the wall on side 1, cell `w` on side 2, like the edge band.
-@inline _band_window(::Side{1}, sd::Int, halo::Int, w::Int) = (halo+1):(halo+w)
-@inline _band_window(::Side{2}, sd::Int, halo::Int, w::Int) = (sd-halo-w+1):(sd-halo)
-@inline function _storage_band_view(arr::AbstractArray, s::Side, ::Dim{D}, halo::Int, w::Int) where {D}
-    n = size(arr, D) - 2halo
-    n >= w || throw(ArgumentError("boundary condition needs $w interior cells along dimension $D, the interior has $n"))
-    return _halo_window_view(_band_window(s, size(arr, D), halo, w), arr, D, halo)
-end
-@inline _band_view(h::AbstractSingleHaloArray, s::Side, d::Dim, w::Int, ::Nothing) =
-    _storage_band_view(parent(h), s, d, halo_width(h), w)
 @inline ghost_view(arr::AbstractArray, s::Side, ::Dim{D}, halo::Int) where {D} =
     _halo_window_view(_recv_window(s, size(arr, D), halo), arr, D, halo)
 

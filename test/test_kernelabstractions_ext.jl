@@ -4,6 +4,9 @@ using JLArrays            # GPUArrays' CPU reference backend: a KernelAbstractio
 using KernelAbstractions
 const KA = KernelAbstractions
 
+struct DirichletExt{T} <: HaloArrays.AbstractBoundaryCondition; value::T; end
+(bc::DirichletExt)(u, k) = 2bc.value - u(0)
+
 @testset "KernelAbstractions extension: GPU face copies" begin
     # JLArray storage must take the kernel path for these tests to mean anything
     @test !(KA.get_backend(JLArray(zeros(2))) isa KA.CPU)
@@ -30,6 +33,17 @@ const KA = KernelAbstractions
     @test !HaloArrays._fused_periodic_fill!(dev)
     synchronize_halo!(dev)
     @test Array(parent(dev)) == parent(ref)
+
+    # rules on the device: built-ins, a custom type and a closure, vs the CPU fill
+    for (dims, h) in (((7,), 2), ((6, 5), 1), ((4, 5, 6), 2))
+        x = rand(dims .+ 2h...)
+        bcr = ntuple(d -> d == 1 ? (Mirror(-1), Extrapolation(2)) :
+                          d == 2 ? (Repeating(), DirichletExt(0.5)) :
+                                   ((u, k) -> u(0) + 0.1k, Periodic()), length(dims))
+        ref = LocalHaloArray(copy(x), h, bcr); synchronize_halo!(ref)
+        dev = LocalHaloArray(JLArray(copy(x)), h, bcr); synchronize_halo!(dev)
+        @test Array(parent(dev)) ≈ parent(ref)
+    end
 
     # slab copy between a view and a dense buffer, both directions, and the shape check
     a = JLArray(rand(6, 7))

@@ -7,6 +7,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- The rule contract for boundary conditions: a condition is callable as
+  `bc(u, k)` and returns one ghost cell's value, `u` a `FaceCells` accessor
+  (`u(j)` the interior cell `j` in from the wall, `far(u)` the same from the
+  opposite wall, `global_index(u)` the ghost cell's global index) and `k` the
+  ghost cell's distance from the wall. The built-ins are one line each; a
+  custom condition is a type with one call method, or a bare function
+  `(u, k) -> value` in the condition tuple (wrapped as `CellBC`). One method
+  runs on the CPU, in a kernel on GPU storage, per tile and on MPI physical
+  faces.
 - `HaloArraysKernelAbstractionsExt` (loads with KernelAbstractions and
   GPUArraysCore, i.e. with any GPU array package): the face copies of
   `synchronize_halo!` on GPU storage run as kernels instead
@@ -15,6 +24,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   all-periodic `LocalHaloArray`. A refresh of a 48⁴ Float32 block on Metal goes
   from 0.17 ms to 0.06 ms (halo 2: 0.37 → 0.11 ms), bit-identical. CPU storage,
   and any run without the extension, keep the previous broadcasts.
+
+### Changed
+- `Mirror`, `Repeating` and `Extrapolation` are implemented as rules (one loop
+  over the face per condition) instead of broadcasts on reversed / sliced
+  views; same values, integer-exact extrapolation weights as before. The slab
+  helpers `_reflect_into!`, `_repeating_into!`, `_extrapolate_into!` and
+  `_band_view` are gone (internal).
 
 ### Fixed
 - MPI `HaloArray` on GPU storage: the sends read device memory directly, and

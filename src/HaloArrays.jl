@@ -71,7 +71,12 @@ export HaloArray,
     Extrapolation,
     Periodic,
     NoBoundaryCondition,
+    CellBC,
     FunctionBC,
+    FaceCells,
+    face_dim,
+    far,
+    global_index,
     Side,
     Dim
 

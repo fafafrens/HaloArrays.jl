@@ -241,7 +241,31 @@ HaloArray(Float64, (64, 64), 1, topology;
 Custom boundary conditions can be passed as a subtype or instance of
 `AbstractBoundaryCondition`.
 
-### Custom per-field conditions with `FunctionBC`
+### Custom conditions as rules
+
+A boundary condition is a rule for one ghost cell: a callable `bc(u, k)` that
+returns the ghost value, where `u(j)` reads the interior cell `j` in from the
+wall (`u(0)` touches it) and `k` is the ghost cell's distance from the wall.
+The built-ins are written this way — `Repeating` is `u(0)`, `Mirror(s)` is
+`s * u(k - 1)`, `Periodic` is `far(u)(k - 1)` — and so is a custom one, as a
+type with one method or as a bare function in the condition tuple:
+
+```julia
+struct Dirichlet{T} <: AbstractBoundaryCondition; value::T; end
+(bc::Dirichlet)(u, k) = 2bc.value - u(0)            # wall halfway between u(0) and the ghost
+
+neumann(q, Δ) = (u, k) -> u(0) + k * Δ * q           # fixed outward flux, any halo width
+u = LocalHaloArray(Float64, (64, 64), 1;
+        boundary_condition = ((Dirichlet(300.0), neumann(0.0, dx)), (:periodic, :periodic)))
+```
+
+One method runs everywhere: a loop over the face on the CPU, a kernel on GPU
+storage (the condition must then be isbits — scalars, not host arrays), per
+tile on a `ThreadedHaloArray`, on the physical faces of an MPI `HaloArray`.
+`global_index(u)` gives the ghost cell's global index for position-dependent
+rules. See [`AbstractBoundaryCondition`](@ref) and [`FaceCells`](@ref).
+
+### Whole-slab conditions with `FunctionBC`
 
 For a one-off rule you don't want to make a type for, wrap a function in
 [`FunctionBC`](@ref). It runs inside `synchronize_halo!` like a built-in, on
@@ -278,8 +302,8 @@ inflow = FunctionBC() do g, e, s, d, hw, o
 end
 ```
 
-Three kinds, one mechanism: built-in singletons, `FunctionBC` (custom **per-field**),
-and coupled (**cross-field**, below).
+Three kinds: rules (built-in or custom, **per cell**), `FunctionBC` (custom,
+**per face slab**), and coupled (**cross-field**, below).
 
 ### Coupled boundary conditions
 
