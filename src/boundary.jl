@@ -17,6 +17,39 @@ using StaticArrays
 # ============================================================
 
 """
+    FaceGeometry
+
+One face of a block as the fill sees it, built once per face by
+[`boundary_condition!`](@ref): the ghost cells to write, the storage index of
+the interior cell touching the wall, the interior extent along the normal and
+the offset from storage to global indices. Type parameters: `N` dimensions,
+`D` the normal, `S` the side (1 low, 2 high), `H` the halo width. A prepared
+rule ([`prepare_boundary`](@ref)) is built from it.
+"""
+struct FaceGeometry{N,D,S,H,R}
+    ghosts::R                   # CartesianIndices of the face's ghost cells
+    wall::Int                   # storage index along D of the interior cell touching the wall
+    n::Int                      # interior cells along D
+    shift::CartesianIndex{N}    # global index = storage index + shift
+end
+
+function FaceGeometry(a::AbstractArray{T,N}, ::Side{S}, ::Dim{D}, ::Val{H},
+        origin::CartesianIndex{N}) where {T,N,S,D,H}
+    sd = size(a, D)
+    ghosts = CartesianIndices(ntuple(i -> i == D ? _recv_window(Side(S), sd, H) : (H+1):(size(a, i)-H), Val(N)))
+    wall = S == 1 ? H + 1 : sd - H
+    return FaceGeometry{N,D,S,H,typeof(ghosts)}(ghosts, wall, sd - 2H, origin - first(ghosts))
+end
+
+@inline face_dim(::FaceGeometry{N,D}) where {N,D} = D
+@inline face_side(::FaceGeometry{N,D,S}) where {N,D,S} = S
+@inline halo_width(::FaceGeometry{N,D,S,H}) where {N,D,S,H} = H
+@inline _into(::FaceGeometry{N,D,S}) where {N,D,S} = 3 - 2S            # +1 from the low wall, -1 from the high one
+@inline _far_wall(g::FaceGeometry) = g.wall + _into(g) * (g.n - 1)
+@inline _distance(g::FaceGeometry{N,D,S}, I::CartesianIndex) where {N,D,S} =
+    S == 1 ? g.wall - I[D] : I[D] - g.wall                             # ghost cell's distance from the wall, 1:H
+
+"""
     FaceCells
 
 The interior as seen from one ghost cell, handed to a boundary-condition rule
@@ -37,21 +70,21 @@ after inlining, `u(j)` is one indexed load.
 struct FaceCells{A,N,D}         # D: the face normal (static, so u(j) is one indexed load)
     a::A
     I::CartesianIndex{N}        # the ghost cell (storage index)
-    side::Int                   # 1 low, 2 high
-    wall::Int                   # storage index along d of the interior cell touching the wall
+    wall::Int                   # storage index along D of the interior cell touching the wall
     into::Int                   # +1 / -1: from the wall into the interior
-    n::Int                      # interior cells along d
+    n::Int                      # interior cells along D
     shift::CartesianIndex{N}    # global_index(u) = I + shift
 end
 
-@inline FaceCells(a::A, I::CartesianIndex{N}, ::Val{D}, side, wall, into, n, shift) where {A,N,D} =
-    FaceCells{A,N,D}(a, I, side, wall, into, n, shift)
+@inline FaceCells(a::A, g::FaceGeometry{N,D}, I::CartesianIndex{N}) where {A,N,D} =
+    FaceCells{A,N,D}(a, I, g.wall, _into(g), g.n, g.shift)
 
 @inline _setindex(I::CartesianIndex{N}, v, ::Val{D}) where {N,D} =
     CartesianIndex(ntuple(i -> i == D ? v : I[i], Val(N)))
 
-@inline (u::FaceCells{A,N,D})(j) where {A,N,D} =
-    @inbounds u.a[_setindex(u.I, u.wall + u.into * j, Val(D))]
+# the cell at storage index `i` along the normal, the ghost's coordinates elsewhere
+@inline _cell(u::FaceCells{A,N,D}, i) where {A,N,D} = @inbounds u.a[_setindex(u.I, i, Val(D))]
+@inline (u::FaceCells)(j) = _cell(u, u.wall + u.into * j)
 
 """
     face_dim(u::FaceCells) -> Int
@@ -70,7 +103,7 @@ boundary of the domain (a periodic face is exchanged, not filled), so `far` is
 meaningful on single-block storage only.
 """
 @inline far(u::FaceCells{A,N,D}) where {A,N,D} =
-    FaceCells{A,N,D}(u.a, u.I, 3 - u.side, u.wall + u.into * (u.n - 1), -u.into, u.n, u.shift)
+    FaceCells{A,N,D}(u.a, u.I, u.wall + u.into * (u.n - 1), -u.into, u.n, u.shift)
 
 """
     global_index(u::FaceCells) -> CartesianIndex
@@ -81,65 +114,98 @@ included), for position-dependent rules.
 @inline global_index(u::FaceCells) = u.I + u.shift
 
 # ---- the built-ins as rules ------------------------------------
+# These are the definitions; the fill does not call them directly but through
+# `prepare_boundary`, which lowers each to a `Stencil` (same values, one shared
+# evaluator). They remain callable for a user rule that composes them.
 @inline (::Periodic)(u::FaceCells, k)   = far(u)(k - 1)
 @inline (bc::Mirror)(u::FaceCells, k)   = bc.sign * u(k - 1)
 @inline (::Repeating)(u::FaceCells, k)  = u(0)
 
 # Polynomial extrapolation of order p: the degree-p Lagrange polynomial through
 # the p + 1 interior cells nearest the wall (distances 0..p), evaluated at -k.
-# At integer points the weights are integers (the binomial coefficients of
-# Newton's forward-difference formula), computed in integer arithmetic so the
-# rule is exact for integer arrays and runs in a kernel; p = 0 is Repeating.
-@inline function _lagrange_weight(j::Int, p::Int, x::Int)
-    num = 1; den = 1
-    for i in 0:p
-        i == j && continue
-        num *= x - i
-        den *= j - i
-    end
-    return num ÷ den
+# At integer points the weights are integers, L_j(-k) = (-1)^j C(k+p, p-j) C(k+j-1, j)
+# (Newton's forward-difference form), so the rule is exact for integer arrays;
+# p = 0 is Repeating. Computed from binomials with overflow checking — the
+# plain product of numerator and denominator overflows long before the
+# coefficient itself does.
+@inline function _lagrange_weight(j::Int, p::Int, k::Int)
+    w = Base.checked_mul(binomial(k + p, p - j), binomial(k + j - 1, j))
+    return isodd(j) ? -w : w
 end
 @inline function (bc::Extrapolation)(u::FaceCells, k)
     p = bc.order
-    v = _lagrange_weight(0, p, -k) * u(0)
+    v = _lagrange_weight(0, p, k) * u(0)
     for j in 1:p
-        v += _lagrange_weight(j, p, -k) * u(j)
+        v += _lagrange_weight(j, p, k) * u(j)
     end
     return v
 end
-
-# Per-face specialisation hook: `_face_rule(bc, Val(halo))` returns the callable
-# the fill applies on that face. The default is the condition itself; a
-# condition whose rule has per-face setup (tables that depend on k ≤ halo only)
-# returns a prepared rule instead, built once per face rather than per cell.
-@inline _face_rule(bc, ::Val) = bc
-
-# Extrapolation: the weights depend on (k, j) only, so tabulate them per face.
-# The table has a fixed capacity (orders up to `_TABLE_ORDER`) so that building
-# it needs no runtime-to-type conversion of the order (which is a field, not a
-# type parameter) — no dynamic dispatch, no allocation; higher orders take the
-# per-cell rule above.
-const _TABLE_ORDER = 7
-struct ExtrapolationTable{H}
-    order::Int
-    w::NTuple{H,NTuple{_TABLE_ORDER + 1,Int}}   # w[k][j+1] = L_j(order, -k), zero past the order
-end
-@inline function (t::ExtrapolationTable)(u::FaceCells, k)
-    @inbounds wk = t.w[k]
-    v = wk[1] * u(0)
-    for j in 1:t.order
-        @inbounds v += wk[j + 1] * u(j)
-    end
-    return v
-end
-@inline _extrapolation_table(p::Int, ::Val{H}) where {H} =
-    ExtrapolationTable{H}(p, ntuple(k -> ntuple(j -> j - 1 <= p ? _lagrange_weight(j - 1, p, -k) : 0,
-                                                Val(_TABLE_ORDER + 1)), Val(H)))
 
 # FunctionBC: the rule as a plain function (see the docstring in haloarray.jl).
 @inline (bc::FunctionBC)(u::FaceCells, k) = bc.f(u, k)
 
-# Interior cells a rule needs along the normal (checked once per face, so a
+# ---- prepared rules --------------------------------------------
+"""
+    prepare_boundary(bc, g::FaceGeometry) -> rule
+
+The rule the fill applies on face `g`: by default the condition itself
+(`bc(u, k)`), for the built-ins a [`Stencil`](@ref) — the weighted interior
+cells of each ghost layer, tabulated once per face. Built once per face per
+refresh, so a condition may do per-face work here (tables depending on the
+halo width and the geometry) rather than per cell.
+"""
+@inline prepare_boundary(bc, ::FaceGeometry) = bc
+
+"""
+    Stencil{H,C,W}
+
+A linear rule tabulated per ghost layer: ghost layer `k` (distance `1:H` from
+the wall) is `Σ_t w[k][t] · a[idx[k][t]]`, `idx` a storage index along the face
+normal, `C` the capacity (entries past `count` are unused). `Periodic`,
+`Repeating`, `Mirror` and `Extrapolation` lower to it in
+[`prepare_boundary`](@ref), so every built-in runs through one evaluator —
+`Periodic` is one entry at the opposite wall, `Extrapolation(p)` is `p + 1`
+entries with the Lagrange weights.
+"""
+struct Stencil{H,C,W}
+    count::Int
+    idx::NTuple{H,NTuple{C,Int}}
+    w::NTuple{H,NTuple{C,W}}
+end
+const _STENCIL_CAPACITY = 8
+
+@inline function (s::Stencil)(u::FaceCells, k)
+    @inbounds ik = s.idx[k]
+    @inbounds wk = s.w[k]
+    v = wk[1] * _cell(u, ik[1])
+    for t in 2:s.count
+        @inbounds v += wk[t] * _cell(u, ik[t])
+    end
+    return v
+end
+
+# One entry per layer: index `at(k)` with weight `w`.
+@inline _stencil1(::Val{H}, at::F, w) where {H,F} =
+    Stencil{H,_STENCIL_CAPACITY,typeof(w)}(1,
+        ntuple(k -> ntuple(t -> t == 1 ? at(k) : 0, Val(_STENCIL_CAPACITY)), Val(H)),
+        ntuple(k -> ntuple(t -> t == 1 ? w : zero(w), Val(_STENCIL_CAPACITY)), Val(H)))
+
+@inline prepare_boundary(::Repeating, g::FaceGeometry) =
+    _stencil1(Val(halo_width(g)), k -> g.wall, 1)
+@inline prepare_boundary(bc::Mirror, g::FaceGeometry) =
+    _stencil1(Val(halo_width(g)), k -> g.wall + _into(g) * (k - 1), Int(bc.sign))
+@inline prepare_boundary(::Periodic, g::FaceGeometry) =
+    _stencil1(Val(halo_width(g)), k -> _far_wall(g) - _into(g) * (k - 1), 1)
+@inline function prepare_boundary(bc::Extrapolation, g::FaceGeometry)
+    p = bc.order
+    p < _STENCIL_CAPACITY || throw(ArgumentError(
+        "Extrapolation order $p exceeds the stencil capacity ($(_STENCIL_CAPACITY) cells, order ≤ $(_STENCIL_CAPACITY - 1))"))
+    return Stencil{halo_width(g),_STENCIL_CAPACITY,Int}(p + 1,
+        ntuple(k -> ntuple(t -> g.wall + _into(g) * (t - 1), Val(_STENCIL_CAPACITY)), Val(halo_width(g))),
+        ntuple(k -> ntuple(t -> t - 1 <= p ? _lagrange_weight(t - 1, p, k) : 0, Val(_STENCIL_CAPACITY)), Val(halo_width(g))))
+end
+
+# Interior cells a rule reads along the normal (checked once per face, so a
 # short interior fails loudly instead of reading ghosts).
 @inline _cells_needed(::AbstractBoundaryCondition) = 1
 @inline _cells_needed(bc::Extrapolation) = bc.order + 1
@@ -151,55 +217,29 @@ end
 
 @inline function boundary_condition!(h::AbstractSingleHaloArray, s::Side, d::Dim,
         bc::AbstractBoundaryCondition, tile=nothing)
-    # the halo width is a type parameter of `h`: pass it as a Val, so the fill
-    # specialises on it without relying on constant propagation
-    _fill_face!(_tile_storage(h, tile), bc, s, d, Val(halo_width(h)), ghost_origin(h, s, d, tile))
+    a = _tile_storage(h, tile)
+    # the halo width is a type parameter of `h`: passed as a Val, the geometry
+    # and the stencil specialise on it without relying on constant propagation
+    g = FaceGeometry(a, s, d, Val(halo_width(h)), ghost_origin(h, s, d, tile))
+    isempty(g.ghosts) && return nothing          # halo width 0, or an empty block: nothing to fill
+    g.n >= _cells_needed(bc) || throw(ArgumentError(
+        "boundary condition needs $(_cells_needed(bc)) interior cells along dimension $(face_dim(g)), the interior has $(g.n)"))
+    _traverse!(_face_backend(a), a, prepare_boundary(bc, g), g)
     return nothing
 end
 
-function _fill_face!(a::AbstractArray{T,N}, bc, ::Side{S}, ::Dim{D}, ::Val{hw},
-        origin::CartesianIndex{N}) where {T,N,S,D,hw}
-    sd = size(a, D)
-    n  = sd - 2hw
-    n >= _cells_needed(bc) || throw(ArgumentError(
-        "boundary condition needs $(_cells_needed(bc)) interior cells along dimension $D, the interior has $n"))
-    ghosts = CartesianIndices(ntuple(i -> i == D ? _recv_window(Side(S), sd, hw) : (hw+1):(size(a, i)-hw), Val(N)))
-    isempty(ghosts) && return nothing
-    wall  = S == 1 ? hw + 1 : sd - hw
-    into  = S == 1 ? 1 : -1
-    shift = origin - first(ghosts)
-    _launch_fill!(a, bc, ghosts, Val(D), S, wall, into, n, shift, Val(hw))
-    return nothing
-end
-
-# `_face_rule` must be type-stable (one concrete rule type per condition type);
-# a condition with a runtime choice of rule branches here instead, so that each
-# branch is a concrete launch.
-@inline _launch_fill!(a, bc, ghosts, d::Val, side, wall, into, n, shift, hw::Val) =
-    _fill_face_cells!(_face_backend(a), a, _face_rule(bc, hw), ghosts, d, side, wall, into, n, shift)
-@inline function _launch_fill!(a, bc::Extrapolation, ghosts, d::Val, side, wall, into, n, shift, hw::Val)
-    if bc.order <= _TABLE_ORDER
-        _fill_face_cells!(_face_backend(a), a, _extrapolation_table(bc.order, hw), ghosts, d, side, wall, into, n, shift)
-    else
-        _fill_face_cells!(_face_backend(a), a, bc, ghosts, d, side, wall, into, n, shift)
-    end
-    return nothing
-end
-
-# One ghost cell: its distance from the wall and its accessor, then the rule.
-@inline function _fill_cell!(a, rule, I::CartesianIndex, ::Val{D}, side, wall, into, n, shift) where {D}
-    k = side == 1 ? wall - I[D] : I[D] - wall
-    u = FaceCells(a, I, Val(D), side, wall, into, n, shift)
-    @inbounds a[I] = rule(u, k)
+# One ghost cell: its accessor and distance, then the rule.
+@inline function _fill_cell!(a, rule, g::FaceGeometry, I::CartesianIndex)
+    @inbounds a[I] = rule(FaceCells(a, g, I), _distance(g, I))
     return nothing
 end
 
 # Seam: the KernelAbstractions extension launches the loop below as a kernel on
 # GPU storage (`_face_backend` returns the backend there); host storage loops.
 @inline _face_backend(a) = nothing
-function _fill_face_cells!(::Nothing, a, rule, ghosts, d::Val, side, wall, into, n, shift)
-    @inbounds for I in ghosts
-        _fill_cell!(a, rule, I, d, side, wall, into, n, shift)
+function _traverse!(::Nothing, a, rule, g::FaceGeometry)
+    @inbounds for I in g.ghosts
+        _fill_cell!(a, rule, g, I)
     end
     return nothing
 end
@@ -263,18 +303,16 @@ end
 
 # ---- Periodic -------------------------------------------------
 # HaloArray (MPI exchange) and ThreadedHaloArray (inter-tile exchange) already
-# wrap the edges → no-op. LocalHaloArray must physically wrap the interior data:
-# a slab copy rather than the rule, since it is one contiguous copy per face
-# (and one kernel, or the fused all-faces kernel, through the extension).
+# wrap the edges → no-op. LocalHaloArray wraps the interior data through the
+# periodic stencil (or, on GPU storage with every face periodic, the fused
+# kernel of the extension).
 boundary_condition!(::Union{HaloArray,ThreadedHaloArray}, ::Side, ::Dim, ::Periodic, tile=nothing) = nothing
-@inline boundary_condition!(halo::LocalHaloArray, ::Side{S}, d::Dim, ::Periodic, tile=nothing) where {S} =
-    (_copy_slab!(ghost_view(halo, Side(S), d), edge_view(halo, Side(3 - S), d)); nothing)
 
 # ============================================================
 # GPU seams
 #
-# The face copies — the periodic ghost fill above and the exchange-buffer
-# pack/unpack in mpi_support.jl — are broadcasts on views. On GPU storage a
+# The exchange-buffer pack/unpack copies in mpi_support.jl are broadcasts on
+# views. On GPU storage a
 # broadcast on two SubArrays costs ~20 µs of launch work per face while the
 # faces carry almost no data, so a refresh is launch-bound (0.17 ms for the 8
 # faces of a 48⁴ block on Metal). The KernelAbstractions extension
@@ -290,8 +328,9 @@ boundary_condition!(::Union{HaloArray,ThreadedHaloArray}, ::Side, ::Dim, ::Perio
 """
     _copy_slab!(dest, src)
 
-`dest .= src` for a face slab (a ghost/edge view of the storage, or an exchange
-buffer). The KernelAbstractions extension turns it into one kernel on GPU storage.
+`dest .= src` for an exchange slab (a ghost/edge view of the storage, or an
+exchange buffer). The KernelAbstractions extension turns it into one kernel on
+GPU storage.
 """
 @inline _copy_slab!(dest, src) = _copy_slab!(_slab_backend(dest, src), dest, src)
 @inline _slab_backend(dest, src) = nothing

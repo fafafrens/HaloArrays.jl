@@ -23,7 +23,7 @@ each (`Repeating` is `u(0)`, `Mirror(s)` is `s * u(k - 1)`, `Periodic` is
 
 ```julia
 struct Dirichlet{T} <: AbstractBoundaryCondition; value::T; end
-(bc::Dirichlet)(u, k) = 2bc.value - u(0)          # the wall sits halfway between u(0) and the ghost
+(bc::Dirichlet)(u, k) = 2bc.value - u(k - 1)      # reflection about the wall value, every ghost layer
 ```
 
 The same method runs on every backend: a loop over the face on the CPU, a
@@ -116,7 +116,7 @@ kernel on GPU storage (so `f` must be isbits: capture scalars, not host
 arrays), per tile, on the physical faces of an MPI `HaloArray`.
 
 ```julia
-dirichlet(g)  = FunctionBC((u, k) -> 2g - u(0))                 # wall value g, any halo width
+dirichlet(g)  = FunctionBC((u, k) -> 2g - u(k - 1))             # wall value g, any halo width
 neumann(q, Δ) = (u, k) -> u(0) + k * Δ * q                       # outward flux q (bare function)
 inflow(prof)  = (u, k) -> prof(Tuple(global_index(u)))           # position-dependent
 u = LocalHaloArray(Float64, (64, 64), 1;

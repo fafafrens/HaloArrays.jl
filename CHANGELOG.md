@@ -13,7 +13,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   opposite wall, `global_index(u)` the ghost cell's global index) and `k` the
   ghost cell's distance from the wall. The built-ins are one line each; a
   custom condition is a type with one call method, or a bare function
-  `(u, k) -> value` in the condition tuple (wrapped as `FunctionBC`). One method
+  `(u, k) -> value` in the condition tuple (wrapped as `FunctionBC`). The
+  built-ins lower to a `Stencil` in `prepare_boundary(bc, ::FaceGeometry)`
+  (weighted interior cells per ghost layer, built once per face), so all four
+  run through one evaluator; a custom rule is called as it is. One method
   runs on the CPU, in a kernel on GPU storage, per tile and on MPI physical
   faces.
 - `HaloArraysKernelAbstractionsExt` (loads with KernelAbstractions and
@@ -32,11 +35,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`(u, k) -> 2g - u(0)` for a Dirichlet wall, `(u, k) -> value(Tuple(global_index(u)))`
   for a position-dependent one); `grid.jl`'s axis continuation and the DG
   example are converted.
-- `Mirror`, `Repeating` and `Extrapolation` are implemented as rules (one loop
-  over the face per condition) instead of broadcasts on reversed / sliced
-  views; same values, integer-exact extrapolation weights as before. The slab
+- `Mirror`, `Repeating`, `Extrapolation` and (on `LocalHaloArray`) `Periodic`
+  are implemented as stencils (one traversal of the face per condition) instead
+  of broadcasts on reversed / sliced views; same values, integer-exact
+  extrapolation weights. The weights are computed from binomials with overflow
+  checking (the previous product form overflowed for high orders). The slab
   helpers `_reflect_into!`, `_repeating_into!`, `_extrapolate_into!` and
   `_band_view` are gone (internal).
+- **Breaking:** `Extrapolation` orders are limited to 7 (an 8-cell stencil);
+  `synchronize_halo!` throws `ArgumentError` above that.
 
 ### Fixed
 - MPI `HaloArray` on GPU storage: the sends read device memory directly, and

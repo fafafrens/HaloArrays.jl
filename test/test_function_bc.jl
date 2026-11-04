@@ -48,9 +48,9 @@ end
         for d in 1:2, s in 1:2
             @test all(ghost_view(u, Side(s), Dim(d)) .== 9.0)
         end
-        # Dirichlet wall value g: the wall sits halfway between u(0) and the ghost
+        # Dirichlet wall value g: reflection about the wall value
         g = 3.0
-        ud = LocalHaloArray(Float64, (8, 8), 1; boundary_condition = FunctionBC((u, k) -> 2g - u(0)))
+        ud = LocalHaloArray(Float64, (8, 8), 1; boundary_condition = FunctionBC((u, k) -> 2g - u(k - 1)))
         interior_view(ud) .= 1.0; boundary_condition!(ud)
         @test all(ghost_view(ud, Side(1), Dim(1)) .== 5.0)
         # zero-flux Neumann (ghost = wall cell) == Repeating at hw=1

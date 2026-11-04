@@ -64,18 +64,18 @@ end
 
 # ---- one face of a rule = one kernel -------------------------------------
 # The same `_fill_cell!` as the CPU loop, one work item per ghost cell: the
-# rule `bc` (an isbits condition) runs on the device.
+# prepared rule (an isbits stencil or condition) runs on the device.
 
 HaloArrays._face_backend(a::AbstractGPUArray) = KA.get_backend(a)
 HaloArrays._face_backend(a::SubArray) = HaloArrays._face_backend(parent(a))   # view storage, e.g. a stepped view of a GPU array
 
-@kernel function _fill_face_kernel!(a, rule, first_ghost, d::Val, side, wall, into, n, shift)
+@kernel function _fill_face_kernel!(a, rule, g, first_ghost)
     J = @index(Global, Cartesian)
-    HaloArrays._fill_cell!(a, rule, first_ghost + J - oneunit(J), d, side, wall, into, n, shift)
+    HaloArrays._fill_cell!(a, rule, g, first_ghost + J - oneunit(J))
 end
 
-function HaloArrays._fill_face_cells!(backend::KA.Backend, a, rule, ghosts, d::Val, side, wall, into, n, shift)
-    _fill_face_kernel!(backend)(a, rule, first(ghosts), d, side, wall, into, n, shift; ndrange=size(ghosts))
+function HaloArrays._traverse!(backend::KA.Backend, a, rule, g::HaloArrays.FaceGeometry)
+    _fill_face_kernel!(backend)(a, rule, g, first(g.ghosts); ndrange=size(g.ghosts))
     return nothing
 end
 

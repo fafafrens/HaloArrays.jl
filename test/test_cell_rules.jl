@@ -7,7 +7,7 @@ using StaticArrays
 struct DirichletRule{T} <: AbstractBoundaryCondition
     value::T
 end
-(bc::DirichletRule)(u, k) = 2bc.value - u(0)
+(bc::DirichletRule)(u, k) = 2bc.value - u(k - 1)
 
 # the reference: the same rule written out on the storage, side by side
 function _reference_fill!(a::AbstractArray{T,N}, bc, s, d, hw) where {T,N}
@@ -34,7 +34,7 @@ end
             (Mirror(-1),       (k, c) -> -c(k - 1)),
             (Extrapolation(1), (k, c) -> (1 + k) * c(0) - k * c(1)),
             (Extrapolation(2), (k, c) -> (1 + k) * (2 + k) / 2 * c(0) - k * (2 + k) * c(1) + k * (1 + k) / 2 * c(2)),
-            (DirichletRule(0.25), (k, c) -> 0.5 - c(0)),
+            (DirichletRule(0.25), (k, c) -> 0.5 - c(k - 1)),
         )
         for (bc, formula) in rules, d in 1:length(dims), s in 1:2
             bcs = ntuple(i -> i == d ? (s == 1 ? (bc, NoBoundaryCondition()) : (NoBoundaryCondition(), bc)) :
@@ -52,6 +52,41 @@ end
         u = LocalHaloArray(copy(x), 2, (u, k) -> far(u)(k - 1)); synchronize_halo!(u)
         @test parent(u) == parent(ref)
         @test u.boundary_condition[1][1] isa FunctionBC
+        # the built-ins lower to stencils; a custom rule stays itself
+        g = FaceGeometry(parent(ref), Side(1), Dim(1), Val(2), CartesianIndex(-1, 1))
+        @test prepare_boundary(Periodic(), g) isa Stencil
+        @test prepare_boundary(Extrapolation(3), g) isa Stencil
+        @test prepare_boundary(DirichletRule(1.0), g) isa DirichletRule
+    end
+
+    @testset "zero Dirichlet == Antireflecting on every ghost layer" begin
+        a = LocalHaloArray(Float64, (4,), 2; boundary_condition = Antireflecting())
+        d = LocalHaloArray(Float64, (4,), 2; boundary_condition = DirichletRule(0.0))
+        interior_view(a) .= 1:4; interior_view(d) .= 1:4
+        synchronize_halo!(a); synchronize_halo!(d)
+        @test parent(d) == parent(a) == [-2, -1, 1, 2, 3, 4, -4, -3]
+    end
+
+    @testset "extrapolation weights: exact, overflow-checked, capacity" begin
+        # order 7 on a degree-7 polynomial, halo 3: exact in Float64 and in Int
+        f(x) = sum(x^m for m in 0:7)
+        u = LocalHaloArray(Int, (10,), 3; boundary_condition = Extrapolation(7))
+        interior_view(u) .= f.(1:10); synchronize_halo!(u)
+        @test parent(u)[1:3] == f.(-2:0) && parent(u)[14:16] == f.(11:13)
+        # the weights of the base branch for a constant field sum to 1 on every layer
+        c = LocalHaloArray(Int, (12,), 4; boundary_condition = Extrapolation(7))
+        interior_view(c) .= 5; synchronize_halo!(c)
+        @test all(==(5), parent(c))
+        @test HaloArrays._lagrange_weight(0, 1, 1) == 2 && HaloArrays._lagrange_weight(1, 1, 1) == -1
+        @test_throws OverflowError HaloArrays._lagrange_weight(3, 7, 10^17)
+        @test_throws ArgumentError synchronize_halo!(LocalHaloArray(Float64, (12,), 1; boundary_condition = Extrapolation(8)))
+    end
+
+    @testset "zero halo width: nothing to fill, no error" begin
+        e = LocalHaloArray(Float64, (0,), 0; boundary_condition = Repeating())
+        @test synchronize_halo!(e) === e
+        z = LocalHaloArray(Float64, (5,), 0; boundary_condition = Extrapolation(1))
+        @test synchronize_halo!(z) === z
     end
 
     @testset "global_index: position-dependent rule, Local vs 2x2 Threaded" begin

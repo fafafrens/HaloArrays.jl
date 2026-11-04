@@ -252,7 +252,7 @@ type with one method or as a bare function in the condition tuple:
 
 ```julia
 struct Dirichlet{T} <: AbstractBoundaryCondition; value::T; end
-(bc::Dirichlet)(u, k) = 2bc.value - u(0)            # wall halfway between u(0) and the ghost
+(bc::Dirichlet)(u, k) = 2bc.value - u(k - 1)        # reflection about the wall value, every layer
 
 neumann(q, Δ) = (u, k) -> u(0) + k * Δ * q           # fixed outward flux, any halo width
 u = LocalHaloArray(Float64, (64, 64), 1;
@@ -265,12 +265,12 @@ tile on a `ThreadedHaloArray`, on the physical faces of an MPI `HaloArray`.
 `global_index(u)` gives the ghost cell's global index for position-dependent
 rules. See [`AbstractBoundaryCondition`](@ref) and [`FaceCells`](@ref).
 
-`FunctionBC(f)` is the same thing with a name: `FunctionBC((u, k) -> 2u₀ - u(0))`.
+`FunctionBC(f)` is the same thing with a name: `FunctionBC((u, k) -> 2u₀ - u(k - 1))`.
 The standard conditions are short, side-independent one-liners, geometry-agnostic
 (pass any grid spacing `Δ` yourself):
 
 ```julia
-dirichlet(u₀)     = (u, k) -> 2u₀ - u(0)                              # wall value u₀
+dirichlet(u₀)     = (u, k) -> 2u₀ - u(k - 1)                          # wall value u₀ (reflection about it)
 neumann(q, Δ)     = (u, k) -> u(0) + k * Δ * q                        # outward normal flux q
 robin(α, β, γ, Δ) = (u, k) -> (γ - (α/2 - β/Δ) * u(0)) / (α/2 + β/Δ)  # α·u + β·∂u/∂n = γ (halo 1)
 ```
