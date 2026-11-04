@@ -40,8 +40,7 @@ end
 @inline _elt_abs2(x)                = abs2(x)
 @inline _elt_dot(x::Number, y::Number)               = conj(x) * y
 @inline _elt_dot(x::StaticArray, y::StaticArray)     = sum(map(_elt_dot, x, y))
-@inline _elt_dot(x::AbstractArray, y::AbstractArray) = mapreduce(_elt_dot, +, x, y)
-@inline _elt_dot(x, y)                               = LinearAlgebra.dot(x, y)
+@inline _elt_dot(x, y)                               = LinearAlgebra.dot(x, y)   # array cells too: `dot` recurses, allocation-free
 # Scalar accumulator zero of ‖·‖² / ⟨·,·⟩ for a (possibly vector-valued) element
 # type — `Float64` for an `SVector{N,Float64}`, unchanged for numeric elements.
 @inline _sqnorm_zero(::Type{T}) where {T} = zero(Base.promote_op(_elt_abs2, T))
@@ -142,7 +141,7 @@ end
 
 function Base.mapreduce(
         f::F, op::OP, halo::AbstractSingleHaloArray, etc::Vararg{AbstractSingleHaloArray}; kws...,
-    ) where {F<:Function, OP}
+    ) where {F, OP}
     dims = _dims_kwarg(kws, 1 + length(etc))
     dims === nothing || return _mapreduce_dims(f, op, halo, dims)
     r = _local_mapreduce(mapreduce, f, op, (halo, etc...))   # per-tile, no init
@@ -152,7 +151,7 @@ end
 for func in (:mapfoldl, :mapfoldr)
     @eval function Base.$func(
             f::F, op::OP, halo::AbstractSingleHaloArray, etc::Vararg{AbstractSingleHaloArray}; kws...,
-        ) where {F<:Function, OP}
+        ) where {F, OP}
         # `dims=` is rejected for order-sensitive folds on every halo array: a
         # per-tile / per-rank reduction reorders the fold (and on a tiled array
         # would combine same-shaped per-tile results across ALL tiles, mixing
@@ -172,14 +171,26 @@ end
 for func in (:mapreduce, :mapfoldl, :mapfoldr)
     @eval function Base.$func(
             f::F, op::OP, z::Iterators.Zip{<:Tuple{AbstractSingleHaloArray,Vararg{AbstractSingleHaloArray}}}; kws...,
-        ) where {F<:Function, OP}
+        ) where {F, OP}
         g(args...) = f(args)
         return $func(g, op, z.is...; kws...)
     end
 end
 
-Base.any(f::F, u::AbstractSingleHaloArray) where {F<:Function} = _local_any(f, u)
-Base.all(f::F, u::AbstractSingleHaloArray) where {F<:Function} = _local_all(f, u)
+Base.any(f::F, u::AbstractSingleHaloArray) where {F} = _local_any(f, u)
+Base.all(f::F, u::AbstractSingleHaloArray) where {F} = _local_all(f, u)
+
+# The reducer `f` is untyped above so a callable struct reaches the halo-aware
+# reductions too (with `F<:Function` it fell to Base's generic, rank-local
+# version). Base has `any(f::Function, ::AbstractArray; dims)`, so a plain
+# function needs these to resolve the ambiguity; they forward to the untyped
+# methods (the HaloArray ones live in mpi_support.jl).
+for T in (:AbstractSingleHaloArray, :HaloArray, :FieldCollection, :MaybeHaloArray)
+    @eval begin
+        Base.any(f::Function, u::$T) = invoke(Base.any, Tuple{Any,$T}, f, u)
+        Base.all(f::Function, u::$T) = invoke(Base.all, Tuple{Any,$T}, f, u)
+    end
+end
 
 # `==` compares the interiors (ghosts excluded, like every reduction). Without
 # this method Base's generic AbstractArray `==` iterates the arrays — which is
@@ -206,14 +217,14 @@ end
 # field-combine op is `op` itself; `kws` (e.g. `init`) apply at that combine.
 # `mapreduce` additionally supports `dims=`: each field is reduced along `dims`
 # and the same collection kind is rebuilt around the reduced fields.
-function Base.mapreduce(f::F, op::OP, c::AbstractHaloCollection; kws...) where {F<:Function, OP}
+function Base.mapreduce(f::F, op::OP, c::AbstractHaloCollection; kws...) where {F, OP}
     dims = _dims_kwarg(kws, 1)
     dims === nothing || return _mapreduce_dims(f, op, c, dims)
     return mapreduce(field -> mapreduce(f, op, field), op, eachfield(c); kws...)
 end
 
 for func in (:mapfoldl, :mapfoldr)
-    @eval Base.$func(f::F, op::OP, halo::AbstractHaloCollection; kws...) where {F<:Function, OP} =
+    @eval Base.$func(f::F, op::OP, halo::AbstractHaloCollection; kws...) where {F, OP} =
         $func(field -> $func(f, op, field), op, eachfield(halo); kws...)
 end
 
@@ -224,7 +235,7 @@ for func in (:mapreduce, :mapfoldl, :mapfoldr)
     # materializes O(#fields) (a `zip` of tuples would be type-unstable).
     @eval function Base.$func(
             f::F, op::OP, halo::AbstractHaloCollection, etc::Vararg{AbstractHaloCollection}; kws...,
-        ) where {F<:Function, OP}
+        ) where {F, OP}
         per_field_results = map((fields...) -> $func(f, op, fields...),
                                 map(eachfield, (halo, etc...))...)
         return reduce(op, per_field_results; kws...)
@@ -232,7 +243,7 @@ for func in (:mapreduce, :mapfoldl, :mapfoldr)
 
     @eval function Base.$func(
             f::F, op::OP, z::Iterators.Zip{<:Tuple{AbstractHaloCollection,Vararg{AbstractHaloCollection}}}; kws...,
-        ) where {F<:Function, OP}
+        ) where {F, OP}
         g(args...) = f(args)
         $func(g, op, z.is...; kws...)
     end
@@ -241,15 +252,15 @@ end
 
 # Field-wise short-circuit all/any for any collection kind (named or indexed):
 # reduce over fields, each field reducing over its own interior.
-Base.all(f::F, c::FieldCollection) where {F<:Function} =
+Base.all(f::F, c::FieldCollection) where {F} =
     all(field -> all(f, field), _fields(c))
-Base.any(f::F, c::FieldCollection) where {F<:Function} =
+Base.any(f::F, c::FieldCollection) where {F} =
     any(field -> any(f, field), _fields(c))
 
 for func in (:mapreduce, :mapfoldl, :mapfoldr)
     @eval function Base.$func(
             f::F, op::OP, halo::MaybeHaloArray, etc::Vararg{MaybeHaloArray}; kws...,
-        ) where {F<:Function, OP}
+        ) where {F, OP}
         all(is_active, (halo, etc...)) ||
             throw(ErrorException("MaybeHaloArray: attempt to reduce inactive value"))
         return $func(f, op, getdata(halo), getdata.(etc)...; kws...)
@@ -257,24 +268,24 @@ for func in (:mapreduce, :mapfoldl, :mapfoldr)
 
     @eval function Base.$func(
             f::F, op::OP, z::Iterators.Zip{<:Tuple{MaybeHaloArray,Vararg{MaybeHaloArray}}}; kws...,
-        ) where {F<:Function, OP}
+        ) where {F, OP}
         g(args...) = f(args)
         $func(g, op, z.is...; kws...)
     end
 end
 
-function Base.all(f::F, halo::MaybeHaloArray) where {F<:Function}
+function Base.all(f::F, halo::MaybeHaloArray) where {F}
     is_active(halo) || throw(ErrorException("MaybeHaloArray: attempt to reduce inactive value"))
     return all(f, getdata(halo))
 end
 
-function Base.any(f::F, halo::MaybeHaloArray) where {F<:Function}
+function Base.any(f::F, halo::MaybeHaloArray) where {F}
     is_active(halo) || throw(ErrorException("MaybeHaloArray: attempt to reduce inactive value"))
     return any(f, getdata(halo))
 end
 
 Base.sum(halo::AbstractHaloArray) = mapreduce(identity, +, halo)
-Base.sum(f::F, halo::AbstractHaloArray) where {F<:Function} = mapreduce(f, +, halo)
+Base.sum(f::F, halo::AbstractHaloArray) where {F} = mapreduce(f, +, halo)
 Base.maximum(halo::AbstractHaloArray) = mapreduce(identity, max, halo)
 Base.minimum(halo::AbstractHaloArray) = mapreduce(identity, min, halo)
 

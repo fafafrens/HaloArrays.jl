@@ -6,6 +6,25 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Scalar indexing of a `LocalHaloArray` (`u[i, j]`, `u[i, j] = v`) allocated
+  80 bytes per access through a boxed `Union{Nothing, Tuple}` splat; it is
+  allocation-free now. This is the path every broadcast with a plain array and
+  every generic Base fallback takes.
+- `copyto!` between collections of different element types (a `Float32` copy
+  of a `Float64` state) required identical types and fell to Base's
+  cell-by-cell fallback (scalar indexing, rank-local under MPI); any pair of
+  collections with the same fields works now.
+- The reductions (`mapreduce`, `mapfoldl`/`mapfoldr`, `any`, `all`) accept any
+  callable as the reducer, not only a `Function`: a callable struct used to
+  reach Base's generic methods, rank-local under MPI and scalar-indexed on GPU
+  storage.
+- `dot` between a single halo array and a collection is an `ArgumentError`
+  instead of Base's generic `dot`, which was rank-local and silently returned a
+  number whenever the lengths agreed.
+- `dot` on array-valued cells goes through `LinearAlgebra.dot` (allocation-free)
+  instead of a two-iterator `mapreduce` that allocated per cell.
+
 ## [0.16.0] — 2026-11-04
 
 ### Added

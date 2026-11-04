@@ -121,16 +121,20 @@ global_to_storage_index(halo::LocalHaloArray, global_idx::NTuple{N,<:Integer}) w
     all(i -> 1 <= global_idx[i] <= interior_size(halo, i), 1:N) ? ntuple(i -> global_idx[i] + halo_width(halo), Val(N)) : nothing
 _global_size(halo::LocalHaloArray) = interior_size(halo)
 
+# The explicit `nothing` check narrows the Union return before the splat; without
+# it every scalar access allocates (80 bytes) through a boxed splat.
+@inline function _storage_index(halo::LocalHaloArray, I)
+    storage_idx = global_to_storage_index(halo, _check_global_scalar_indices(halo, I))
+    storage_idx === nothing && throw(BoundsError(halo, I))
+    return storage_idx
+end
+
 function Base.getindex(halo::LocalHaloArray, I::Vararg{Integer})
-    idx = _check_global_scalar_indices(halo, I)
-    storage_idx = global_to_storage_index(halo, idx)
-    @inbounds return parent(halo)[storage_idx...]
+    @inbounds return parent(halo)[_storage_index(halo, I)...]
 end
 
 function Base.setindex!(halo::LocalHaloArray, value, I::Vararg{Integer})
-    idx = _check_global_scalar_indices(halo, I)
-    storage_idx = global_to_storage_index(halo, idx)
-    @inbounds parent(halo)[storage_idx...] = value
+    @inbounds parent(halo)[_storage_index(halo, I)...] = value
     return halo
 end
 

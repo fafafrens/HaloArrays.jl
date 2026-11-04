@@ -295,7 +295,7 @@ end
 # result owns its sub-communicator: `free!` it when reducing in a loop.
 function Base.mapreduce(
         f::F, op::OP, halo::HaloArray, etc::Vararg{HaloArray}; kws...,
-    ) where {F<:Function,OP}
+    ) where {F,OP}
     dims = _dims_kwarg(kws, 1 + length(etc))
     dims === nothing || return _mapreduce_dims(f, op, halo, dims)
     comm   = communicator(halo)
@@ -336,7 +336,7 @@ end
 for func in (:mapfoldl, :mapfoldr)
     @eval function Base.$func(
             f::F, op::OP, halo::HaloArray, etc::Vararg{HaloArray}; kws...,
-        ) where {F<:Function,OP}
+        ) where {F,OP}
         :dims in keys(kws) && throw(ArgumentError(
             "`$($(string(func)))` with `dims=` is not supported on a distributed HaloArray: " *
             "a per-slice reduction across ranks reorders the fold. Use `mapreduce`/`sum`/… " *
@@ -350,7 +350,7 @@ end
 for func in (:mapreduce, :mapfoldl, :mapfoldr)
     @eval function Base.$func(
             f::F, op::OP, z::Iterators.Zip{<:Tuple{HaloArray,Vararg{HaloArray}}}; kws...,
-        ) where {F<:Function,OP}
+        ) where {F,OP}
         g(args...) = f(args)
         $func(g, op, z.is...; kws...)
     end
@@ -363,11 +363,11 @@ end
 @inline _normalize_reduction_op(::typeof(Base.add_sum)) = +
 @inline _normalize_reduction_op(::typeof(Base.mul_prod)) = *
 
-function Base.any(f::F, u::HaloArray) where {F<:Function}
+function Base.any(f::F, u::HaloArray) where {F}
     MPI.Allreduce(_local_any(f, u) :: Bool, |, communicator(u))
 end
 
-function Base.all(f::F, u::HaloArray) where {F<:Function}
+function Base.all(f::F, u::HaloArray) where {F}
     MPI.Allreduce(_local_all(f, u) :: Bool, &, communicator(u))
 end
 

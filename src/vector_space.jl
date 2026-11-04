@@ -90,8 +90,12 @@ LinearAlgebra.norm(m::MaybeHaloArray) =
     is_active(m) ? LinearAlgebra.norm(getdata(m)) : sqrt(_sqnorm_zero(eltype(m)))
 LinearAlgebra.norm(m::MaybeHaloArray, p::Real) =
     is_active(m) ? LinearAlgebra.norm(getdata(m), p) : sqrt(_sqnorm_zero(eltype(m)))
-# Fallback for any other halo-array type.
-LinearAlgebra.dot(x::AbstractHaloArray, y::AbstractHaloArray) = mapreduce(LinearAlgebra.dot, +, x, y)
+# Every kind has its own `dot` above; a mixed pair (a single array with a
+# collection) is an error. Without this method it reached Base's generic
+# `dot(::AbstractArray, ::AbstractArray)`: scalar-indexed and rank-local under
+# MPI, and silently a number whenever the lengths happen to agree.
+LinearAlgebra.dot(x::AbstractHaloArray, y::AbstractHaloArray) = throw(ArgumentError(
+    "dot between a $(nameof(typeof(x))) and a $(nameof(typeof(y))) is not defined"))
 
 # ---- in-place BLAS-1 updates (elementwise) -----------------------------------
 # Default path: the interior-only broadcast — correct on every backend (GPU
