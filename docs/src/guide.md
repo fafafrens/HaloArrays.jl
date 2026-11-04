@@ -595,7 +595,6 @@ With a GPU array package loaded (the extension triggers on KernelAbstractions
 and GPUArraysCore, which CUDA, Metal, AMDGPU and oneAPI all load) the ghost
 refresh itself runs as kernels on GPU storage: `synchronize_halo!` fills every
 rule face of a block — any mix of built-in and custom conditions — in one
-launch (an all-periodic `LocalHaloArray` has its own, slightly faster kernel),
-the MPI exchange buffers use one kernel per face, and the MPI exchange
+launch, the MPI exchange buffers use one kernel per face, and the MPI exchange
 synchronizes the device before posting its sends. Nothing changes for CPU
 storage.

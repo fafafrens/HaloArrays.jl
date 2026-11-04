@@ -29,10 +29,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`FaceGeometry` + prepared rule) in a single kernel and applies each face's
   stencil or custom rule — any mix of conditions, `NoBoundaryCondition` and
   exchange faces skipped, on `LocalHaloArray` and on the physical faces of an
-  MPI `HaloArray`. The all-periodic `LocalHaloArray` keeps its Int32 kernel,
-  which is still the fastest for that case. Metal, 48⁴ Float32, mixed
-  conditions: 0.070 ms per refresh (halo 2: 0.139), 128³: 0.013 ms, vs
-  0.06–0.17 ms with one launch per face; bit-identical to the CPU.
+  MPI `HaloArray`; it replaces the all-periodic kernel of 0.16's extension
+  draft (#97), which it outperforms. Metal, 48⁴ Float32: 0.057 ms per
+  refresh all-periodic, 0.059 with mixed conditions (halo 2: 0.108), 128³:
+  0.011 ms, vs 0.06–0.17 ms with one launch per face; bit-identical to the
+  CPU.
 - `HaloArraysKernelAbstractionsExt` (loads with KernelAbstractions and
   GPUArraysCore, i.e. with any GPU array package): the face copies of
   `synchronize_halo!` on GPU storage run as kernels instead
