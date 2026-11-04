@@ -8,7 +8,7 @@ using StaticArrays
 # The geometry is "just another field": every rank/tile fills its interior by
 # evaluating the axis descriptions at the global index, then one halo
 # synchronization completes the ghosts — exchange across ranks/tiles/periodic
-# edges, and a FunctionBC continuing the axis on physical edges.
+# edges, and a rule continuing the axis on physical edges.
 # ============================================================
 
 # ---- coordinate systems -----------------------------------------------------
@@ -152,11 +152,10 @@ end
 # A Float field on `u`'s layout (same backend, halo, tiling, topology, device).
 # Its boundary condition is `Periodic` where the topology is periodic (the
 # topology check requires it; the exchange then wraps the coordinate) and, on
-# physical edges, a FunctionBC that evaluates `value(global_index)` on the
-# ghost slab — so one `synchronize_halo!` completes the ghosts on every backend.
+# physical edges, a rule that evaluates `value(global_index)` at each ghost
+# cell — so one `synchronize_halo!` completes the ghosts on every backend.
 function _geometry_bc(periodic::NTuple{N,Bool}, value::V) where {N,V}
-    fill = FunctionBC((ghost, edge, side, dim, hw, origin) ->
-        (ghost .= (J -> value(Tuple(origin - oneunit(origin) + J))).(CartesianIndices(ghost)); nothing))
+    fill = FunctionBC((u, k) -> value(Tuple(global_index(u))))
     return ntuple(d -> periodic[d] ? (Periodic(), Periodic()) : (fill, fill), Val(N))
 end
 
@@ -237,7 +236,7 @@ terms of global cell indices; `u` may be any single halo array or collection
 The interior is filled from the global index on every rank and tile and the
 ghosts are completed by one [`synchronize_halo!`](@ref): across ranks, tiles
 and periodic edges by the exchange (so periodic ghosts wrap like any field),
-and on physical edges by a [`FunctionBC`](@ref) that continues the axis
+and on physical edges by a [`FunctionBC`](@ref) rule that continues the axis
 outside the domain. Corner ghosts (outside the domain in more than one
 direction) are left at zero, as for every field. Synchronizing it again is
 harmless. Read it like any field: `g.x`, `field_storages(g)`, `tile_parent(g, t)`,

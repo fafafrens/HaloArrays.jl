@@ -12,7 +12,8 @@ using StaticArrays
 # the fill is order-free: the CPU loops the face, the KernelAbstractions
 # extension runs the same rule in a kernel, a ThreadedHaloArray tile is just a
 # smaller block. The built-ins below are one line each; a user condition is a
-# type with one call method, or a plain function wrapped by `CellBC`.
+# type with one call method, or a plain function (`FunctionBC`, or bare in
+# the condition tuple).
 # ============================================================
 
 """
@@ -135,27 +136,8 @@ end
     ExtrapolationTable{H}(p, ntuple(k -> ntuple(j -> j - 1 <= p ? _lagrange_weight(j - 1, p, -k) : 0,
                                                 Val(_TABLE_ORDER + 1)), Val(H)))
 
-"""
-    CellBC(f)
-
-A boundary condition from a per-cell function `f(u, k)` — the rule contract of
-[`AbstractBoundaryCondition`](@ref) without defining a type. A bare function in
-a boundary-condition tuple is wrapped automatically:
-
-```julia
-dirichlet(g) = (u, k) -> 2g - u(0)                 # wall value g (second order)
-u = LocalHaloArray(Float64, (64, 64), 1;
-        boundary_condition = ((dirichlet(0.0), dirichlet(1.0)), (:periodic, :periodic)))
-```
-
-On GPU storage the function runs inside the fill kernel, so it must be isbits
-(capture scalars, not host arrays). Cf. [`FunctionBC`](@ref), whose function
-fills a whole face slab at once.
-"""
-struct CellBC{F} <: AbstractBoundaryCondition
-    f::F
-end
-@inline (bc::CellBC)(u::FaceCells, k) = bc.f(u, k)
+# FunctionBC: the rule as a plain function (see the docstring in haloarray.jl).
+@inline (bc::FunctionBC)(u::FaceCells, k) = bc.f(u, k)
 
 # Interior cells a rule needs along the normal (checked once per face, so a
 # short interior fails loudly instead of reading ghosts).
@@ -252,7 +234,7 @@ edges), so it is safe to call on a decomposed grid. The condition per
 `(dimension, side)` comes from `u`'s stored boundary condition — see
 [`Periodic`](@ref), [`Mirror`](@ref) ([`Reflecting`](@ref), [`Antireflecting`](@ref)),
 [`Repeating`](@ref), [`Extrapolation`](@ref), [`NoBoundaryCondition`](@ref),
-[`CellBC`](@ref), [`FunctionBC`](@ref), or any type implementing the rule
+[`FunctionBC`](@ref), or any type implementing the rule
 `bc(u, k)` (see [`AbstractBoundaryCondition`](@ref)).
 """
 function boundary_condition!(halo::AbstractSingleHaloArray{T,N}; threads::Bool=false) where {T,N}
@@ -325,14 +307,6 @@ buffer). The KernelAbstractions extension turns it into one kernel on GPU storag
 # ---- NoBoundaryCondition ----------------------------------------
 # Ghost cells are left unchanged; the user fills them via a custom function.
 boundary_condition!(::AbstractSingleHaloArray, ::Side, ::Dim, ::NoBoundaryCondition, tile=nothing) = nothing
-
-# ---- FunctionBC (custom per-field) ------------------------------
-# Hand the user's closure the resolved ghost/edge views, the face, the halo width,
-# and the global origin of the ghost slab (for position-dependent / GPU-safe BCs).
-# On a tile these are the tile-local views and the per-tile origin, so one
-# closure runs on every backend.
-@inline boundary_condition!(h::AbstractSingleHaloArray, s::Side, d::Dim, bc::FunctionBC, tile=nothing) =
-    bc.f(ghost_view(h, s, d, tile), edge_view(h, s, d, tile), s, d, halo_width(h), ghost_origin(h, s, d, tile))
 
 # ============================================================
 # Collection delegators
@@ -506,7 +480,7 @@ to_bc(bc::AbstractBoundaryCondition)                  = bc
 to_bc(::Type{T}) where {T<:AbstractBoundaryCondition} = T()
 to_bc(::typeof(Reflecting))                           = Reflecting()     # the bare constructor names
 to_bc(::typeof(Antireflecting))                       = Antireflecting()
-to_bc(f::Function)                                    = CellBC(f)         # a per-cell rule (u, k) -> value
+to_bc(f::Function)                                    = FunctionBC(f)     # a bare rule (u, k) -> value
 to_bc(s::Symbol)                                      = to_bc(Val(s))
 to_bc(::Val{:reflecting})     = Reflecting()
 to_bc(::Val{:antireflecting}) = Antireflecting()

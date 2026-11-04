@@ -265,45 +265,27 @@ tile on a `ThreadedHaloArray`, on the physical faces of an MPI `HaloArray`.
 `global_index(u)` gives the ghost cell's global index for position-dependent
 rules. See [`AbstractBoundaryCondition`](@ref) and [`FaceCells`](@ref).
 
-### Whole-slab conditions with `FunctionBC`
-
-For a one-off rule you don't want to make a type for, wrap a function in
-[`FunctionBC`](@ref). It runs inside `synchronize_halo!` like a built-in, on
-physical edges only, and works on every backend (single, MPI, threaded). Your
-function is called per `(side, dim)` face as `f(ghost, edge, side, dim, hw, origin)`,
-where `ghost` is the slab to write and `edge` is the adjacent interior slab to read
-(same shape). Because the two straddle the wall, the standard conditions are short,
-side-independent one-liners — and they're geometry-agnostic, so you pass any grid
-spacing `Δ` yourself:
+`FunctionBC(f)` is the same thing with a name: `FunctionBC((u, k) -> 2u₀ - u(0))`.
+The standard conditions are short, side-independent one-liners, geometry-agnostic
+(pass any grid spacing `Δ` yourself):
 
 ```julia
-# Dirichlet — fix the wall value u₀:           (ghost + edge)/2 = u₀
-dirichlet(u₀)     = FunctionBC((g, e, s, d, hw, o) -> (g .= 2 .* u₀ .- e))
-# Neumann — fix the outward normal flux q:     (ghost − edge)/Δ = q
-neumann(q, Δ)     = FunctionBC((g, e, s, d, hw, o) -> (g .= e .+ Δ .* q))
-# Robin — α·u + β·∂u/∂n = γ at the wall:
-robin(α, β, γ, Δ) = FunctionBC((g, e, s, d, hw, o) -> (g .= (γ .- (α/2 - β/Δ) .* e) ./ (α/2 + β/Δ)))
+dirichlet(u₀)     = (u, k) -> 2u₀ - u(0)                              # wall value u₀
+neumann(q, Δ)     = (u, k) -> u(0) + k * Δ * q                        # outward normal flux q
+robin(α, β, γ, Δ) = (u, k) -> (γ - (α/2 - β/Δ) * u(0)) / (α/2 + β/Δ)  # α·u + β·∂u/∂n = γ (halo 1)
 ```
 
-These compose the way you'd expect: `robin(1, 0, u₀, Δ)` is `dirichlet(u₀)`,
-`robin(0, 1, q, Δ)` is `neumann(q, Δ)`, and `dirichlet(0)` coincides with the
-built-in [`Antireflecting`](@ref) (zero-flux Neumann likewise coincides with
-[`Repeating`](@ref)). Pass them per side like any BC, e.g.
-`boundary_condition = ((dirichlet(300.0), neumann(0.0, dx)), (:periodic, :periodic))`.
-
-`origin` is the **global** `CartesianIndex` of `ghost[1]` (the package computes the
-MPI-rank / tile offset for you), so a *position-dependent* condition is a broadcast
-that stays correct under decomposition — and GPU-safe, since each lane derives its
-own global index:
+`robin(1, 0, u₀, Δ)` is `dirichlet(u₀)`, `robin(0, 1, q, Δ)` is `neumann(q, Δ)`,
+`dirichlet(0)` coincides with the built-in [`Antireflecting`](@ref) and zero-flux
+Neumann with [`Repeating`](@ref). A position-dependent condition reads the ghost
+cell's global index, so it stays correct under decomposition and in a kernel:
 
 ```julia
-inflow = FunctionBC() do g, e, s, d, hw, o
-    g .= profile.(Tuple.((o - oneunit(o)) .+ CartesianIndices(g)))   # value varies along the face
-end
+inflow = (u, k) -> profile(Tuple(global_index(u)))     # value varies along the face
 ```
 
-Three kinds: rules (built-in or custom, **per cell**), `FunctionBC` (custom,
-**per face slab**), and coupled (**cross-field**, below).
+Two kinds: rules (built-in or custom, **per cell**) and coupled (**cross-field**,
+below).
 
 ### Coupled boundary conditions
 

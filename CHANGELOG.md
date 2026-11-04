@@ -13,7 +13,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   opposite wall, `global_index(u)` the ghost cell's global index) and `k` the
   ghost cell's distance from the wall. The built-ins are one line each; a
   custom condition is a type with one call method, or a bare function
-  `(u, k) -> value` in the condition tuple (wrapped as `CellBC`). One method
+  `(u, k) -> value` in the condition tuple (wrapped as `FunctionBC`). One method
   runs on the CPU, in a kernel on GPU storage, per tile and on MPI physical
   faces.
 - `HaloArraysKernelAbstractionsExt` (loads with KernelAbstractions and
@@ -26,6 +26,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and any run without the extension, keep the previous broadcasts.
 
 ### Changed
+- **Breaking:** `FunctionBC(f)` takes the per-cell rule `f(u, k) -> value`
+  instead of the slab function `f(ghost, edge, side, dim, hw, origin)`. The
+  slab form had no GPU kernel and duplicated what a rule expresses in one line
+  (`(u, k) -> 2g - u(0)` for a Dirichlet wall, `(u, k) -> value(Tuple(global_index(u)))`
+  for a position-dependent one); `grid.jl`'s axis continuation and the DG
+  example are converted.
 - `Mirror`, `Repeating` and `Extrapolation` are implemented as rules (one loop
   over the face per condition) instead of broadcasts on reversed / sliced
   views; same values, integer-exact extrapolation weights as before. The slab

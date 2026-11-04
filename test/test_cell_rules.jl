@@ -51,7 +51,7 @@ end
         # the same rule spelled as a closure (goes through the generic fill, not the slab copy)
         u = LocalHaloArray(copy(x), 2, (u, k) -> far(u)(k - 1)); synchronize_halo!(u)
         @test parent(u) == parent(ref)
-        @test u.boundary_condition[1][1] isa CellBC
+        @test u.boundary_condition[1][1] isa FunctionBC
     end
 
     @testset "global_index: position-dependent rule, Local vs 2x2 Threaded" begin
@@ -102,7 +102,7 @@ end
     @testset "errors and allocations" begin
         w = LocalHaloArray(Float64, (2,), 1; boundary_condition = ((Extrapolation(2), Extrapolation(2)),))
         @test_throws ArgumentError synchronize_halo!(w)
-        @test HaloArrays.to_bc((u, k) -> u(0)) isa CellBC
+        @test HaloArrays.to_bc((u, k) -> u(0)) isa FunctionBC
         u = LocalHaloArray(Float64, (16, 16), 2;
                 boundary_condition = ((Mirror(-1), Extrapolation(2)), (DirichletRule(1.0), (u, k) -> u(0) + k)))
         interior_view(u) .= 1.0
