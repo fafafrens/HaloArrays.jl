@@ -6,6 +6,26 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- `HaloArraysKernelAbstractionsExt` (loads with KernelAbstractions and
+  GPUArraysCore, i.e. with any GPU array package): the face copies of
+  `synchronize_halo!` on GPU storage run as kernels instead
+  of broadcasts on views — one kernel per slab for the exchange-buffer
+  pack/unpack and for mixed boundary conditions, one fused kernel for an
+  all-periodic `LocalHaloArray`. A refresh of a 48⁴ Float32 block on Metal goes
+  from 0.17 ms to 0.06 ms (halo 2: 0.37 → 0.11 ms), bit-identical. CPU storage,
+  and any run without the extension, keep the previous broadcasts.
+
+### Fixed
+- MPI `HaloArray` on GPU storage: the sends read device memory directly, and
+  nothing ordered them after the asynchronous pack copies. The exchange now
+  packs every face first, synchronizes the device (through the extension; a
+  no-op on the CPU) and only then posts the sends.
+- `LocalHaloArray` rejects a periodic dimension with fewer interior cells than
+  the halo width (`ArgumentError`): the periodic "edge" would reach into the
+  ghosts, so the fill read what it wrote (order-dependent on the CPU, a race in
+  a kernel).
+
 ## [0.15.0] — 2026-11-03
 
 ### Added
