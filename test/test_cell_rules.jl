@@ -52,11 +52,10 @@ end
         u = LocalHaloArray(copy(x), 2, (u, k) -> far(u)(k - 1)); synchronize_halo!(u)
         @test parent(u) == parent(ref)
         @test u.boundary_condition[1][1] isa FunctionBC
-        # the built-ins lower to stencils; a custom rule stays itself
+        # Extrapolation lowers to a stencil; everything else stays itself
         g = FaceGeometry(parent(ref), Side(1), Dim(1), Val(2), CartesianIndex(-1, 1))
-        @test prepare_boundary(Periodic(), g) isa CopyStencil{2}
-        @test prepare_boundary(Repeating(), g) isa CopyStencil{2}
-        @test prepare_boundary(Mirror(-1), g).sign == -1
+        @test prepare_boundary(Periodic(), g) === Periodic()         # the copy conditions are their own rule
+        @test prepare_boundary(Mirror(-1), g) === Mirror(-1)
         @test prepare_boundary(Extrapolation(3), g) isa Stencil{2,8,Float64}
         @test prepare_boundary(DirichletRule(1.0), g) isa DirichletRule
         # the weights follow the field's scalar type: Float32 field → Float32 weights, Int field → Int
