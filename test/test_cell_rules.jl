@@ -82,6 +82,16 @@ end
         @test_throws ArgumentError synchronize_halo!(LocalHaloArray(Float64, (12,), 1; boundary_condition = Extrapolation(8)))
     end
 
+    @testset "interior extent: a rule never reads a ghost" begin
+        # Mirror at halo 2 reads two interior cells: interior 1 is rejected, interior 2 accepted
+        @test_throws ArgumentError synchronize_halo!(LocalHaloArray(Float64, (1,), 2; boundary_condition = Mirror(1)))
+        @test synchronize_halo!(LocalHaloArray(Float64, (2,), 2; boundary_condition = Mirror(1))) isa LocalHaloArray
+        # same on a threaded tile (tiles of 1 cell, halo 2)
+        @test_throws ArgumentError synchronize_halo!(ThreadedHaloArray(Float64, (1,), 2; dims = (2,), boundary_condition = Mirror(-1)))
+        # Repeating only needs the wall cell
+        @test synchronize_halo!(LocalHaloArray(Float64, (1,), 2; boundary_condition = Repeating())) isa LocalHaloArray
+    end
+
     @testset "zero halo width: nothing to fill, no error" begin
         e = LocalHaloArray(Float64, (0,), 0; boundary_condition = Repeating())
         @test synchronize_halo!(e) === e

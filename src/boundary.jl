@@ -205,10 +205,14 @@ end
         ntuple(k -> ntuple(t -> t - 1 <= p ? _lagrange_weight(t - 1, p, k) : 0, Val(_STENCIL_CAPACITY)), Val(halo_width(g))))
 end
 
-# Interior cells a rule reads along the normal (checked once per face, so a
-# short interior fails loudly instead of reading ghosts).
-@inline _cells_needed(::AbstractBoundaryCondition) = 1
-@inline _cells_needed(bc::Extrapolation) = bc.order + 1
+# Interior cells a rule reads along the normal at halo width H — checked once
+# per face, so a short interior fails loudly instead of reading ghosts (the
+# "rules read interior cells only" contract). A custom rule declares its own
+# need by adding a method; the default is the wall cell.
+@inline _cells_needed(::AbstractBoundaryCondition, ::Val{H}) where {H} = 1
+@inline _cells_needed(::Mirror, ::Val{H}) where {H} = H                 # u(k - 1), k = 1:H
+@inline _cells_needed(::Periodic, ::Val{H}) where {H} = H               # the far wall's k - 1
+@inline _cells_needed(bc::Extrapolation, ::Val{H}) where {H} = bc.order + 1
 
 # ---- the fill: every rule, every single-block backend ----------
 # `tile` selects the storage: nothing (whole block) or a ThreadedHaloArray tile.
@@ -222,8 +226,9 @@ end
     # and the stencil specialise on it without relying on constant propagation
     g = FaceGeometry(a, s, d, Val(halo_width(h)), ghost_origin(h, s, d, tile))
     isempty(g.ghosts) && return nothing          # halo width 0, or an empty block: nothing to fill
-    g.n >= _cells_needed(bc) || throw(ArgumentError(
-        "boundary condition needs $(_cells_needed(bc)) interior cells along dimension $(face_dim(g)), the interior has $(g.n)"))
+    need = _cells_needed(bc, Val(halo_width(h)))
+    g.n >= need || throw(ArgumentError(
+        "boundary condition needs $need interior cells along dimension $(face_dim(g)), the interior has $(g.n)"))
     _traverse!(_face_backend(a), a, prepare_boundary(bc, g), g)
     return nothing
 end
