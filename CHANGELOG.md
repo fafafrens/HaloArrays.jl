@@ -164,10 +164,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `HaloArray` (`start_halo_exchange!` without `finish_halo_exchange!`) is an
   `ArgumentError`; the blocking and the split exchange share request slots, and
   the second post overwrote live handles.
-- `ghost_origin` no longer bounds-checks the block: a zero-extent rank of an
-  uneven decomposition reaches the boundary fill's "nothing to fill" early-out
-  instead of a `BoundsError`. On a `ThreadedHaloArray` the tile argument is
-  required (the first tile's origin silently stood in for a missing one).
+- The boundary fill on an empty block (a zero-extent rank of an uneven
+  decomposition) is a no-op: the face normal to the empty dimension has a
+  ghost layer in storage but no interior, and `FaceGeometry` gives it an
+  empty ghost range (it was a nonempty range with zero interior cells, so the
+  rule's cell requirement threw). `ghost_origin` no longer bounds-checks the
+  block either; on a `ThreadedHaloArray` its tile argument is required (the
+  first tile's origin silently stood in for a missing one).
 - `mapreduce`/`mapfoldl`/`mapfoldr` over a single array zipped with a
   collection is an `ArgumentError`, like `dot`; it reached Base's
   materializing multi-array fallback.

@@ -37,7 +37,12 @@ end
 function FaceGeometry(a::AbstractArray{T,N}, ::Side{S}, ::Dim{D}, ::Val{H},
         origin::CartesianIndex{N}) where {T,N,S,D,H}
     sd = size(a, D)
-    ghosts = CartesianIndices(ntuple(i -> i == D ? _recv_window(Side(S), sd, H) : (H+1):(size(a, i)-H), Val(N)))
+    # An empty block (a zero-extent rank of an uneven decomposition, or a tile
+    # of one) has no face to fill: the ghost range is empty along every
+    # dimension, including the one normal to the face, whose ghost layer
+    # exists in storage but has no interior to read from.
+    ghosts = CartesianIndices(ntuple(i -> i == D ? (sd > 2H ? _recv_window(Side(S), sd, H) : (1:0)) :
+                                               (H+1):(size(a, i)-H), Val(N)))
     wall = S == 1 ? H + 1 : sd - H
     return FaceGeometry{N,D,S,H,T}(ghosts, wall, sd - 2H, origin - first(ghosts))
 end
