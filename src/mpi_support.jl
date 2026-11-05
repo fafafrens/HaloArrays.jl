@@ -5,25 +5,18 @@
 # HaloCommState — MPI request bookkeeping
 # ============================================================
 
-# Requests are MPI.UnsafeRequest / UnsafeMultiRequest: no per-request Julia
-# object, so posting and waiting allocate nothing; the buffers they refer to
-# are pinned with GC.@preserve at each MPI call. The per-face containers serve
-# the split start/finish exchange (one Wait per face, ghosts unpacked as they
-# arrive); the flat MultiRequests serve the blocking exchange (one Waitall).
-# Outer dimension is NTuple{N,...} so exchange loops specialize on N.
-struct HaloCommState{N}
-    unsafe_recv_reqs_vv::NTuple{N, Vector{MPI.UnsafeRequest}}
-    unsafe_send_reqs_vv::NTuple{N, Vector{MPI.UnsafeRequest}}
-    unsafe_recv_reqs::MPI.UnsafeMultiRequest
-    unsafe_send_reqs::MPI.UnsafeMultiRequest
+# One `UnsafeMultiRequest` per direction, slot `tag_send(D, S)` per face: no
+# per-request Julia object, so posting and waiting allocate nothing. The
+# blocking exchange waits on all slots at once; the split exchange waits on
+# one face's slot (an item of a multi-request is itself a waitable request),
+# unpacking each face as it arrives. Both share the slots, since the blocking
+# exchange completes before it returns. The buffers and requests are fields
+# of the HaloArray, pinned with `GC.@preserve halo` around each MPI call.
+struct HaloCommState
+    recv_reqs::MPI.UnsafeMultiRequest
+    send_reqs::MPI.UnsafeMultiRequest
 end
-
-function HaloCommState(N::Int)
-    unsafe_recv_reqs_vv = ntuple(_ -> [MPI.UnsafeRequest() for _ in 1:2], N)
-    unsafe_send_reqs_vv = ntuple(_ -> [MPI.UnsafeRequest() for _ in 1:2], N)
-    HaloCommState{N}(unsafe_recv_reqs_vv, unsafe_send_reqs_vv,
-        MPI.UnsafeMultiRequest(2N), MPI.UnsafeMultiRequest(2N))
-end
+HaloCommState(N::Int) = HaloCommState(MPI.UnsafeMultiRequest(2N), MPI.UnsafeMultiRequest(2N))
 
 # ============================================================
 # CartesianTopology constructors
@@ -83,43 +76,30 @@ function build_haloarray_from_data(data::AbstractArray{T,N}, halo::Int,
         data, topology, comm_state, recv_bufs, send_bufs, bc)
 end
 
-function HaloArray(data::AbstractArray{T,N}, halo::Int,
+# Three forms, like the other single kinds: wrap existing storage, allocate on
+# a given topology, or allocate on a topology built over COMM_WORLD (periodic
+# where the boundary condition is). `Float64` when the element type is omitted.
+function HaloArray(data::AbstractArray{T,N}, halo::Integer,
         topology::CartesianTopology{N}, boundary_condition) where {T,N}
-    build_haloarray_from_data(data, halo, topology, boundary_condition)
+    build_haloarray_from_data(data, Int(halo), topology, boundary_condition)
 end
 
-function HaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int,
+function HaloArray(::Type{T}, owned_dims::NTuple{N,<:Integer}, halo::Integer,
         topology::CartesianTopology{N};
-        boundary_condition=ntuple(_ -> (Repeating(), Repeating()), Val(N))) where {T,N}
-    fullsize = ntuple(i -> owned_dims[i] + 2*halo, Val(N))
-    data = zeros(T, fullsize...)
-    build_haloarray_from_data(data, halo, topology, boundary_condition)
+        boundary_condition=:repeating, storage=zeros) where {T,N}
+    HaloArray(_padded_storage(storage, T, owned_dims, halo), halo, topology, boundary_condition)
 end
 
-function HaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int,
-        topology::CartesianTopology{N}, boundary_condition) where {T,N}
-    bc = normalize_boundary_condition(boundary_condition, N)
-    HaloArray(T, owned_dims, halo, topology; boundary_condition=bc)
-end
-
-function HaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int,
-        boundary_condition::NTuple{N,NTuple{2,AbstractBoundaryCondition}}) where {T,N}
+function HaloArray(::Type{T}, owned_dims::NTuple{N,<:Integer}, halo::Integer;
+        boundary_condition=:repeating, kwargs...) where {T,N}
     MPI.Initialized() || MPI.Init()
-    comm     = MPI.COMM_WORLD
-    periodic = infer_periodicity(normalize_boundary_condition(boundary_condition, N))
-    topology = CartesianTopology(comm, ntuple(_ -> 0, Val(N)); periodic=periodic)
-    HaloArray(T, owned_dims, halo, topology; boundary_condition=boundary_condition)
+    bc       = normalize_boundary_condition(boundary_condition, N)
+    topology = CartesianTopology(MPI.COMM_WORLD, ntuple(_ -> 0, Val(N)); periodic=infer_periodicity(bc))
+    HaloArray(T, owned_dims, halo, topology; boundary_condition=bc, kwargs...)
 end
 
-function HaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int;
-        boundary_condition=ntuple(_ -> (Repeating(), Repeating()), Val(N))) where {T,N}
-    HaloArray(T, owned_dims, halo, normalize_boundary_condition(boundary_condition, N))
-end
-
-function HaloArray(owned_dims::NTuple{N,Int}, halo::Int;
-        boundary_condition=ntuple(_ -> (Repeating(), Repeating()), Val(N))) where {N}
-    HaloArray(Float64, owned_dims, halo, normalize_boundary_condition(boundary_condition, N))
-end
+HaloArray(owned_dims::NTuple{N,<:Integer}, halo::Integer, args...; kwargs...) where {N} =
+    HaloArray(Float64, owned_dims, halo, args...; kwargs...)
 
 function HaloArray{T,N,arraytype,Halo}(::UndefInitializer,
         boundary_condition) where {T,N,arraytype<:AbstractArray{T,N},Halo}
@@ -148,133 +128,89 @@ end
 # LinearAlgebra.norm inherited from AbstractSingleHaloArray (abstract_haloarray.jl)
 
 # ============================================================
-# Halo exchange — per-face helpers
-#
-# All helpers take ::Val{D} and ::Val{S} so D and S are compile-time
-# constants.  This makes Side(S) and Dim(D) concrete types, letting
-# edge_view / ghost_view specialise statically (no dynamic
-# dispatch).  GC.@preserve is kept inside named functions rather than
-# ntuple closures so the pinned roots are unambiguous local parameters.
-# ============================================================
-
-# Pack one face: edge slab → send buffer (`_copy_slab!`: a kernel on GPU
-# storage). Every face is packed before any send is posted, so one device
-# synchronization covers all the packs (see the GPU seams in boundary.jl).
-@inline function _pack_face!(halo, ::Side{S}, ::Dim{D}) where {D,S}
-    halo.topology.neighbors[D][S] == MPI.PROC_NULL && return nothing
-    _copy_slab!(halo.send_bufs[D][S], edge_view(halo, Side(S), Dim(D)))
-    return nothing
-end
-
-# Copy recv buffer → ghost slab (blocking-exchange unpack).
-@inline function _copy_from_recv_buf!(recv_bufs, halo, ::Val{D}, ::Val{S}) where {D, S}
-    halo.topology.neighbors[D][S] == MPI.PROC_NULL && return nothing
-    _copy_slab!(ghost_view(halo, Side(S), Dim(D)), recv_bufs[D][S])
-    return nothing
-end
-
-# Post using the flat request index (blocking exchange: one Waitall).
-# recv_state = (UnsafeMultiRequest, recv_bufs),  send_state = (UnsafeMultiRequest, send_bufs)
-@inline function _post_flat_unsafe!(halo, recv_state, send_state, comm,
-        ::Val{D}, ::Val{S}) where {D, S}
-    recv_reqs, recv_bufs = recv_state
-    send_reqs, send_bufs = send_state
-    nbrank = halo.topology.neighbors[D][S]
-    nbrank == MPI.PROC_NULL && return nothing
-    idx = tag_send(Val(D), Val(S))
-    GC.@preserve recv_state MPI.Irecv!(recv_bufs[D][S], comm, recv_reqs[idx];
-        source=nbrank, tag=tag_recv(Val(D), Val(S)))
-    GC.@preserve send_state MPI.Isend(send_bufs[D][S], comm, send_reqs[idx];
-        dest=nbrank, tag=tag_send(Val(D), Val(S)))
-    return nothing
-end
-
-# Post using the per-face request index (split exchange: start).
-# recv_state = (NTuple{N,Vector{UnsafeRequest}}, recv_bufs),  same for send.
-@inline function _post_vv_unsafe!(halo, recv_state, send_state, comm,
-        ::Val{D}, ::Val{S}) where {D, S}
-    recv_reqs, recv_bufs = recv_state
-    send_reqs, send_bufs = send_state
-    nbrank = halo.topology.neighbors[D][S]
-    nbrank == MPI.PROC_NULL && return nothing
-    GC.@preserve recv_state MPI.Irecv!(recv_bufs[D][S], comm, recv_reqs[D][S];
-        source=nbrank, tag=tag_recv(Val(D), Val(S)))
-    GC.@preserve send_state MPI.Isend(send_bufs[D][S], comm, send_reqs[D][S];
-        dest=nbrank, tag=tag_send(Val(D), Val(S)))
-    return nothing
-end
-
-# Wait + unpack using the per-face requests (split exchange: finish).
-# recv_state = (NTuple{N,Vector{UnsafeRequest}}, recv_bufs),  send_state = NTuple{N,Vector{UnsafeRequest}}
-@inline function _wait_unpack_vv_unsafe!(halo, recv_state, send_state,
-        ::Val{D}, ::Val{S}) where {D, S}
-    recv_reqs, recv_bufs = recv_state
-    nbrank = halo.topology.neighbors[D][S]
-    nbrank == MPI.PROC_NULL && return nothing
-    GC.@preserve recv_state MPI.Wait(recv_reqs[D][S])
-    _copy_slab!(ghost_view(halo, Side(S), Dim(D)), recv_bufs[D][S])
-    GC.@preserve send_state MPI.Wait(send_state[D][S])
-    return nothing
-end
-
-# ============================================================
 # Halo exchange
 #
-# Face iteration goes through the shared `_foreach_face` primitive (one
-# compile-time-unrolled, closure-free recursion — see haloarray.jl). Each
-# adapter below is a thin `(halo, Side, Dim)` shim that pulls its request and
-# buffer state from `halo` and delegates to a per-face helper above.
-# Packing is a separate pass before posting: on GPU storage the sends read
-# device memory directly, and nothing but an explicit device synchronization
-# orders them after the pack kernels (`_device_synchronize`, a no-op on CPU).
+# Four per-face steps, each a `(halo, Side, Dim)` method that `_foreach_face`
+# (haloarray.jl: a compile-time-unrolled, closure-free recursion) applies to
+# every face, so Side/Dim are static and the views specialise. Messages are
+# tagged by the sender's face, `tag_send(D, S)`, which is also the face's
+# request slot; the receive tag is the neighbour's send tag. The pack pass
+# runs before any post: on GPU storage the sends read device memory
+# directly, and only an explicit device synchronization orders them after
+# the pack kernels (`_device_synchronize`, a no-op on CPU).
 # ============================================================
 
-@inline _unpack_face!(halo, ::Side{S}, ::Dim{D}) where {D,S} =
-    _copy_from_recv_buf!(halo.receive_bufs, halo, Val(D), Val(S))
+# Whether face (s, d) has a neighbour rank (periodic faces do: the topology
+# wraps them); the complement is a physical boundary.
+@inline _has_neighbor(halo::HaloArray, ::Side{S}, ::Dim{D}) where {S,D} =
+    halo.topology.neighbors[D][S] != MPI.PROC_NULL
 
-@inline _post_face_waitall_unsafe!(halo, ::Side{S}, ::Dim{D}) where {D,S} =
-    _post_flat_unsafe!(halo, (halo.comm_state.unsafe_recv_reqs, halo.receive_bufs),
-        (halo.comm_state.unsafe_send_reqs, halo.send_bufs), halo.topology.cart_comm, Val(D), Val(S))
-
-@inline _post_face_async_unsafe!(halo, ::Side{S}, ::Dim{D}) where {D,S} =
-    _post_vv_unsafe!(halo, (halo.comm_state.unsafe_recv_reqs_vv, halo.receive_bufs),
-        (halo.comm_state.unsafe_send_reqs_vv, halo.send_bufs), halo.topology.cart_comm, Val(D), Val(S))
-
-@inline _finish_face_async_unsafe!(halo, ::Side{S}, ::Dim{D}) where {D,S} =
-    _wait_unpack_vv_unsafe!(halo, (halo.comm_state.unsafe_recv_reqs_vv, halo.receive_bufs),
-        halo.comm_state.unsafe_send_reqs_vv, Val(D), Val(S))
-
-function halo_exchange_waitall_unsafe!(halo::HaloArray{T,N}) where {T,N}
-    recv_state = (halo.comm_state.unsafe_recv_reqs, halo.receive_bufs)
-    send_state = (halo.comm_state.unsafe_send_reqs, halo.send_bufs)
-    _foreach_face(_pack_face!, halo, Val(N))
-    _device_synchronize(parent(halo))
-    _foreach_face(_post_face_waitall_unsafe!, halo, Val(N))
-    GC.@preserve recv_state MPI.Waitall(halo.comm_state.unsafe_recv_reqs)
-    _foreach_face(_unpack_face!, halo, Val(N))
-    GC.@preserve send_state MPI.Waitall(halo.comm_state.unsafe_send_reqs)
+# edge slab → send buffer / recv buffer → ghost slab (`_copy_slab!`: a kernel
+# on GPU storage)
+@inline function _pack_face!(halo, s::Side{S}, d::Dim{D}) where {S,D}
+    _has_neighbor(halo, s, d) || return nothing
+    _copy_slab!(halo.send_bufs[D][S], edge_view(halo, s, d))
+    return nothing
+end
+@inline function _unpack_face!(halo, s::Side{S}, d::Dim{D}) where {S,D}
+    _has_neighbor(halo, s, d) || return nothing
+    _copy_slab!(ghost_view(halo, s, d), halo.receive_bufs[D][S])
     return nothing
 end
 
-function start_halo_exchange_async_unsafe!(halo::HaloArray{T,N}) where {T,N}
-    _foreach_face(_pack_face!, halo, Val(N))
-    _device_synchronize(parent(halo))
-    _foreach_face(_post_face_async_unsafe!, halo, Val(N))
+# post the face's receive and send on its slot
+@inline function _post_face!(halo, ::Side{S}, ::Dim{D}) where {S,D}
+    nbrank = halo.topology.neighbors[D][S]
+    nbrank == MPI.PROC_NULL && return nothing
+    comm = halo.topology.cart_comm
+    slot = tag_send(Val(D), Val(S))
+    GC.@preserve halo begin
+        MPI.Irecv!(halo.receive_bufs[D][S], comm, halo.comm_state.recv_reqs[slot];
+            source=nbrank, tag=tag_recv(Val(D), Val(S)))
+        MPI.Isend(halo.send_bufs[D][S], comm, halo.comm_state.send_reqs[slot];
+            dest=nbrank, tag=tag_send(Val(D), Val(S)))
+    end
     return nothing
 end
 
-function end_halo_exchange_async_wait_unsafe!(halo::HaloArray{T,N}) where {T,N}
-    _foreach_face(_finish_face_async_unsafe!, halo, Val(N))
+# wait for the face's receive, unpack it, wait for its send (split finish)
+@inline function _finish_face!(halo, s::Side{S}, d::Dim{D}) where {S,D}
+    _has_neighbor(halo, s, d) || return nothing
+    slot = tag_send(Val(D), Val(S))
+    GC.@preserve halo begin
+        MPI.Wait(halo.comm_state.recv_reqs[slot])
+        _unpack_face!(halo, s, d)
+        MPI.Wait(halo.comm_state.send_reqs[slot])
+    end
     return nothing
 end
 
 # ---- public exchange API ----------------------------------------------
 # All return `halo`, like every other backend's mutating driver.
 
-halo_exchange!(halo::HaloArray; threads::Bool=false) = (halo_exchange_waitall_unsafe!(halo); halo)
+function halo_exchange!(halo::HaloArray{T,N}; threads::Bool=false) where {T,N}
+    _foreach_face(_pack_face!, halo, Val(N))
+    _device_synchronize(parent(halo))
+    _foreach_face(_post_face!, halo, Val(N))
+    GC.@preserve halo begin
+        MPI.Waitall(halo.comm_state.recv_reqs)
+        _foreach_face(_unpack_face!, halo, Val(N))
+        MPI.Waitall(halo.comm_state.send_reqs)
+    end
+    return halo
+end
 
-start_halo_exchange!(halo::HaloArray)  = (start_halo_exchange_async_unsafe!(halo); halo)
-finish_halo_exchange!(halo::HaloArray) = (end_halo_exchange_async_wait_unsafe!(halo); halo)
+function start_halo_exchange!(halo::HaloArray{T,N}) where {T,N}
+    _foreach_face(_pack_face!, halo, Val(N))
+    _device_synchronize(parent(halo))
+    _foreach_face(_post_face!, halo, Val(N))
+    return halo
+end
+
+function finish_halo_exchange!(halo::HaloArray{T,N}) where {T,N}
+    _foreach_face(_finish_face!, halo, Val(N))
+    return halo
+end
 
 function synchronize_halo!(halo::HaloArray; threads::Bool=false)
     halo_exchange!(halo)
@@ -286,26 +222,18 @@ end
 # Reductions
 # ============================================================
 
-# `mapreduce` (and through it `sum`/`prod`/`maximum`/`minimum`) supports the
-# `dims=` keyword: it runs a transient `DimReductionPlan` (built, used, and
-# released within the call) and returns a fresh reduced array every time. The
-# result has the reduced dimensions DROPPED and lives on the coordinate-0 slice
-# of the topology (a `MaybeHaloArray`, inactive elsewhere) — same semantics as
-# `mapreduce(…; dims)`, unlike Base's kept-singleton-dims shape. The
-# result owns its sub-communicator: `free!` it when reducing in a loop.
-function Base.mapreduce(
-        f::F, op::OP, halo::HaloArray, etc::Vararg{HaloArray}; kws...,
-    ) where {F<:Function,OP}
-    dims = _dims_kwarg(kws, 1 + length(etc))
-    dims === nothing || return _mapreduce_dims(f, op, halo, dims)
-    comm   = communicator(halo)
-    rlocal = _local_mapreduce(mapreduce, f, op, (halo, etc...))  # shared local part (no init)
-    # Normalize AFTER the local part (add_sum's integer widening already
-    # happened in rlocal): the builtin MPI_SUM/MPI_PROD then applies — required
-    # on non-Intel, where MPI.jl cannot register custom reduction ops.
-    r = _allreduce(rlocal, _normalize_reduction_op(op), comm; iscommutative=true)
-    return _apply_init(op, r, kws)  # seed once, after Allreduce
-end
+# Every reduction (`mapreduce` and through it `sum`/`maximum`/…, the folds,
+# `any`/`all`/`==`, `dot`/`norm`/`dots!`) is written once in reduction.jl /
+# vector_space.jl on the local part plus `_global`, which on a HaloArray is
+# the `_allreduce` below. `mapreduce(…; dims=)` runs a transient
+# `DimReductionPlan` (reduction.jl): the result has the reduced dimensions
+# DROPPED and lives on the coordinate-0 slice of the topology (a
+# `MaybeHaloArray`, inactive elsewhere); it owns its sub-communicator, `free!`
+# it when reducing in a loop.
+#
+# The op is normalized AFTER the local part (add_sum's integer widening has
+# happened): the builtin MPI_SUM/MPI_PROD then applies — required on
+# non-Intel, where MPI.jl cannot register custom reduction ops.
 
 # MPI.jl sends an AbstractArray value down its strided-buffer path, which a
 # static array cannot serve (`strides(::SVector)` is undefined), so `sum` of
@@ -333,72 +261,12 @@ function _allreduce(x::StaticArray, op, comm; iscommutative)
     return MPI.Allreduce(_MPICell(x), MPI.Op(+, _MPICell{typeof(x)}; iscommutative=true), comm).x
 end
 
-for func in (:mapfoldl, :mapfoldr)
-    @eval function Base.$func(
-            f::F, op::OP, halo::HaloArray, etc::Vararg{HaloArray}; kws...,
-        ) where {F<:Function,OP}
-        :dims in keys(kws) && throw(ArgumentError(
-            "`$($(string(func)))` with `dims=` is not supported on a distributed HaloArray: " *
-            "a per-slice reduction across ranks reorders the fold. Use `mapreduce`/`sum`/… " *
-            "with `dims=` (commutative ops only)."))
-        comm   = communicator(halo)
-        rlocal = _local_mapreduce($func, f, op, (halo, etc...); kws...)  # shared local part
-        _allreduce(rlocal, op, comm; iscommutative=false)
-    end
-end
-
-for func in (:mapreduce, :mapfoldl, :mapfoldr)
-    @eval function Base.$func(
-            f::F, op::OP, z::Iterators.Zip{<:Tuple{HaloArray,Vararg{HaloArray}}}; kws...,
-        ) where {F<:Function,OP}
-        g(args...) = f(args)
-        $func(g, op, z.is...; kws...)
-    end
-end
-
 # Base's reduction kwargs arrive as its internal wrappers; unwrap them so
 # MPI.Op resolves to the builtin MPI_SUM/MPI_PROD instead of registering a
 # custom callback op on every call.
 @inline _normalize_reduction_op(op) = op
 @inline _normalize_reduction_op(::typeof(Base.add_sum)) = +
 @inline _normalize_reduction_op(::typeof(Base.mul_prod)) = *
-
-function Base.any(f::F, u::HaloArray) where {F<:Function}
-    MPI.Allreduce(_local_any(f, u) :: Bool, |, communicator(u))
-end
-
-function Base.all(f::F, u::HaloArray) where {F<:Function}
-    MPI.Allreduce(_local_all(f, u) :: Bool, &, communicator(u))
-end
-
-# Collective equality: every rank compares its own interior, then combines with
-# a logical-AND Allreduce, so all ranks agree (see the note in reduction.jl).
-function Base.:(==)(x::HaloArray, y::HaloArray)
-    size(x) == size(y) || return false
-    MPI.Allreduce(_local_equal(x, y) :: Bool, &, communicator(x))
-end
-
-# Global inner product / norm / sum: the SAME contiguous-aware local part every
-# backend uses (`_local_dot`/`_local_sum`, reduction.jl — for this rank's single
-# tile that is `_interior_dot`/`_interior_acc` over the padded parent), then a
-# single Allreduce. These stay in every Krylov inner loop, so both the SIMD
-# reduction and the single collective matter.
-LinearAlgebra.dot(x::HaloArray, y::HaloArray) =
-    MPI.Allreduce(_local_dot(x, y), +, communicator(x))
-# `dots!`: the j local products, then ONE Allreduce of the j numbers.
-function _dots!(h, V, w, j, comm::MPI.Comm)
-    for i in 1:j
-        h[i] = _local_dot(V[i], w)
-    end
-    _allreduce(view(h, 1:j), +, comm; iscommutative = true)
-    return h
-end
-LinearAlgebra.norm(u::HaloArray) =
-    sqrt(MPI.Allreduce(_local_sum(_elt_abs2, u), +, communicator(u)))
-Base.sum(u::HaloArray) =
-    _allreduce(_local_sum(identity, u), +, communicator(u); iscommutative=true)
-
-# _mapreduce_dims (all backends + collections) lives in reduction.jl.
 
 
 # ============================================================

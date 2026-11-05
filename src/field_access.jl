@@ -1,5 +1,5 @@
 # Local storage access: no halo exchange or intermediate field-container map.
-@inline _cell_storage(field::Union{LocalHaloArray,HaloArray}, ::Nothing) = parent(field)
+@inline _cell_storage(field::_SingleBlock, ::Nothing) = parent(field)
 @inline _cell_storage(field::ThreadedHaloArray, ::Nothing) =
     throw(ArgumentError("threaded field access requires an explicit tile id"))
 Base.@propagate_inbounds function _cell_storage(field::AbstractSingleHaloArray, tile::Integer)

@@ -6,6 +6,111 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- `storage=` on every constructor: `LocalHaloArray(Float32, dims, h;
+  storage=CUDA.zeros)` allocates the padded block through
+  `storage(T, sizes...)` (`zeros` by default), and the same keyword on
+  `ThreadedHaloArray`, the MPI `HaloArray` (its exchange buffers follow the
+  storage), `MultiHaloArray` and `ArrayOfHaloArray` places every tile or field
+  there. It replaces the `storage=` that only the local `ArrayOfHaloArray`
+  form had.
+
+### Changed
+- One constructor per collection family. `MultiHaloArray(FT, T, geometry,
+  halo[, topology]; fields, boundary_condition | boundary_conditions,
+  kwargs...)` and `ArrayOfHaloArray(FT, T, field_shape, geometry, halo[,
+  topology]; …)` (or `boundary_conditions` alone, whose size is the field
+  shape) resolve the conditions and map the backend's own constructor
+  `FT(T, geometry, halo[, topology]; boundary_condition=bc, kwargs...)` over
+  them; the topology and every other keyword (`dims`, `thread_backend`,
+  `storage`) pass through. The nine `MultiHaloArray` and eleven
+  `ArrayOfHaloArray` per-backend methods, the four `_make_field` helpers and
+  the private local field builder are gone; the `field_shape` form now works
+  for MPI fields too. `HaloArray` keeps the data form, the topology form, the
+  inferred-topology form and the `Float64` forwarder: the positional
+  boundary-condition forms `HaloArray(T, dims, halo, topology, bc)` and
+  `HaloArray(T, dims, halo, bc)` are removed (use `boundary_condition=`).
+  Integer arguments (`Int32` dims, `Int8` halo) are normalized everywhere.
+
+- Every reduction is written once: the local part (per tile) followed by
+  `_global(r, op, communicator(u))`, which is the identity on the serial
+  backends and one `Allreduce` on an MPI `HaloArray`. The eleven
+  `HaloArray`-specific copies in `mpi_support.jl` (`mapreduce`, the folds,
+  `any`/`all`/`==`, `dot`/`norm`/`sum`, `dots!`) are gone; the `zip` forms are
+  one method. `dot` and `norm` on a multi-field state combine across ranks
+  **once** (they did one `Allreduce` per field), so a Krylov inner product on
+  a collection is one collective.
+- The MPI exchange keeps one request per face and direction (`HaloCommState`
+  is two `UnsafeMultiRequest`s): the blocking exchange waits on all slots, the
+  split exchange on one face's slot, which MPI.jl's multi-request items make
+  directly waitable. The parallel per-face request vectors, the state-tuple
+  shims and the `*_unsafe!` layer are gone; the exchange is four per-face
+  steps (`_pack_face!`, `_post_face!`, `_unpack_face!`, `_finish_face!`) and
+  three drivers. `_has_neighbor` is the one place that knows `PROC_NULL`.
+- The in-place BLAS-1 updates are one kernel: `_interior_map!(f, dest, rng[, src])`
+  (a contiguous `@simd` loop on a dense `Array` parent, a broadcast over the
+  interior views on anything else) and its two-output form `_interior_map2!`;
+  `rmul!`/`lmul!`/`axpy!`/`axpby!`/`swap!`/`rotate!`/`reflect!` are one
+  closure each instead of twelve hand-written loops and fallbacks, at the same
+  speed (256³: identical timings) and allocation-free. `lmul!(s, x)` now
+  multiplies on the left (it was `rmul!`, wrong for a non-commutative cell
+  type). Tested on device storage (JLArrays) against the CPU.
+- `LocalHaloArray` and `HaloArray` are the two single-block kinds
+  (`_SingleBlock`, one alias instead of three spellings): `interior_view`,
+  `edge_view`/`ghost_view`, scalar indexing and `show` are written once on
+  the union (the MPI kind adds its warning, error text and topology line
+  through three one-line hooks); `ghost_origin` is one method for every
+  single kind and threaded tile; `halo_width(u)` one instance method. Gone:
+  the duplicated `versors`/`map`, `full_range`, `full_tile_size`, the
+  tile-first `boundary_condition!(t, tile, side, dim)` nothing called.
+  `HaloArray`'s `show` uses the `LocalHaloArray` wording.
+
+### Removed
+- Every deprecated spelling, all silent since their replacement arrived:
+  `LocalMultiHaloArray` / `ThreadedMultiHaloArray` (use
+  `MultiHaloArray(LocalHaloArray, …)` / `MultiHaloArray(ThreadedHaloArray, …)`);
+  `halo_exchange_threads!` / `boundary_condition_threads!` /
+  `synchronize_halo_threads!` (the `threads=true` keyword);
+  `mapreduce_haloarray_dims(f, op, u, dims)` (`mapreduce(f, op, u; dims)`);
+  `global_size(u)` and the fallback that let a downstream type define it
+  instead of `_global_size` (`size(u)` is global on every kind; on an inactive
+  `MaybeHaloArray` use `size(parent(u))`); the grid accessors with the
+  coordinate system as first argument, `cell_center(system, g, …)` and six
+  siblings from 0.10 (the geometry carries its system); the pre-0.3
+  four-argument `apply_coupled_bc!(bc, state, side, dim)` form and the
+  `applicable` router in front of the user's method — a coupled condition
+  defines the one `tile`-generic method, and a missing one is a `MethodError`.
+- Uncalled definitions: `@maybe_delegate`, `apply_if_active`, `to_tuple`,
+  `active_fields`, the one-argument `similar(::Broadcasted)` on the halo
+  styles (Base always passes the element type), and the hand-written
+  `size(u, i)`, `axes(u, i)`, `length`, `ndims`, `eltype` that repeated
+  Base's `AbstractArray` defaults on the single kinds, the collections and
+  `MaybeHaloArray`.
+
+### Fixed
+- `eachindex(u)` on an MPI `HaloArray` is the global index block this rank
+  owns, so `for I in eachindex(u); u[I]` is valid on every rank. It gave the
+  interior view's 1-based indices: correct on rank 0 only, an "index not
+  owned" error (or, with a split along another dimension, the wrong cell) on
+  the others. The serial kinds already returned the global interior.
+- Scalar indexing of a `LocalHaloArray` (`u[i, j]`, `u[i, j] = v`) allocated
+  80 bytes per access through a boxed `Union{Nothing, Tuple}` splat; it is
+  allocation-free now. This is the path every broadcast with a plain array and
+  every generic Base fallback takes.
+- `copyto!` between collections of different element types (a `Float32` copy
+  of a `Float64` state) required identical types and fell to Base's
+  cell-by-cell fallback (scalar indexing, rank-local under MPI); any pair of
+  collections with the same fields works now.
+- The reductions (`mapreduce`, `mapfoldl`/`mapfoldr`, `any`, `all`) accept any
+  callable as the reducer, not only a `Function`: a callable struct used to
+  reach Base's generic methods, rank-local under MPI and scalar-indexed on GPU
+  storage.
+- `dot` between a single halo array and a collection is an `ArgumentError`
+  instead of Base's generic `dot`, which was rank-local and silently returned a
+  number whenever the lengths agreed.
+- `dot` on array-valued cells goes through `LinearAlgebra.dot` (allocation-free)
+  instead of a two-iterator `mapreduce` that allocated per cell.
+
 ## [0.16.0] — 2026-11-04
 
 ### Added

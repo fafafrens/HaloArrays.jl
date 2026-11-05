@@ -40,8 +40,7 @@ end
 @inline _elt_abs2(x)                = abs2(x)
 @inline _elt_dot(x::Number, y::Number)               = conj(x) * y
 @inline _elt_dot(x::StaticArray, y::StaticArray)     = sum(map(_elt_dot, x, y))
-@inline _elt_dot(x::AbstractArray, y::AbstractArray) = mapreduce(_elt_dot, +, x, y)
-@inline _elt_dot(x, y)                               = LinearAlgebra.dot(x, y)
+@inline _elt_dot(x, y)                               = LinearAlgebra.dot(x, y)   # array cells too: `dot` recurses, allocation-free
 # Scalar accumulator zero of ‖·‖² / ⟨·,·⟩ for a (possibly vector-valued) element
 # type — `Float64` for an `SVector{N,Float64}`, unchanged for numeric elements.
 @inline _sqnorm_zero(::Type{T}) where {T} = zero(Base.promote_op(_elt_abs2, T))
@@ -108,6 +107,9 @@ end
     haskey(kws, :init) ? op(kws[:init], r) : r
 _local_sum(f::F, u) where {F} =
     _mapreduce_tile(t -> _interior_acc(f, tile_parent(u, t), interior_range(u, t)), +, u)
+# A collection's local sum is the sum over its fields (recursively: a field
+# may itself be a collection), so `norm` on a state combines across ranks once.
+_local_sum(f::F, c::AbstractHaloCollection) where {F} = sum(field -> _local_sum(f, field), eachfield(c))
 # `_interior_dot` indexes BOTH parents with x's range under @inbounds/@simd —
 # guard first (a mismatch would be an out-of-bounds read / silently partial dot,
 # where Base's `dot` throws). Covers `dot` on every backend (MPI included).
@@ -123,12 +125,21 @@ _local_any(f::F, u) where {F} = _mapreduce_tile(t -> any(f, interior_view(u, t))
 _local_all(f::F, u) where {F} = _mapreduce_tile(t -> all(f, interior_view(u, t)), &, u)
 _local_equal(x, y) = _mapreduce_tile(t -> interior_view(x, t) == interior_view(y, t), &, x)
 
-# Reduce each tile (serially, with the user's kwargs), then combine the
-# per-tile results with `op` across tiles. One definition per reducer covers
-# LocalHaloArray and ThreadedHaloArray; the MPI HaloArray methods
-# (mpi_support.jl) are more specific and Allreduce the same local part.
-# `mapreduce` additionally supports `dims=`, routed to the backend-uniform
-# dims-reduction below (the MPI method routes to its plan-based equivalent).
+# ---- the global combine: one seam for every backend -----------------------
+# A reduction is the local part (per tile, contiguous-aware, above) followed by
+# the combine across ranks: nothing on the serial backends (`communicator` is
+# `nothing`), one Allreduce on an MPI `HaloArray` (`_allreduce`,
+# mpi_support.jl, which also handles static-array cells and in-place vectors).
+# Every reduction below is written once, on `AbstractSingleHaloArray`, in
+# terms of `_global`; the op is normalized for MPI (`add_sum` → `+`) after the
+# local part, so Base's integer widening has already happened.
+@inline _global(r, op, ::Nothing; iscommutative::Bool=true) = r
+@inline _global(r, op, comm::MPI.Comm; iscommutative::Bool=true) =
+    _allreduce(r, _normalize_reduction_op(op), comm; iscommutative)
+
+# Reduce each tile (serially, with the user's kwargs), combine the per-tile
+# results with `op` across tiles, then across ranks. `mapreduce` additionally
+# supports `dims=`, routed to the dims-reduction below (plan-based on MPI).
 # Shared dims= kwarg validation: the canonical dims, or nothing for the scalar path.
 @inline function _dims_kwarg(kws, nargs::Int)
     dims = get(kws, :dims, Colon())
@@ -142,17 +153,17 @@ end
 
 function Base.mapreduce(
         f::F, op::OP, halo::AbstractSingleHaloArray, etc::Vararg{AbstractSingleHaloArray}; kws...,
-    ) where {F<:Function, OP}
+    ) where {F, OP}
     dims = _dims_kwarg(kws, 1 + length(etc))
     dims === nothing || return _mapreduce_dims(f, op, halo, dims)
-    r = _local_mapreduce(mapreduce, f, op, (halo, etc...))   # per-tile, no init
-    return _apply_init(op, r, kws)                            # seed once (commutative)
+    r = _global(_local_mapreduce(mapreduce, f, op, (halo, etc...)), op, communicator(halo))
+    return _apply_init(op, r, kws)                            # seed once, after the combine
 end
 
 for func in (:mapfoldl, :mapfoldr)
     @eval function Base.$func(
             f::F, op::OP, halo::AbstractSingleHaloArray, etc::Vararg{AbstractSingleHaloArray}; kws...,
-        ) where {F<:Function, OP}
+        ) where {F, OP}
         # `dims=` is rejected for order-sensitive folds on every halo array: a
         # per-tile / per-rank reduction reorders the fold (and on a tiled array
         # would combine same-shaped per-tile results across ALL tiles, mixing
@@ -163,32 +174,47 @@ for func in (:mapfoldl, :mapfoldr)
             "`$($(string(func)))` with `dims=` is not supported on a halo array; " *
             "use `mapreduce`/`sum`/… with `dims=` (commutative ops only)."))
         # Folds forward `init` into the tile fold (it seeds one end): exact Base
-        # on a single tile; on a tiled array the cross-tile order is unspecified
-        # regardless — use `mapreduce` for a commutative reduction.
-        return _local_mapreduce($func, f, op, (halo, etc...); kws...)
+        # on a single tile; on a tiled or distributed array the cross-tile /
+        # cross-rank order is unspecified regardless — use `mapreduce` for a
+        # commutative reduction.
+        r = _local_mapreduce($func, f, op, (halo, etc...); kws...)
+        return _global(r, op, communicator(halo); iscommutative=false)
     end
 end
 
+# `mapreduce(f, op, zip(u, v))` is `mapreduce(f ∘ tuple, op, u, v)`: one method
+# for every kind (single, collection, Maybe), the multi-array methods dispatch.
 for func in (:mapreduce, :mapfoldl, :mapfoldr)
     @eval function Base.$func(
-            f::F, op::OP, z::Iterators.Zip{<:Tuple{AbstractSingleHaloArray,Vararg{AbstractSingleHaloArray}}}; kws...,
-        ) where {F<:Function, OP}
+            f::F, op::OP, z::Iterators.Zip{<:Tuple{AbstractHaloArray,Vararg{AbstractHaloArray}}}; kws...,
+        ) where {F, OP}
         g(args...) = f(args)
         return $func(g, op, z.is...; kws...)
     end
 end
 
-Base.any(f::F, u::AbstractSingleHaloArray) where {F<:Function} = _local_any(f, u)
-Base.all(f::F, u::AbstractSingleHaloArray) where {F<:Function} = _local_all(f, u)
+Base.any(f::F, u::AbstractSingleHaloArray) where {F} = _global(_local_any(f, u), |, communicator(u))
+Base.all(f::F, u::AbstractSingleHaloArray) where {F} = _global(_local_all(f, u), &, communicator(u))
+
+# The reducer `f` is untyped above so a callable struct reaches the halo-aware
+# reductions too (with `F<:Function` it fell to Base's generic, rank-local
+# version). Base has `any(f::Function, ::AbstractArray; dims)`, so a plain
+# function needs these to resolve the ambiguity; they forward to the untyped
+# methods.
+for T in (:AbstractSingleHaloArray, :FieldCollection, :MaybeHaloArray)
+    @eval begin
+        Base.any(f::Function, u::$T) = invoke(Base.any, Tuple{Any,$T}, f, u)
+        Base.all(f::Function, u::$T) = invoke(Base.all, Tuple{Any,$T}, f, u)
+    end
+end
 
 # `==` compares the interiors (ghosts excluded, like every reduction). Without
 # this method Base's generic AbstractArray `==` iterates the arrays — which is
 # interior-LOCAL, so under MPI each rank would compare only its own subdomain
-# and ranks could silently disagree. The HaloArray method (mpi_support.jl)
-# Allreduces the same local part so every rank returns the same answer.
+# and ranks could silently disagree; the `&` combine makes every rank agree.
 function Base.:(==)(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray)
     size(x) == size(y) || return false
-    return _local_equal(x, y)
+    return _global(_local_equal(x, y), &, communicator(x))
 end
 
 function Base.:(==)(x::AbstractHaloCollection, y::AbstractHaloCollection)
@@ -206,14 +232,14 @@ end
 # field-combine op is `op` itself; `kws` (e.g. `init`) apply at that combine.
 # `mapreduce` additionally supports `dims=`: each field is reduced along `dims`
 # and the same collection kind is rebuilt around the reduced fields.
-function Base.mapreduce(f::F, op::OP, c::AbstractHaloCollection; kws...) where {F<:Function, OP}
+function Base.mapreduce(f::F, op::OP, c::AbstractHaloCollection; kws...) where {F, OP}
     dims = _dims_kwarg(kws, 1)
     dims === nothing || return _mapreduce_dims(f, op, c, dims)
     return mapreduce(field -> mapreduce(f, op, field), op, eachfield(c); kws...)
 end
 
 for func in (:mapfoldl, :mapfoldr)
-    @eval Base.$func(f::F, op::OP, halo::AbstractHaloCollection; kws...) where {F<:Function, OP} =
+    @eval Base.$func(f::F, op::OP, halo::AbstractHaloCollection; kws...) where {F, OP} =
         $func(field -> $func(f, op, field), op, eachfield(halo); kws...)
 end
 
@@ -224,63 +250,49 @@ for func in (:mapreduce, :mapfoldl, :mapfoldr)
     # materializes O(#fields) (a `zip` of tuples would be type-unstable).
     @eval function Base.$func(
             f::F, op::OP, halo::AbstractHaloCollection, etc::Vararg{AbstractHaloCollection}; kws...,
-        ) where {F<:Function, OP}
+        ) where {F, OP}
         per_field_results = map((fields...) -> $func(f, op, fields...),
                                 map(eachfield, (halo, etc...))...)
         return reduce(op, per_field_results; kws...)
-    end
-
-    @eval function Base.$func(
-            f::F, op::OP, z::Iterators.Zip{<:Tuple{AbstractHaloCollection,Vararg{AbstractHaloCollection}}}; kws...,
-        ) where {F<:Function, OP}
-        g(args...) = f(args)
-        $func(g, op, z.is...; kws...)
     end
 end
 
 
 # Field-wise short-circuit all/any for any collection kind (named or indexed):
 # reduce over fields, each field reducing over its own interior.
-Base.all(f::F, c::FieldCollection) where {F<:Function} =
+Base.all(f::F, c::FieldCollection) where {F} =
     all(field -> all(f, field), _fields(c))
-Base.any(f::F, c::FieldCollection) where {F<:Function} =
+Base.any(f::F, c::FieldCollection) where {F} =
     any(field -> any(f, field), _fields(c))
 
 for func in (:mapreduce, :mapfoldl, :mapfoldr)
     @eval function Base.$func(
             f::F, op::OP, halo::MaybeHaloArray, etc::Vararg{MaybeHaloArray}; kws...,
-        ) where {F<:Function, OP}
+        ) where {F, OP}
         all(is_active, (halo, etc...)) ||
             throw(ErrorException("MaybeHaloArray: attempt to reduce inactive value"))
         return $func(f, op, getdata(halo), getdata.(etc)...; kws...)
     end
-
-    @eval function Base.$func(
-            f::F, op::OP, z::Iterators.Zip{<:Tuple{MaybeHaloArray,Vararg{MaybeHaloArray}}}; kws...,
-        ) where {F<:Function, OP}
-        g(args...) = f(args)
-        $func(g, op, z.is...; kws...)
-    end
 end
 
-function Base.all(f::F, halo::MaybeHaloArray) where {F<:Function}
+function Base.all(f::F, halo::MaybeHaloArray) where {F}
     is_active(halo) || throw(ErrorException("MaybeHaloArray: attempt to reduce inactive value"))
     return all(f, getdata(halo))
 end
 
-function Base.any(f::F, halo::MaybeHaloArray) where {F<:Function}
+function Base.any(f::F, halo::MaybeHaloArray) where {F}
     is_active(halo) || throw(ErrorException("MaybeHaloArray: attempt to reduce inactive value"))
     return any(f, getdata(halo))
 end
 
 Base.sum(halo::AbstractHaloArray) = mapreduce(identity, +, halo)
-Base.sum(f::F, halo::AbstractHaloArray) where {F<:Function} = mapreduce(f, +, halo)
+Base.sum(f::F, halo::AbstractHaloArray) where {F} = mapreduce(f, +, halo)
 Base.maximum(halo::AbstractHaloArray) = mapreduce(identity, max, halo)
 Base.minimum(halo::AbstractHaloArray) = mapreduce(identity, min, halo)
 
 # Fast `sum` (no-arg): contiguous-aware interior reduction (see `_interior_acc`).
 # `sum(f, ...)` and max/min keep the generic mapreduce path above.
-Base.sum(u::AbstractSingleHaloArray) = _local_sum(identity, u)
+Base.sum(u::AbstractSingleHaloArray) = _global(_local_sum(identity, u), +, communicator(u))
 
 # dot, norm, and the in-place BLAS-1 ops (rmul!/lmul!/axpy!/axpby!) — all built
 # on the mapreduce/broadcast above — live in vector_space.jl.
@@ -712,7 +724,3 @@ end
         j === nothing ? Tuple(ok)[findfirst(==(d), kept)::Int] : Tuple(rk)[j]
     end
 end
-
-# The keyword form `mapreduce(f, op, u; dims=…)` (and `sum(u; dims=…)` etc.) is
-# the API; the positional name remains as a deprecated alias.
-Base.@deprecate mapreduce_haloarray_dims(f, op, u, dims) mapreduce(f, op, u; dims=dims) false

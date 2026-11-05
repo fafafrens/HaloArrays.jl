@@ -26,10 +26,11 @@ Base.:*(x::Number, halo::AbstractSingleHaloArray) = x .* halo
 # ---- norm (global reduction) ------------------------------------------------
 # The 2-norm (the Krylov hot path) is its own branch-free method; the general-`p`
 # method carries the `p == Inf` / else dispatch and reuses the 2-norm for p == 2.
-LinearAlgebra.norm(halo::AbstractSingleHaloArray) = sqrt(_local_sum(_elt_abs2, halo))
+LinearAlgebra.norm(halo::AbstractSingleHaloArray) =
+    sqrt(_global(_local_sum(_elt_abs2, halo), +, communicator(halo)))
 # Expressed in GLOBAL primitives (mapreduce), not the _local_* helpers, so the
-# MPI HaloArray inherits a globally-correct p-norm through its Allreduce-backed
-# mapreduce — only the hot 2-norm gets a specialized MPI method.
+# p-norm is globally correct on every backend through mapreduce's combine —
+# only the hot 2-norm is written on the local part directly.
 # `norm` (not `abs`) per element: for a scalar `norm(x::Number) == abs(x)`, so the
 # numeric result is unchanged, while a vector-valued cell contributes its own
 # Euclidean length — matching Base's `norm(::Array{<:AbstractVector}, p)`.
@@ -44,16 +45,18 @@ function LinearAlgebra.norm(halo::AbstractSingleHaloArray, p::Real)
     return mapreduce(x -> norm(x)^p, +, halo)^(1 / p)
 end
 # The 2-norm above IS the fast path: `_local_sum` runs the contiguous-aware
-# `_interior_acc` per tile (single-block inline, threaded across the backend);
-# the MPI HaloArray method (mpi_support.jl) Allreduces the same local part.
+# `_interior_acc` per tile (single-block inline, threaded across the backend),
+# then one combine across ranks (`_global`, reduction.jl).
 
-# Collections: combine the per-field norms (each field already does its own global
-# reduction — MPI Allreduce / tile combine). Forwarding per field avoids Base's
-# generic `norm`, which iterates the collection through its scalar `AbstractArray`
-# interface and allocates O(N) every call (a hot-path leak in any Krylov solve on a
-# collection state). Mirrors the per-field `dot` below. ‖x‖₂ = √Σ_f ‖x_f‖²,
+# Collections: the 2-norm sums the fields' local parts and combines ONCE
+# (one Allreduce per norm on an MPI state, not one per field — this is in every
+# Krylov iteration on a collection state); the p-norms combine the per-field
+# global norms, each already a global reduction. Forwarding per field avoids
+# Base's generic `norm`, which iterates the collection through its scalar
+# `AbstractArray` interface and allocates O(N) every call. ‖x‖₂ = √Σ_f ‖x_f‖²,
 # ‖x‖_∞ = maxₚ ‖x_f‖_∞, ‖x‖_p = (Σ_f ‖x_f‖_p^p)^{1/p}.
-LinearAlgebra.norm(x::AbstractHaloCollection) = sqrt(sum(f -> norm(f)^2, eachfield(x)))
+LinearAlgebra.norm(x::AbstractHaloCollection) =
+    sqrt(_global(sum(f -> _local_sum(_elt_abs2, f), eachfield(x)), +, communicator(x)))
 function LinearAlgebra.norm(x::AbstractHaloCollection, p::Real)
     p == 2    && return norm(x)
     p == 1    && return sum(f -> norm(f, 1), eachfield(x))
@@ -68,15 +71,15 @@ end
 # backend rather than the two-argument `mapreduce(dot, +, x, y)`: Base's
 # multi-iterator `mapreduce` materializes `map(dot, …)` into a full interior-sized
 # array, allocating O(N) every call — and `dot` is in every Krylov inner loop.
-# The interior dot is allocation-free (BLAS-backed for contiguous storage) and
-# globally correct (MPI Allreduce; per-tile / per-field combine).
-LinearAlgebra.dot(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray) = _local_dot(x, y)
-# Tuple broadcast, not `zip`/`map`/`foreach` over the two field tuples: those
-# silently stop at the shorter tuple, so two collections with different field
-# counts would combine a partial result. Broadcasting two tuples checks their
-# lengths (`DimensionMismatch`), unrolls at compile time and allocates nothing.
+# The interior dot is allocation-free (BLAS-backed for contiguous storage); the
+# combine across ranks is one Allreduce (`_global`), for a collection too: its
+# local part sums the fields (`_local_dot`, reduction.jl, which also rejects a
+# field-count mismatch), so a Krylov inner product on a multi-field state is
+# one collective, not one per field.
+LinearAlgebra.dot(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray) =
+    _global(_local_dot(x, y), +, communicator(x))
 LinearAlgebra.dot(x::AbstractHaloCollection, y::AbstractHaloCollection) =
-    sum(dot.(eachfield(x), eachfield(y)))
+    _global(_local_dot(x, y), +, communicator(x))
 # MaybeHaloArray: forward to the inner array (its own dot/norm already do the right
 # global reduction); an inactive value contributes nothing. Without these, `dot`
 # hits the two-arg-mapreduce fallback below and `norm` hits Base's generic path —
@@ -90,8 +93,12 @@ LinearAlgebra.norm(m::MaybeHaloArray) =
     is_active(m) ? LinearAlgebra.norm(getdata(m)) : sqrt(_sqnorm_zero(eltype(m)))
 LinearAlgebra.norm(m::MaybeHaloArray, p::Real) =
     is_active(m) ? LinearAlgebra.norm(getdata(m), p) : sqrt(_sqnorm_zero(eltype(m)))
-# Fallback for any other halo-array type.
-LinearAlgebra.dot(x::AbstractHaloArray, y::AbstractHaloArray) = mapreduce(LinearAlgebra.dot, +, x, y)
+# Every kind has its own `dot` above; a mixed pair (a single array with a
+# collection) is an error. Without this method it reached Base's generic
+# `dot(::AbstractArray, ::AbstractArray)`: scalar-indexed and rank-local under
+# MPI, and silently a number whenever the lengths happen to agree.
+LinearAlgebra.dot(x::AbstractHaloArray, y::AbstractHaloArray) = throw(ArgumentError(
+    "dot between a $(nameof(typeof(x))) and a $(nameof(typeof(y))) is not defined"))
 
 # ---- in-place BLAS-1 updates (elementwise) -----------------------------------
 # Default path: the interior-only broadcast — correct on every backend (GPU
@@ -147,110 +154,69 @@ LinearAlgebra.ldiv!(out::AbstractHaloArray, J::UniformScaling, b::AbstractHaloAr
 LinearAlgebra.ldiv!(J::UniformScaling, b::AbstractHaloArray) = (b .= b ./ J.λ; b)
 LinearAlgebra.rdiv!(b::AbstractHaloArray, J::UniformScaling) = (b .= b ./ J.λ; b)
 
-# contiguous @simd over the leading (contiguous) dim of a dense Array parent …
-@inline function _interior_scal!(p::Array, rng::Tuple, s)
+# The one kernel behind every in-place elementwise update of one tile's
+# interior: `_interior_map!(f, dest, rng[, src])` writes `dest[I] = f(dest[I][, src[I]])`,
+# `_interior_map2!(f, px, py, rng)` writes `(px[I], py[I]) = f(px[I], py[I])` in
+# one fused pass (both outputs from both old inputs, no temporary). On a dense
+# `Array` parent: a contiguous `@simd` loop over the leading dimension (the
+# closure inlines; same speed as the hand-written loops it replaces). On any
+# other parent (GPU): a broadcast over the interior views, so device parents
+# keep their on-device kernels — the two-output form needs one temporary there.
+@inline function _interior_map!(f::F, dest::Array, rng::Tuple) where {F}
     inner = rng[1]; outer = CartesianIndices(Base.tail(rng))
     @inbounds for J in outer
-        @simd for i in inner; p[i, J] *= s; end
+        @simd for i in inner; dest[i, J] = f(dest[i, J]); end
     end
+    return nothing
 end
-@inline function _interior_axpy!(py::Array, px::Array, rng::Tuple, s)
+@inline function _interior_map!(f::F, dest::Array, rng::Tuple, src::Array) where {F}
     inner = rng[1]; outer = CartesianIndices(Base.tail(rng))
     @inbounds for J in outer
-        @simd for i in inner; py[i, J] += s * px[i, J]; end
+        @simd for i in inner; dest[i, J] = f(dest[i, J], src[i, J]); end
     end
+    return nothing
 end
-@inline function _interior_axpby!(py::Array, px::Array, rng::Tuple, s, t)
-    inner = rng[1]; outer = CartesianIndices(Base.tail(rng))
-    @inbounds for J in outer
-        @simd for i in inner; py[i, J] = s * px[i, J] + t * py[i, J]; end
+@inline function _interior_map2!(f::F, px::Array, py::Array, rng::Tuple) where {F}
+    @inbounds for I in CartesianIndices(rng)
+        px[I], py[I] = f(px[I], py[I])
     end
+    return nothing
 end
-# … and the GPU / non-dense fallback: broadcast over the interior view.
-@inline _interior_scal!(p::AbstractArray, rng::Tuple, s) = (@views p[rng...] .*= s; nothing)
-@inline _interior_axpy!(py::AbstractArray, px::AbstractArray, rng::Tuple, s) =
-    (@views py[rng...] .+= s .* px[rng...]; nothing)
-@inline _interior_axpby!(py::AbstractArray, px::AbstractArray, rng::Tuple, s, t) =
-    (@views py[rng...] .= s .* px[rng...] .+ t .* py[rng...]; nothing)
+@inline _interior_map!(f::F, dest::AbstractArray, rng::Tuple) where {F} =
+    (@views dest[rng...] .= f.(dest[rng...]); nothing)
+@inline _interior_map!(f::F, dest::AbstractArray, rng::Tuple, src::AbstractArray) where {F} =
+    (@views dest[rng...] .= f.(dest[rng...], src[rng...]); nothing)
+@inline function _interior_map2!(f::F, px::AbstractArray, py::AbstractArray, rng::Tuple) where {F}
+    @views xi = px[rng...]; @views yi = py[rng...]
+    t = f.(xi, yi)                        # the pairs, one temporary
+    xi .= first.(t); yi .= last.(t)
+    return nothing
+end
 
 # Per-tile driving goes through `_foreach_tile` (abstract_haloarray.jl, next to
 # the one-tile decomposition trait it is built on). The two-array kernels index
 # BOTH parents with x's range under @inbounds, so they must pass the shared
 # geometry guard first (an unchecked mismatch is an out-of-bounds read/write).
 LinearAlgebra.rmul!(x::AbstractSingleHaloArray, s::Number) =
-    (_foreach_tile(t -> _interior_scal!(tile_parent(x, t), interior_range(x, t), s), x); x)
-LinearAlgebra.lmul!(s::Number, x::AbstractSingleHaloArray) =
-    (_foreach_tile(t -> _interior_scal!(tile_parent(x, t), interior_range(x, t), s), x); x)
+    (_foreach_tile(t -> _interior_map!(v -> v * s, tile_parent(x, t), interior_range(x, t)), x); x)
+LinearAlgebra.lmul!(s::Number, x::AbstractSingleHaloArray) =           # s on the left: not `rmul!` for a non-commutative cell type
+    (_foreach_tile(t -> _interior_map!(v -> s * v, tile_parent(x, t), interior_range(x, t)), x); x)
 function LinearAlgebra.axpy!(s::Number, x::AbstractSingleHaloArray, y::AbstractSingleHaloArray)
     _check_same_geometry(x, y, "axpy!")
-    _foreach_tile(t -> _interior_axpy!(tile_parent(y, t), tile_parent(x, t), interior_range(x, t), s), x)
+    _foreach_tile(t -> _interior_map!((yv, xv) -> yv + s * xv, tile_parent(y, t), interior_range(x, t), tile_parent(x, t)), x)
     return y
 end
 function LinearAlgebra.axpby!(s::Number, x::AbstractSingleHaloArray, t::Number, y::AbstractSingleHaloArray)
     _check_same_geometry(x, y, "axpby!")
-    _foreach_tile(tt -> _interior_axpby!(tile_parent(y, tt), tile_parent(x, tt), interior_range(x, tt), s, t), x)
+    _foreach_tile(tt -> _interior_map!((yv, xv) -> s * xv + t * yv, tile_parent(y, tt), interior_range(x, tt), tile_parent(x, tt)), x)
     return y
 end
 
 # ---- swap + Givens/Householder on two vectors (elementwise, MPI-safe) --------
 # These complete the BLAS-1 surface (SSWAP, SROT). Each mixes two whole vectors
-# elementwise — no reduction — so it is correct local-per-rank/tile (MPI-safe).
-# Both outputs depend on both old inputs, so each cell is updated through scalar
-# locals in a single fused pass: no temporary vector, no extra traversal.
-#
-# A single-tile kernel does the cell math on one raw padded array over
-# `interior_range` (so no scalar-getindex on the halo array itself); the shared
-# `_foreach_tile` driver runs it inline on a single-block array (Local/MPI) or
-# across the thread backend on a ThreadedHaloArray — one method per operation.
+# elementwise — no reduction — so it is correct local-per-rank/tile (MPI-safe);
+# each is one pair-valued cell function through `_interior_map2!` above.
 # Collections delegate per field, so each field picks its own driver.
-
-# Dense Array parents (CPU): scalar fused pass — no temporary, both outputs from
-# the two scalar locals. Non-Array (GPU) parents take the broadcast fallbacks
-# below: each is an in-place two-output op, so it needs one temp (copy of old x);
-# scalar-indexing a GPUArray would error / crawl. Same Array-gating as the other
-# BLAS-1 ops; keeps the CPU path 0-alloc, the GPU path correct.
-@inline function _swap_tile!(px::Array, py::Array, rng)
-    @inbounds for I in CartesianIndices(rng)
-        px[I], py[I] = py[I], px[I]
-    end
-end
-# Givens rotation:  x .= c*x + s*y,  y .= -conj(s)*x + c*y
-@inline function _rotate_tile!(px::Array, py::Array, rng, c, s)
-    @inbounds for I in CartesianIndices(rng)
-        a = px[I]; b = py[I]
-        px[I] = c * a + s * b
-        py[I] = c * b - conj(s) * a
-    end
-end
-# Householder reflection:  x .= c*x + s*y,  y .= conj(s)*x − c*y
-@inline function _reflect_tile!(px::Array, py::Array, rng, c, s)
-    @inbounds for I in CartesianIndices(rng)
-        a = px[I]; b = py[I]
-        px[I] = c * a + s * b
-        py[I] = conj(s) * a - c * b
-    end
-end
-
-# --- GPU / non-dense fallbacks: broadcast over the interior views (one temp) ---
-@inline function _swap_tile!(px::AbstractArray, py::AbstractArray, rng)
-    @views xi = px[rng...]; @views yi = py[rng...]
-    tmp = copy(xi); xi .= yi; yi .= tmp
-    return nothing
-end
-@inline function _rotate_tile!(px::AbstractArray, py::AbstractArray, rng, c, s)
-    @views xi = px[rng...]; @views yi = py[rng...]
-    a = copy(xi)                          # old x (both outputs need it)
-    @. xi = c * a + s * yi
-    @. yi = c * yi - conj(s) * a
-    return nothing
-end
-@inline function _reflect_tile!(px::AbstractArray, py::AbstractArray, rng, c, s)
-    @views xi = px[rng...]; @views yi = py[rng...]
-    a = copy(xi)
-    @. xi = c * a + s * yi
-    @. yi = conj(s) * a - c * yi
-    return nothing
-end
 
 """
     swap!(x, y) -> (x, y)
@@ -263,7 +229,7 @@ backend and is MPI-safe (each rank/tile swaps its own cells). On a
 """
 function swap!(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray)
     _check_same_geometry(x, y, "swap!")
-    _foreach_tile(t -> _swap_tile!(tile_parent(x, t), tile_parent(y, t), interior_range(x, t)), x)
+    _foreach_tile(t -> _interior_map2!((a, b) -> (b, a), tile_parent(x, t), tile_parent(y, t), interior_range(x, t)), x)
     return x, y
 end
 
@@ -289,27 +255,30 @@ function dots!(h, V, w, j)
     end
     return h
 end
-dots!(h, V, w::AbstractSingleHaloArray, j) = _dots!(h, V, w, j, communicator(w))
-# A collection reduces once too (`_local_dot` over its fields, reduction.jl;
-# `communicator` from its fields, abstract_haloarray.jl).
-dots!(h, V, w::AbstractHaloCollection, j) = _dots!(h, V, w, j, communicator(w))
-# Serial backends: `_local_dot` is the whole reduction (tile-parallel on ThreadedHaloArray).
-function _dots!(h, V, w, j, ::Nothing)
+# The j local products (a collection's over all its fields), then ONE combine
+# of the j numbers: in place on an MPI communicator, nothing on the serial
+# backends (`_global`, reduction.jl).
+function dots!(h, V, w::Union{AbstractSingleHaloArray,AbstractHaloCollection}, j)
     for i in 1:j
         h[i] = _local_dot(V[i], w)
     end
+    _global(view(h, 1:j), +, communicator(w))
     return h
 end
 
+# Givens rotation:  x .= c*x + s*y,  y .= -conj(s)*x + c*y
 function LinearAlgebra.rotate!(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray, c, s)
     _check_same_geometry(x, y, "rotate!")
-    _foreach_tile(t -> _rotate_tile!(tile_parent(x, t), tile_parent(y, t), interior_range(x, t), c, s), x)
+    _foreach_tile(t -> _interior_map2!((a, b) -> (c * a + s * b, c * b - conj(s) * a),
+                                       tile_parent(x, t), tile_parent(y, t), interior_range(x, t)), x)
     return x, y
 end
 
+# Householder reflection:  x .= c*x + s*y,  y .= conj(s)*x − c*y
 function LinearAlgebra.reflect!(x::AbstractSingleHaloArray, y::AbstractSingleHaloArray, c, s)
     _check_same_geometry(x, y, "reflect!")
-    _foreach_tile(t -> _reflect_tile!(tile_parent(x, t), tile_parent(y, t), interior_range(x, t), c, s), x)
+    _foreach_tile(t -> _interior_map2!((a, b) -> (c * a + s * b, conj(s) * a - c * b),
+                                       tile_parent(x, t), tile_parent(y, t), interior_range(x, t)), x)
     return x, y
 end
 

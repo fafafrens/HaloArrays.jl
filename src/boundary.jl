@@ -225,13 +225,11 @@ end
 @inline _cells_needed(::Extrapolation{P}, ::Val{H}) where {P,H} = P + 1
 
 # ---- the fill: every rule, every single-block backend ----------
-# `tile` selects the storage: nothing (whole block) or a ThreadedHaloArray tile.
-@inline _tile_storage(h::AbstractSingleHaloArray, ::Nothing) = parent(h)
-@inline _tile_storage(h::ThreadedHaloArray, tile::Integer) = tile_parent(h, tile)
-
+# `tile` selects the storage (`_cell_storage`, field_access.jl): nothing for
+# the whole block, a ThreadedHaloArray tile id otherwise.
 @inline function boundary_condition!(h::AbstractSingleHaloArray, s::Side, d::Dim,
         bc::AbstractBoundaryCondition, tile=nothing)
-    a = _tile_storage(h, tile)
+    a = _cell_storage(h, tile)
     g = _face_geometry(h, s, d, bc, tile)
     isempty(g.ghosts) && return nothing          # halo width 0, or an empty block: nothing to fill
     _traverse!(_face_backend(a), a, prepare_boundary(bc, g), g)
@@ -243,7 +241,7 @@ end
 # the stencil specialise on it without relying on constant propagation.
 @inline function _face_geometry(h::AbstractSingleHaloArray, s::Side, d::Dim,
         bc::AbstractBoundaryCondition, tile=nothing)
-    g = FaceGeometry(_tile_storage(h, tile), s, d, Val(halo_width(h)), ghost_origin(h, s, d, tile))
+    g = FaceGeometry(_cell_storage(h, tile), s, d, Val(halo_width(h)), ghost_origin(h, s, d, tile))
     isempty(g.ghosts) && return g
     need = _cells_needed(bc, Val(halo_width(h)))
     g.n >= need || throw(ArgumentError(
@@ -257,8 +255,8 @@ end
 # them). A NoBoundaryCondition face is owned and left alone by its no-op
 # method; the fused launch gives it an empty geometry.
 @inline _rule_owns(::LocalHaloArray, ::Side, ::Dim) = true
-@inline _rule_owns(h::HaloArray, ::Side{S}, ::Dim{D}) where {S,D} =
-    h.topology.neighbors[D][S] < 0 && !(h.boundary_condition[D][S] isa Periodic)
+@inline _rule_owns(h::HaloArray, s::Side{S}, d::Dim{D}) where {S,D} =
+    !_has_neighbor(h, s, d) && !(h.boundary_condition[D][S] isa Periodic)
 
 # One ghost cell: its accessor and distance, then the rule.
 @inline function _fill_cell!(a, rule, g::FaceGeometry, I::CartesianIndex)
@@ -282,7 +280,7 @@ end
 # predicate, so face ownership is decided in one place.
 # ============================================================
 
-function boundary_condition!(halo::Union{LocalHaloArray,HaloArray}, s::Side{S}, dim::Dim{D}) where {S,D}
+function boundary_condition!(halo::_SingleBlock, s::Side{S}, dim::Dim{D}) where {S,D}
     _rule_owns(halo, s, dim) && boundary_condition!(halo, s, dim, halo.boundary_condition[D][S])
     return halo
 end
@@ -417,8 +415,7 @@ collection, delegates to its first field. Use it to apply a physical boundary
 condition only where one belongs.
 """
 @inline is_physical_boundary(::LocalHaloArray, ::Side, ::Dim) = true
-@inline is_physical_boundary(halo::HaloArray, ::Side{S}, ::Dim{D}) where {S,D} =
-    halo.topology.neighbors[D][S] < 0
+@inline is_physical_boundary(halo::HaloArray, s::Side, d::Dim) = !_has_neighbor(halo, s, d)
 # Threaded: a domain edge exists if any boundary tile has no neighbour (id 0).
 @inline is_physical_boundary(h::ThreadedHaloArray, ::Side{S}, ::Dim{D}) where {S,D} =
     any(t -> neighbor_tile_id(h, t, D, S) == 0, 1:tile_count(h))
@@ -460,40 +457,14 @@ The spatial dimension is taken from the collection's type
 allocation-free. Mark the coupled edges [`NoBoundaryCondition`](@ref) so
 `synchronize_halo!` leaves them for this call; for a *mix* of coupled and
 ordinary boundaries, call the per-face form on the specific `(side, dim)`.
-
-!!! compat "Legacy signatures (pre-0.3)"
-    The old split signatures still work: a **four-argument** method
-    `apply_coupled_bc!(bc, state, s, d)` (Local/MPI whole-array) and a
-    **five-argument** `(bc, state, s, d, tile_id::Integer)` (per threaded tile).
-    New code should define the single `tile`-generic method above instead.
 """
-function apply_coupled_bc!(bc::AbstractCoupledBoundaryCondition,
-        state, ::Side{S}, ::Dim{D}) where {S,D}
-    throw(ArgumentError(
-        "no apply_coupled_bc! for $(typeof(bc)) at side $S dim $D; define " *
-        "`HaloArrays.apply_coupled_bc!(bc::$(nameof(typeof(bc))), state, ::Side, ::Dim, tile)` " *
-        "(read `edge_view(field, s, d, tile)`, write `ghost_view(field, s, d, tile)`)"))
-end
+function apply_coupled_bc! end
 
-# Route one face to the user's method. The canonical signature is the 5-arg
-# `(bc, state, side, dim, tile)`; when only the legacy 4-arg (Local/MPI) method
-# exists, fall back to it. The `applicable` check (runtime method lookup) runs
-# once per face per application — noise next to the ghost fill itself. There is
-# deliberately NO generic throwing 5-arg fallback method: it would be dispatch-
-# ambiguous with user methods that leave `tile` untyped, so the missing-method
-# error lives here instead.
-@inline function _coupled_face_call!(bc, state, side::Side{S}, dim::Dim{D}, tile) where {S,D}
-    if applicable(apply_coupled_bc!, bc, state, side, dim, tile)
-        apply_coupled_bc!(bc, state, side, dim, tile)
-    elseif tile === nothing
-        apply_coupled_bc!(bc, state, side, dim)   # legacy 4-arg (or its helpful error)
-    else
-        throw(ArgumentError(
-            "no apply_coupled_bc! for $(typeof(bc)) at side $S dim $D tile $tile; define " *
-            "`HaloArrays.apply_coupled_bc!(bc::$(nameof(typeof(bc))), state, ::Side, ::Dim, tile)`"))
-    end
-    return nothing
-end
+# One face goes straight to the user's `apply_coupled_bc!(bc, state, side, dim,
+# tile)`: `tile` is `nothing` on a single block, the tile id on a threaded
+# field. A condition without that method is a plain MethodError. (No generic
+# throwing fallback: it would be ambiguous with user methods that leave `tile`
+# untyped.)
 
 # Apply the coupled BC on one physical face. The per-field path (Local/MPI) makes
 # a single whole-array call (tile = nothing); the threaded path visits only the
@@ -502,7 +473,7 @@ end
     _apply_coupled_face!(halo_backend(state), bc, state, side, dim)
 
 @inline function _apply_coupled_face!(::AbstractHaloBackend, bc, state, side::Side, dim::Dim)
-    is_physical_boundary(state, side, dim) && _coupled_face_call!(bc, state, side, dim, nothing)
+    is_physical_boundary(state, side, dim) && apply_coupled_bc!(bc, state, side, dim, nothing)
     return nothing
 end
 
@@ -510,7 +481,7 @@ end
         side::Side{S}, dim::Dim{D}) where {S,D}
     for tile_id in 1:tile_count(state)
         neighbor_tile_id(state, tile_id, D, S) == 0 &&
-            _coupled_face_call!(bc, state, side, dim, tile_id)
+            apply_coupled_bc!(bc, state, side, dim, tile_id)
     end
     return nothing
 end

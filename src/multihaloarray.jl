@@ -2,66 +2,26 @@
 # MultiHaloArray(::NamedTuple) constructor live in field_collection.jl.
 
 
-# The MPI collection constructors are field-type-first: the first argument is
-# always the field type (HaloArray), never the element type. The element-type-
-# first forms were removed — they made the first positional argument mean two
-# different things and caused method ambiguities against the specialized
-# Local/Threaded constructors.
-
-function MultiHaloArray(FT::Type{<:HaloArray}, ::Type{T}, owned_dims::NTuple{N,Int},
-        halo::Int, topology::CartesianTopology{N};
-        boundary_conditions::Union{NamedTuple,Nothing} = nothing,
-        fields::Union{NTuple{<:Any,Symbol},Nothing} = nothing,
-        boundary_condition = :repeating) where {T,N}
+# One constructor for every backend. The boundary conditions are resolved into
+# a NamedTuple shaped like the fields (`fields` + one `boundary_condition`, or
+# `boundary_conditions` keyed by name) and one field is built per entry with
+# the backend's own constructor `FT(T, geometry, halo[, topology]; …)`. What
+# follows the halo (an MPI topology) and every keyword this method does not
+# consume (`dims`, `thread_backend`, `storage`, …) goes to that constructor
+# unchanged, so a backend option never needs a collection method of its own.
+function MultiHaloArray(FT::Type{<:AbstractSingleHaloArray}, ::Type{T},
+        geometry::NTuple{N,<:Integer}, halo::Integer, topology...;
+        fields::Union{NTuple{<:Any,Symbol},Nothing}=nothing,
+        boundary_condition=:repeating,
+        boundary_conditions::Union{NamedTuple,Nothing}=nothing,
+        kwargs...) where {T,N}
     bcs = _resolve_bcs(fields, boundary_condition, boundary_conditions)
-    return MultiHaloArray(map(bc -> _make_field(FT, T, owned_dims, halo, topology, bc), bcs))
+    return MultiHaloArray(map(bc -> FT(T, geometry, halo, topology...; boundary_condition=bc, kwargs...), bcs))
 end
 
-function MultiHaloArray(FT::Type{<:HaloArray}, ::Type{T}, owned_dims::NTuple{N,Int},
-        halo::Int;
-        boundary_conditions::Union{NamedTuple,Nothing} = nothing,
-        fields::Union{NTuple{<:Any,Symbol},Nothing} = nothing,
-        boundary_condition = :repeating) where {T,N}
-    bcs = _resolve_bcs(fields, boundary_condition, boundary_conditions)
-    return MultiHaloArray(map(bc -> _make_field(FT, T, owned_dims, halo, bc), bcs))
-end
-
-# Float64 defaults
-MultiHaloArray(::Type{<:HaloArray}, owned_dims::NTuple{N,Int}, halo::Int,
-        topology::CartesianTopology{N}; kwargs...) where {N} =
-    MultiHaloArray(HaloArray, Float64, owned_dims, halo, topology; kwargs...)
-
-MultiHaloArray(::Type{<:HaloArray}, owned_dims::NTuple{N,Int}, halo::Int;
-        kwargs...) where {N} =
-    MultiHaloArray(HaloArray, Float64, owned_dims, halo; kwargs...)
-
-function MultiHaloArray(FT::Type{<:LocalHaloArray}, ::Type{T}, owned_dims::NTuple{N,<:Integer},
-        halo::Integer;
-        boundary_conditions::Union{NamedTuple,Nothing} = nothing,
-        fields::Union{NTuple{<:Any,Symbol},Nothing} = nothing,
-        boundary_condition = :repeating) where {T,N}
-    bcs = _resolve_bcs(fields, boundary_condition, boundary_conditions)
-    dims_n = ntuple(d -> Int(owned_dims[d]), Val(N))
-    return MultiHaloArray(map(bc -> _make_field(FT, T, dims_n, Int(halo), bc), bcs))
-end
-
-MultiHaloArray(::Type{<:LocalHaloArray}, owned_dims::NTuple{N,<:Integer}, halo::Integer;
-        kwargs...) where {N} =
-    MultiHaloArray(LocalHaloArray, Float64, owned_dims, halo; kwargs...)
-
-function MultiHaloArray(FT::Type{<:ThreadedHaloArray}, ::Type{T},
-        tile_size::NTuple{N,<:Integer}, halo::Integer;
-        dims::NTuple{N,<:Integer} = ntuple(d -> d == N ? Threads.nthreads() : 1, Val(N)),
-        boundary_conditions::Union{NamedTuple,Nothing} = nothing,
-        fields::Union{NTuple{<:Any,Symbol},Nothing} = nothing,
-        boundary_condition = :repeating) where {T,N}
-    bcs = _resolve_bcs(fields, boundary_condition, boundary_conditions)
-    return MultiHaloArray(map(bc -> _make_field(FT, T, tile_size, halo, bc; dims=dims), bcs))
-end
-
-MultiHaloArray(::Type{<:ThreadedHaloArray}, tile_size::NTuple{N,<:Integer}, halo::Integer;
-        kwargs...) where {N} =
-    MultiHaloArray(ThreadedHaloArray, Float64, tile_size, halo; kwargs...)
+MultiHaloArray(FT::Type{<:AbstractSingleHaloArray}, geometry::NTuple{N,<:Integer}, halo::Integer,
+        args...; kwargs...) where {N} =
+    MultiHaloArray(FT, Float64, geometry, halo, args...; kwargs...)
 
 
 Base.getindex(mha::MultiHaloArray, name::Symbol) = mha.arrays[name]
@@ -101,20 +61,9 @@ number of leaf fields; a single halo array has field shape `()`.
 # Everything else MultiHaloArray needs is container-generic and defined once on
 # FieldCollection (field_collection.jl) / AbstractHaloCollection
 # (abstract_haloarray.jl): the _fields/_first_field/_map_fields/_check_same_fields
-# hooks, tile_parent, to_tuple, active_fields, integer+Cartesian getindex/
+# hooks, tile_parent, integer+Cartesian getindex/
 # setindex!, similar(c[, T][, dims]), copy/copyto!/fill!/zero, map, interior_view,
 # map_over_field, all/any, and halo_backend/halo_width/tile_*/is_active/is_root.
-
-# ---- deprecated backend-named constructors ---------------------------------
-# `MultiHaloArray(LocalHaloArray, …)` / `MultiHaloArray(ThreadedHaloArray, …)`
-# accept the same keywords; a NamedTuple of fields is just `MultiHaloArray(nt)`.
-Base.@deprecate LocalMultiHaloArray(arrs::NamedTuple) MultiHaloArray(arrs) false
-Base.@deprecate LocalMultiHaloArray(T::Type, owned_dims::Tuple, halo::Integer; kwargs...) MultiHaloArray(LocalHaloArray, T, owned_dims, halo; kwargs...) false
-Base.@deprecate LocalMultiHaloArray(owned_dims::Tuple, halo::Integer, bcs::NamedTuple; kwargs...) MultiHaloArray(LocalHaloArray, Float64, owned_dims, halo; boundary_conditions=bcs, kwargs...) false
-Base.@deprecate LocalMultiHaloArray(owned_dims::Tuple, halo::Integer; kwargs...) MultiHaloArray(LocalHaloArray, Float64, owned_dims, halo; kwargs...) false
-Base.@deprecate ThreadedMultiHaloArray(arrs::NamedTuple) MultiHaloArray(arrs) false
-Base.@deprecate ThreadedMultiHaloArray(T::Type, tile_size::Tuple, halo::Integer; kwargs...) MultiHaloArray(ThreadedHaloArray, T, tile_size, halo; kwargs...) false
-Base.@deprecate ThreadedMultiHaloArray(tile_size::Tuple, halo::Integer; kwargs...) MultiHaloArray(ThreadedHaloArray, Float64, tile_size, halo; kwargs...) false
 
 # ============================================================
 # Helpers for the uniform-BC shorthand (fields + boundary_condition)

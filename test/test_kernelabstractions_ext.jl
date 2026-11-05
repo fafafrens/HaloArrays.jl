@@ -25,6 +25,21 @@ struct DirichletExt{T} <: HaloArrays.AbstractBoundaryCondition; value::T; end
         @test Array(parent(dev2)) == parent(ref)
     end
 
+    # `storage=` allocates on the device directly; the collection constructors pass it down
+    jlzeros(T, d...) = JLArray(zeros(T, d...))
+    g = LocalHaloArray(Float32, (5, 6), 1; boundary_condition=:periodic, storage=jlzeros)
+    @test parent(g) isa JLArray{Float32,2} && size(parent(g)) == (7, 8)
+    gref = LocalHaloArray(Float32, (5, 6), 1; boundary_condition=:periodic)
+    interior_view(g) .= 1.0f0
+    interior_view(gref) .= 1.0f0
+    synchronize_halo!(g)
+    synchronize_halo!(gref)
+    @test Array(parent(g)) == parent(gref)
+    gs = MultiHaloArray(LocalHaloArray, Float32, (5, 6), 1; fields=(:a, :b), boundary_condition=:periodic, storage=jlzeros)
+    @test parent(gs.b) isa JLArray{Float32,2}
+    gv = ArrayOfHaloArray(LocalHaloArray, Float32, (2,), (5, 6), 1; boundary_condition=:periodic, storage=jlzeros)
+    @test parent(gv[2]) isa JLArray{Float32,2}
+
     # mixed conditions: one fused launch over all rule faces
     x = rand(8, 9)
     bc = ((Periodic(), Periodic()), (Repeating(), Repeating()))
@@ -138,4 +153,26 @@ struct DirichletExt{T} <: HaloArrays.AbstractBoundaryCondition; value::T; end
     @test adapt(Array, moved).boundary_condition[1][1].f.table isa Vector{Float64}
     th = adapt(JLArray, ThreadedHaloArray(LocalHaloArray(copy(x), 2, ((table_rule([10.0, 20.0]), Repeating()),)); dims=(2,)))
     @test th.boundary_condition[1][1].f.table isa JLArray
+
+    # BLAS-1 on device storage: the broadcast fallbacks of `_interior_map!`/`_interior_map2!`
+    xa, ya = rand(8, 7), rand(8, 7)
+    cx, cy = LocalHaloArray(copy(xa), 1, bc), LocalHaloArray(copy(ya), 1, bc)
+    dx, dy = LocalHaloArray(JLArray(copy(xa)), 1, bc), LocalHaloArray(JLArray(copy(ya)), 1, bc)
+    for (op!, args) in ((rmul!, (0.5,)), (lmul!, ()), (axpy!, ()), (axpby!, ()), (swap!, ()), (rotate!, (0.6, 0.8)), (reflect!, (0.6, 0.8)))
+        if op! === rmul!
+            rmul!(cx, 0.5); rmul!(dx, 0.5)
+        elseif op! === lmul!
+            lmul!(2.0, cy); lmul!(2.0, dy)
+        elseif op! === axpy!
+            axpy!(1.5, cx, cy); axpy!(1.5, dx, dy)
+        elseif op! === axpby!
+            axpby!(1.5, cx, -0.25, cy); axpby!(1.5, dx, -0.25, dy)
+        elseif op! === swap!
+            swap!(cx, cy); swap!(dx, dy)
+        else
+            op!(cx, cy, args...); op!(dx, dy, args...)
+        end
+        @test Array(parent(dx)) ≈ parent(cx) && Array(parent(dy)) ≈ parent(cy)
+    end
+    @test Array(parent(dx))[1, :] == xa[1, :]                         # ghosts untouched
 end

@@ -1,5 +1,5 @@
 """
-    LocalHaloArray(T, owned_dims, halo; boundary_condition=:repeating)
+    LocalHaloArray(T, owned_dims, halo; boundary_condition=:repeating, storage=zeros)
     LocalHaloArray(data::AbstractArray, halo, boundary_condition)
 
 A single-process halo array: a plain array padded with `halo` ghost cells on
@@ -17,12 +17,16 @@ and `eachindex` address the interior cells only; the ghost padding is hidden.
   [`boundary_condition!`](@ref). A symbol (`:periodic`, `:repeating`,
   `:reflecting`, `:antireflecting`), a boundary-condition instance, or a
   per-dimension tuple of `(left, right)` pairs. See [`Periodic`](@ref) etc.
+- `storage`: the allocator for the padded block, called as
+  `storage(T, sizes...)`. `zeros` by default; `CUDA.zeros` / `Metal.zeros`
+  places the array on a device.
 
 # Examples
 ```julia
 u = LocalHaloArray(Float64, (64, 64), 1; boundary_condition=:periodic)
 interior_view(u) .= 1.0      # write the interior cells
 synchronize_halo!(u)         # fill ghost cells from the boundary condition
+g = LocalHaloArray(Float32, (64, 64), 1; boundary_condition=:periodic, storage=Metal.zeros)
 ```
 
 See also [`HaloArray`](@ref) (MPI), [`ThreadedHaloArray`](@ref) (threads),
@@ -54,15 +58,13 @@ function _check_periodic_extent(fullsize::NTuple{N,Int}, halo::Int, bc) where {N
     return nothing
 end
 
-function LocalHaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int; boundary_condition=:repeating) where {T,N}
-    fullsize = ntuple(i -> owned_dims[i] + 2 * halo, Val(N))
-    data = zeros(T, fullsize...)
-    return LocalHaloArray(data, halo, boundary_condition)
+function LocalHaloArray(::Type{T}, owned_dims::NTuple{N,<:Integer}, halo::Integer;
+        boundary_condition=:repeating, storage=zeros) where {T,N}
+    return LocalHaloArray(_padded_storage(storage, T, owned_dims, halo), Int(halo), boundary_condition)
 end
 
-function LocalHaloArray(owned_dims::NTuple{N,Int}, halo::Int; boundary_condition=:repeating) where {N}
-    return LocalHaloArray(Float64, owned_dims, halo; boundary_condition)
-end
+LocalHaloArray(owned_dims::NTuple{N,<:Integer}, halo::Integer; kwargs...) where {N} =
+    LocalHaloArray(Float64, owned_dims, halo; kwargs...)
 
 # size, axes, length, eltype, ndims, parent, interior_axes, eachindex, iterate
 # inherited from AbstractSingleHaloArray / AbstractArray.
@@ -71,22 +73,26 @@ is_root(::LocalHaloArray; root::Integer=0) = (root == 0)
 # is_active, communicator inherited from AbstractSerialHaloArray
 
 @inline halo_width(::Type{<:LocalHaloArray{T,N,A,Halo}}) where {T,N,A,Halo} = Halo
-@inline halo_width(::LocalHaloArray{T,N,A,Halo}) where {T,N,A,Halo} = Halo
 
 # storage_size / interior_size / interior_range come from AbstractSingleHaloArray.
 
-@inline function full_range(halo::LocalHaloArray)
-    N = ndims(halo)
-    return ntuple(i -> 1:storage_size(halo, i), Val(N))
-end
+# ---- the single-block kinds: one storage block per process ------------
+# LocalHaloArray and HaloArray differ in their topology (none / MPI) and in
+# nothing else about the block they hold: the view accessors, scalar indexing
+# and `show` are written once on the union (the broadcast styles likewise).
+const _SingleBlock{T,N} = Union{HaloArray{T,N},LocalHaloArray{T,N}}
 
-@inline function interior_view(halo::LocalHaloArray)
-    ranges = interior_range(halo)
-    @views return halo.data[ranges...]
-end
+"""
+    interior_view(u) -> view
 
-@inline edge_view(array::LocalHaloArray, s::Side, d::Dim)  = edge_view(parent(array), s, d, halo_width(array))
-@inline ghost_view(array::LocalHaloArray, s::Side, d::Dim) = ghost_view(parent(array), s, d, halo_width(array))
+A mutable view of `u`'s interior (ghost-free) cells. The usual way to read/write
+initial data: `interior_view(u) .= ...`. For [`ThreadedHaloArray`](@ref) pass a
+tile id: `interior_view(u, tile_id)`. See also [`interior_range`](@ref).
+"""
+@inline interior_view(halo::_SingleBlock) = @views halo.data[interior_range(halo)...]
+
+@inline edge_view(a::_SingleBlock, s::Side, d::Dim)  = edge_view(parent(a), s, d, halo_width(a))
+@inline ghost_view(a::_SingleBlock, s::Side, d::Dim) = ghost_view(parent(a), s, d, halo_width(a))
 # versors, Base.similar dispatchers, Base.map!/map inherited from AbstractSingleHaloArray
 
 function Base.similar(halo::LocalHaloArray{T,N,A,Halo,BCondition}, ::Type{AA},
@@ -104,46 +110,57 @@ end
 # interior_axes, eachindex, iterate, versors, Base.similar dispatchers,
 # Base.map!/map — all inherited from AbstractSingleHaloArray
 
-function Base.map(f, src::Vararg{LocalHaloArray,N}) where {N}
-    dest = similar(src[1])
-    map!(f, dest, src...)
-    return dest
-end
-
-
 interior_to_global_index(::LocalHaloArray, owned_idx::NTuple{N,<:Integer}) where {N} = owned_idx
-@inline function ghost_origin(halo::LocalHaloArray{T,N}, ::Side{S}, ::Dim{D}) where {T,N,S,D}
-    owned = interior_size(halo)
-    hw    = halo_width(halo)
-    CartesianIndex(ntuple(i -> i == D ? (S == 1 ? 1 - hw : owned[i] + 1) : 1, Val(N)))
-end
 global_to_storage_index(halo::LocalHaloArray, global_idx::NTuple{N,<:Integer}) where {N} =
     all(i -> 1 <= global_idx[i] <= interior_size(halo, i), 1:N) ? ntuple(i -> global_idx[i] + halo_width(halo), Val(N)) : nothing
 _global_size(halo::LocalHaloArray) = interior_size(halo)
 
-function Base.getindex(halo::LocalHaloArray, I::Vararg{Integer})
+# Scalar indexing by GLOBAL index on the single-block kinds. The explicit
+# `nothing` check narrows the Union return before the splat (without it every
+# access allocated 80 bytes through a boxed splat). An index this process does
+# not hold is a BoundsError on a LocalHaloArray; on an MPI HaloArray, whose
+# scalar indexing is for diagnostics only (a global index is held by one rank),
+# an ArgumentError naming the rank-local semantics.
+@inline function _storage_index(halo::_SingleBlock, I)
     idx = _check_global_scalar_indices(halo, I)
     storage_idx = global_to_storage_index(halo, idx)
-    @inbounds return parent(halo)[storage_idx...]
+    storage_idx === nothing && _not_owned(halo, idx)
+    return storage_idx
+end
+_not_owned(halo::LocalHaloArray, idx) = throw(BoundsError(halo, idx))
+_not_owned(::HaloArray, idx) = throw(ArgumentError(
+    "Global index $idx is not in this MPI rank's interior region; HaloArray scalar indexing is local-only."))
+_index_note(::LocalHaloArray, op) = nothing
+_index_note(::HaloArray, op) =
+    @warn "Global scalar $op on HaloArray is local-only (diagnostics only, not for hot loops)." maxlog=1
+
+function Base.getindex(halo::_SingleBlock, I::Vararg{Integer})
+    _index_note(halo, "getindex")
+    @inbounds return parent(halo)[_storage_index(halo, I)...]
 end
 
-function Base.setindex!(halo::LocalHaloArray, value, I::Vararg{Integer})
-    idx = _check_global_scalar_indices(halo, I)
-    storage_idx = global_to_storage_index(halo, idx)
-    @inbounds parent(halo)[storage_idx...] = value
+function Base.setindex!(halo::_SingleBlock, value, I::Vararg{Integer})
+    _index_note(halo, "setindex!")
+    @inbounds parent(halo)[_storage_index(halo, I)...] = value
     return halo
 end
 
-function Base.show(io::IO, obj::LocalHaloArray)
-    print(io, "LocalHaloArray of global size ", size(obj), " (interior size: ", interior_size(obj), ", storage size: ", storage_size(obj), "), halo width: ", halo_width(obj), "\n")
-    print(io, "  eltype: ", eltype(obj), "\n")
-    print(io, "  boundary_condition: ", obj.boundary_condition, "\n")
+_show_topology(io::IO, ::LocalHaloArray) = nothing
+_show_topology(io::IO, u::HaloArray) = println(io, "  topology: ", u.topology)
+
+function Base.show(io::IO, u::_SingleBlock)
+    println(io, nameof(typeof(u)), " of global size ", size(u), " (interior size: ", interior_size(u),
+            ", storage size: ", storage_size(u), "), halo width: ", halo_width(u))
+    println(io, "  eltype: ", eltype(u))
+    _show_topology(io, u)
+    println(io, "  boundary_condition: ", u.boundary_condition)
 end
 
-function Base.show(io::IO, mime::MIME"text/plain", obj::LocalHaloArray)
-    println(io, "LocalHaloArray (storage size: ", storage_size(obj), ", halo width: ", halo_width(obj), ")")
-    println(io, "  eltype: ", eltype(obj))
-    println(io, "  boundary_condition: ", obj.boundary_condition)
+function Base.show(io::IO, mime::MIME"text/plain", u::_SingleBlock)
+    println(io, nameof(typeof(u)), " (storage size: ", storage_size(u), ", halo width: ", halo_width(u), ")")
+    println(io, "  eltype: ", eltype(u))
+    _show_topology(io, u)
+    println(io, "  boundary_condition: ", u.boundary_condition)
     println(io, "  interior data preview:")
-    show(io, mime, interior_view(obj))
+    show(io, mime, interior_view(u))
 end

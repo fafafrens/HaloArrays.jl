@@ -31,9 +31,9 @@ Broadcast.BroadcastStyle(::_HaloStyle{N}, ::DefaultArrayStyle{M}) where {N,M} =
 Broadcast.BroadcastStyle(::_HaloStyle{N}, a::AbstractArrayStyle{M}) where {N,M} =
     typeof(a)(Val(max(M, N)))
 
-# HaloArray and LocalHaloArray hold one storage block per process and share
-# every broadcast method below; ThreadedHaloArray works tile by tile.
-const _SingleBlock{T,N} = Union{HaloArray{T,N},LocalHaloArray{T,N}}
+# HaloArray and LocalHaloArray hold one storage block per process (the
+# `_SingleBlock` union, local_haloarray.jl) and share every broadcast method
+# below; ThreadedHaloArray works tile by tile.
 Broadcast.BroadcastStyle(::Type{<:_SingleBlock{T,N}}) where {T,N} = HaloArrayStyle{N}()
 Broadcast.BroadcastStyle(::Type{<:ThreadedHaloArray{T,N}}) where {T,N} = ThreadedHaloArrayStyle{N}()
 
@@ -173,14 +173,7 @@ function Base.similar(bc::Broadcasted{<:HaloArrayStyle}, ::Type{T}) where {T}
     return similar(_find_operand(_SingleBlock, bc), T)
 end
 
-function Base.similar(bc::Broadcasted{<:HaloArrayStyle})
-    return similar(_find_operand(_SingleBlock, bc))
-end
-
 function Base.similar(bc::Broadcasted{<:ThreadedHaloArrayStyle}, ::Type{T}) where {T}
     return similar(_find_operand(ThreadedHaloArray, bc), T)
 end
 
-function Base.similar(bc::Broadcasted{<:ThreadedHaloArrayStyle})
-    return similar(_find_operand(ThreadedHaloArray, bc))
-end

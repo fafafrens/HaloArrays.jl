@@ -73,7 +73,7 @@ array, or an array of fields sharing one topology.
 
 """
     ThreadedHaloArray(T, tile_size, halo; dims, boundary_condition=:repeating,
-                      thread_backend=ThreadsBackend())
+                      thread_backend=ThreadsBackend(), storage=zeros)
 
 A shared-memory halo array: the global grid is split into a `dims` layout of
 rectangular tiles, each stored as its own padded array with `halo` ghost cells.
@@ -94,6 +94,8 @@ each tile can be updated independently on its own thread.
 - `thread_backend::`[`ThreadBackend`](@ref): how per-tile work is dispatched
   ([`ThreadsBackend`](@ref) default, [`SerialBackend`](@ref),
   [`PolyesterBackend`](@ref)). Retrieve it with [`thread_backend`](@ref).
+- `storage`: the allocator for each tile's padded block, `storage(T, sizes...)`
+  (`zeros` by default).
 
 Work on a tile with [`tile_parent`](@ref)`(u, tile_id)` (a plain padded array)
 over the shared [`interior_range`](@ref)`(u)`; iterate `1:`[`tile_count`](@ref)`(u)`.
@@ -131,7 +133,8 @@ The thread-execution backend that dispatches this array's per-tile work.
 function ThreadedHaloArray(::Type{T}, tile_size::NTuple{N,<:Integer}, halo::Integer;
         dims::NTuple{N,<:Integer} = ntuple(d -> d == N ? Threads.nthreads() : 1, Val(N)),
         boundary_condition=:repeating,
-        thread_backend::ThreadBackend=ThreadsBackend()) where {T,N}
+        thread_backend::ThreadBackend=ThreadsBackend(),
+        storage=zeros) where {T,N}
     halo_int = Int(halo)
     halo_int >= 0 || throw(ArgumentError("halo width must be non-negative"))
 
@@ -144,8 +147,7 @@ function ThreadedHaloArray(::Type{T}, tile_size::NTuple{N,<:Integer}, halo::Inte
     bc = normalize_boundary_condition(boundary_condition, N)
     topology = ThreadedCartesianTopology(dims; periodic=infer_periodicity(bc))
     validate_boundary_condition(topology, bc)
-    full_tile_size = ntuple(d -> owned_tile_size[d] + 2 * halo_int, Val(N))
-    data = [zeros(T, full_tile_size...) for _ in 1:tile_count(topology)]
+    data = [_padded_storage(storage, T, owned_tile_size, halo_int) for _ in 1:tile_count(topology)]
 
     return ThreadedHaloArray{T,N,typeof(data[1]),halo_int,typeof(topology),typeof(bc),typeof(thread_backend)}(
         data, owned_tile_size, topology, bc, thread_backend,
@@ -236,7 +238,6 @@ end
     return (@inbounds halo[I]), (state[1], s)
 end
 @inline halo_width(::Type{<:ThreadedHaloArray{T,N,A,Halo}}) where {T,N,A,Halo} = Halo
-@inline halo_width(::ThreadedHaloArray{T,N,A,Halo}) where {T,N,A,Halo} = Halo
 """    tile_size(u) -> dims
 
 Interior (ghost-free) cells per tile, in each dimension. The global interior size is
@@ -276,17 +277,7 @@ with the extra `tile_id` since the interior region is per tile.
         throw(BoundsError(halo, owned_idx))
     return ntuple(d -> (coord[d] - 1) * ts[d] + owned_idx[d], Val(N))
 end
-# Global CartesianIndex of the first ghost cell of tile `tile_id` on the (side,dim)
-# face — ghost analog of `interior_to_global_index`, per tile (see the HaloArray
-# version for the index convention).
-@inline function ghost_origin(halo::ThreadedHaloArray{T,N}, ::Side{S}, ::Dim{D},
-        tile_id::Integer) where {T,N,S,D}
-    coord = tile_coordinates(halo, tile_id)
-    ts    = tile_size(halo)
-    hw    = halo_width(halo)
-    CartesianIndex(ntuple(i -> (coord[i] - 1) * ts[i] +
-        (i == D ? (S == 1 ? 1 - hw : ts[i] + 1) : 1), Val(N)))
-end
+# ghost_origin(halo, side, dim, tile_id): the generic single-kind method (haloarray.jl)
 @inline _global_size(halo::ThreadedHaloArray) = interior_size(halo)
 @inline is_root(halo::ThreadedHaloArray; root::Integer=0) = is_root(halo.topology; root=root)
 # is_active, communicator inherited from AbstractSerialHaloArray
@@ -316,8 +307,6 @@ end
 end
 
 @inline storage_size(halo::ThreadedHaloArray, d::Int) = storage_size(halo)[d]
-@inline full_tile_size(halo::ThreadedHaloArray, tile_id::Integer) = size(tile_parent(halo, tile_id))
-@inline full_tile_size(halo::ThreadedHaloArray, tile_id::Integer, d::Int) = size(tile_parent(halo, tile_id), d)
 
 @inline function interior_range(halo::ThreadedHaloArray)
     h = halo_width(halo)
@@ -325,13 +314,6 @@ end
 end
 
 @inline interior_range(halo::ThreadedHaloArray, tile_id::Integer) = interior_range(halo)
-
-@inline function full_range(halo::ThreadedHaloArray)
-    return ntuple(d -> 1:storage_size(halo, d), Val(ndims(halo)))
-end
-
-@inline full_range(halo::ThreadedHaloArray, tile_id::Integer) =
-    ntuple(d -> 1:full_tile_size(halo, tile_id, d), Val(ndims(halo)))
 
 @inline function interior_view(halo::ThreadedHaloArray, tile_id::Integer)
     ranges = interior_range(halo, tile_id)
@@ -418,20 +400,12 @@ end
 halo_exchange!(halo::ThreadedHaloArray; threads::Bool=false) =
     _each_tile!(_threaded_exchange_tile!, halo, threads)
 
-function boundary_condition!(halo::ThreadedHaloArray, tile_id::Integer, side::Side{S}, dim::Dim{D}) where {S,D}
-    _threaded_boundary_side!(halo, tile_id, side, dim)
-    return halo
-end
-
 boundary_condition!(halo::ThreadedHaloArray; threads::Bool=false) =
     _each_tile!(_threaded_boundary_tile!, halo, threads)
 
 synchronize_halo!(halo::ThreadedHaloArray; threads::Bool=false) =
     _each_tile!(_threaded_synchronize_tile!, halo, threads)
 
-Base.@deprecate halo_exchange_threads!(halo) halo_exchange!(halo; threads=true) false
-Base.@deprecate boundary_condition_threads!(halo) boundary_condition!(halo; threads=true) false
-Base.@deprecate synchronize_halo_threads!(halo) synchronize_halo!(halo; threads=true) false
 
 start_halo_exchange!(halo::ThreadedHaloArray) = halo_exchange!(halo)
 finish_halo_exchange!(halo::ThreadedHaloArray) = halo

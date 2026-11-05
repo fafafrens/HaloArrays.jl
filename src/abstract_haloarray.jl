@@ -301,8 +301,18 @@ function is_root end
 # a ThreadedHaloArray (many tiles, which overrides these two methods).
 @inline tile_count(::AbstractSingleHaloArray) = 1
 @inline tile_parent(halo::AbstractSingleHaloArray, ::Integer) = parent(halo)
+# the halo width is a type parameter of every single kind: one instance method
+@inline halo_width(halo::AbstractSingleHaloArray) = halo_width(typeof(halo))
 @inline interior_range(halo::AbstractSingleHaloArray, ::Integer) = interior_range(halo)
 @inline interior_view(halo::AbstractSingleHaloArray, ::Integer) = interior_view(halo)
+
+# One padded storage block: an `owned` interior with `halo` ghost cells on
+# every side, allocated by `storage(T, sizes...)`. Every single-kind
+# constructor takes `storage=` (default `zeros`) and allocates through this,
+# so `storage=CUDA.zeros` / `Metal.zeros` is the one way to say where an
+# array's memory lives, and the collection constructors pass it down.
+@inline _padded_storage(storage, ::Type{T}, owned::NTuple{N,<:Integer}, halo::Integer) where {T,N} =
+    storage(T, ntuple(d -> Int(owned[d]) + 2 * Int(halo), Val(N))...)
 
 # The two drivers over that decomposition. A single-block array runs the
 # per-tile kernel inline on its lone tile; a ThreadedHaloArray (methods with its
@@ -352,14 +362,9 @@ end
 # ThreadedHaloArray overrides fill!, copyto!,
 # and Base.foreach with tforeach variants.
 
-@inline Base.size(halo::AbstractSingleHaloArray)         = _global_size(halo)
-# `size`/`axes` must return 1 / OneTo(1) for trailing dims `i > ndims` (the
-# AbstractArray contract — e.g. ArrayInterface.zeromatrix does `u .* u'`, which
-# asks for axes(u, 2) on a 1-D array).
-@inline Base.size(halo::AbstractSingleHaloArray, i::Int) = i <= ndims(halo) ? size(halo)[i] : 1
-@inline Base.axes(halo::AbstractSingleHaloArray)         = map(Base.OneTo, size(halo))
-@inline Base.axes(halo::AbstractSingleHaloArray, i::Int) = Base.OneTo(size(halo, i))
-@inline Base.length(halo::AbstractSingleHaloArray)       = prod(size(halo))
+# `size` is the one primitive: `size(u, i)`, `axes`, `length` (and the
+# trailing-dimension rule `axes(u, ndims + 1) == OneTo(1)`) are Base's defaults.
+@inline Base.size(halo::AbstractSingleHaloArray) = _global_size(halo)
 
 # Scalar `*`/`/`, `norm`, `dot`, and the in-place BLAS-1 updates (the
 # vector-space / Hilbert-space interface) live in vector_space.jl.
@@ -558,11 +563,8 @@ function _fields end
 @inline _global_size(c::AbstractHaloCollection)  = (field_shape(c)..., _spatial_global_size(c)...)
 @inline storage_size(c::AbstractHaloCollection)  = (field_shape(c)..., _spatial_storage_size(c)...)
 @inline storage_size(c::AbstractHaloCollection, i::Int) = storage_size(c)[i]
-@inline Base.size(c::AbstractHaloCollection)         = _global_size(c)
-@inline Base.size(c::AbstractHaloCollection, i::Int) = i <= ndims(c) ? size(c)[i] : 1
-@inline Base.length(c::AbstractHaloCollection)       = prod(size(c))
+@inline Base.size(c::AbstractHaloCollection) = _global_size(c)
 @inline Base.axes(c::AbstractHaloCollection) = (map(Base.OneTo, field_shape(c))..., _spatial_axes(c)...)
-@inline Base.axes(c::AbstractHaloCollection, i::Int) = i <= ndims(c) ? axes(c)[i] : Base.OneTo(1)
 @inline Base.eachindex(c::AbstractHaloCollection) = CartesianIndices(axes(c))
 @inline interior_axes(c::AbstractHaloCollection) = (map(Base.OneTo, field_shape(c))..., _spatial_interior_axes(c)...)
 @inline interior_axes(c::AbstractHaloCollection, i::Int) = interior_axes(c)[i]
@@ -589,7 +591,9 @@ function Base.fill!(c::AbstractHaloCollection, value)
     return c
 end
 
-function Base.copyto!(dest::C, src::C) where {C<:AbstractHaloCollection}
+# Any pair of collections (a Float32 copy of a Float64 state included): with
+# identical types required, a mixed pair fell to Base's cell-by-cell fallback.
+function Base.copyto!(dest::AbstractHaloCollection, src::AbstractHaloCollection)
     _check_same_fields(dest, src)
     for (d, s) in zip(_fields(dest), _fields(src))
         copyto!(d, s)
@@ -617,24 +621,23 @@ function foreach_field!(f!, mha::AbstractHaloCollection)
     return nothing
 end
 
-@inline function _check_global_scalar_indices(halo::AbstractHaloArray, I::Tuple)
-    nd = ndims(halo)
+@inline function _check_global_scalar_indices(halo::AbstractHaloArray{T,N}, I::Tuple) where {T,N}
     # Fewer indices than dimensions is a LINEAR-indexing attempt (`u[3]` on a
     # 2-D array) — unsupported by design (see the guide's Indexing section):
     # it would route generic code through the slow scalar path, and is
     # ill-defined across ranks. Name the alternative instead of BoundsError.
-    length(I) >= nd || throw(ArgumentError(
-        "linear indexing is not supported on a $nd-dimensional halo array " *
-        "(got $(length(I)) index/indices); give all $nd global indices, or " *
+    length(I) >= N || throw(ArgumentError(
+        "linear indexing is not supported on a $N-dimensional halo array " *
+        "(got $(length(I)) index/indices); give all $N global indices, or " *
         "index the interior view: `interior_view(u)[...]`."))
     # Trailing indices beyond ndims must be 1, per the AbstractArray contract:
     # `A[i, 1]` is valid for a vector. Generic LinearAlgebra code relies on this
     # (e.g. Diagonal's ldiv!, used as a preconditioner, indexes `B[i, 1]`).
-    @inbounds for d in (nd + 1):length(I)
-        isone(I[d]) || throw(BoundsError(halo, I))
-    end
-    idx = ntuple(d -> @inbounds(I[d]), Val(ndims(halo)))
-    @inbounds for d in 1:nd
+    # `split` rather than an `ntuple` closure over `I`: in a function that also
+    # throws, Julia 1.10 allocates the closure's environment on every call.
+    idx, trailing = Base.IteratorsMD.split(I, Val(N))
+    all(isone, trailing) || throw(BoundsError(halo, I))
+    @inbounds for d in 1:N
         first(axes(halo, d)) <= idx[d] <= last(axes(halo, d)) || throw(BoundsError(halo, I))
     end
     return idx
@@ -679,25 +682,3 @@ Base.getindex(halo::AbstractHaloArray, I::CartesianIndex) = getindex(halo, Tuple
 Base.setindex!(halo::AbstractHaloArray, value, I::CartesianIndex) =
     setindex!(halo, value, Tuple(I)...)
 
-# `size(u)` is the whole-domain size on every backend; `global_size` remains as
-# a deprecated alias. It keeps its old behaviour of looking through an inactive
-# `MaybeHaloArray` to the wrapped geometry (where `size` is deliberately all
-# zeros), so code kept during the deprecation window sees the same shape on
-# every rank.
-function global_size(u)
-    Base.depwarn("`global_size(u)` is deprecated, use `size(u)`; on an inactive " *
-                 "`MaybeHaloArray` use `size(getdata(u))` for the wrapped geometry.", :global_size)
-    return _global_size(u)
-end
-const _deprecated_global_size = which(global_size, Tuple{Any})
-
-# A downstream AbstractSingleHaloArray that implemented the formerly exported
-# `global_size` keeps working during the deprecation window: `size` reaches its
-# method through this fallback (the built-in backends' `_global_size` methods
-# are more specific). A type with neither method gets a MethodError rather than
-# a recursion through the deprecated generic `global_size`.
-function _global_size(u::AbstractSingleHaloArray)
-    which(global_size, Tuple{typeof(u)}) === _deprecated_global_size &&
-        throw(MethodError(_global_size, (u,)))
-    return global_size(u)
-end
