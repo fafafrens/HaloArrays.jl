@@ -27,7 +27,7 @@ end
 
 function sanity_check!(halo, names, methods, comm)
     fill_benchmark_data!(halo)
-    methods["waitall_unsafe"](halo)
+    methods["blocking"](halo)
     reference = copy(parent(halo))
 
     ok = true
