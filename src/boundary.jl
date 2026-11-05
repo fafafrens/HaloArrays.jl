@@ -34,15 +34,17 @@ struct FaceGeometry{N,D,S,H,T}         # T: the field's element type (the stenci
     shift::CartesianIndex{N}    # global index = storage index + shift
 end
 
+# The face's ghost layer along its own dimension (`_recv_window` of the
+# exchange), empty on an empty block (`sd == 2H`): a zero-extent rank of an
+# uneven decomposition, or a tile of one, has no face to fill — the ghost
+# layer exists in storage but has no interior to read from.
+@inline _ghost_window(::Side{1}, sd::Int, H::Int) = 1:(H * (sd > 2H))
+@inline _ghost_window(::Side{2}, sd::Int, H::Int) = (sd - H + 1):(sd - H + H * (sd > 2H))
+
 function FaceGeometry(a::AbstractArray{T,N}, ::Side{S}, ::Dim{D}, ::Val{H},
         origin::CartesianIndex{N}) where {T,N,S,D,H}
     sd = size(a, D)
-    # An empty block (a zero-extent rank of an uneven decomposition, or a tile
-    # of one) has no face to fill: the ghost range is empty along every
-    # dimension, including the one normal to the face, whose ghost layer
-    # exists in storage but has no interior to read from.
-    ghosts = CartesianIndices(ntuple(i -> i == D ? (sd > 2H ? _recv_window(Side(S), sd, H) : (1:0)) :
-                                               (H+1):(size(a, i)-H), Val(N)))
+    ghosts = CartesianIndices(ntuple(i -> i == D ? _ghost_window(Side(S), sd, H) : (H+1):(size(a, i)-H), Val(N)))
     wall = S == 1 ? H + 1 : sd - H
     return FaceGeometry{N,D,S,H,T}(ghosts, wall, sd - 2H, origin - first(ghosts))
 end
