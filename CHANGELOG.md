@@ -13,7 +13,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `FaceRanges`, the cell and face checkerboard colours and why one is global
   and the other local, every kernel window and the linear windows) and *Good
   habits* (the conventions that keep one code running on every backend).
-  `interior_to_global_index` has a docstring for every kind; the
+  `interior_to_global_index` has a generic docstring (only the threaded
+  method had one); the
   `accumulate_flux_divergence!` docstring no longer claims to skip the ghost
   side of a boundary face (it scatters onto both cells; the ghost write is
   harmless).

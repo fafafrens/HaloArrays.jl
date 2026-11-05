@@ -75,6 +75,8 @@ lets the last coordinate step by two. Iterate the tuple, then each range:
 ```julia
 cr = CellRanges(u)
 s, f = parent(u), parent(rhs)   # padded blocks, storage coordinates on both sides
+e1, e2 = unit_vector(u, 1), unit_vector(u, 2)
+h2 = dx^2
 for color in (0, 1)
     @inbounds for sub in interior_cells(cr, color), I in sub
         s[I] = 0.25 * (s[I + e1] + s[I - e1] + s[I + e2] + s[I - e2] - h2 * f[I])
@@ -160,7 +162,7 @@ numerical flux takes and returns an `SVector`:
 
 ```julia
 fr = FaceRanges(state)
-accumulate_flux_divergence!(field_storages(dstate), field_storages(state), fr, dim, inv_dx, hll_flux;
+accumulate_flux_divergence!(hll_flux, field_storages(dstate), field_storages(state), fr, dim, inv_dx;
     read     = (_, I) -> sitevector(state, I),
     scatter! = (_, I, s, F) -> (siteview(dstate, I) .+= s .* F))
 ```

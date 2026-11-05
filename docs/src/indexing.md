@@ -154,10 +154,8 @@ from 1 over the launch range. The window types turn it into a storage index:
 ```julia
 @kernel function laplacian!(du, u, region::CellWindow{2}, inv_dx2)
     J = @index(Global, NTuple)
-    I = cell_index(region, J)                 # storage cell of this work item
-    if is_cell_index_inbounds(region, I)
-        @inbounds du[I...] = (u[I[1]+1, I[2]] - 2u[I...] + u[I[1]-1, I[2]]) * inv_dx2
-    end
+    I = cell_index(region, J)                 # storage cell of this work item; a CellWindow launch is exact
+    @inbounds du[I...] = (u[I[1]+1, I[2]] - 2u[I...] + u[I[1]-1, I[2]]) * inv_dx2
 end
 region = interior_cell_window(CellRanges(u))
 laplacian!(backend, (16, 16))(parent(du), parent(u), region, inv_dx2; ndrange=region.size)

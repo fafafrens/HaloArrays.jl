@@ -58,8 +58,9 @@ end
 ```
 
 The same `f` gives the same field on one process, on tiles, or on any number
-of ranks. A loop over `u[I]` would do the same on a `LocalHaloArray` and fail
-or warn on the others. For a collection return one value per field.
+of ranks. A loop over `u[I]` does the same on the serial kinds, slowly, and on
+MPI fails for every cell another rank owns. For a collection return one value
+per field.
 
 The same applies inside a boundary rule: a condition that varies along the
 wall reads [`global_index`](@ref)`(u)`, never the storage index.
@@ -124,9 +125,10 @@ u .= u .+ dt .* du            # interior only, every backend
 r = norm(u)                   # the same number on every rank
 ```
 
-A plain array in an in-place broadcast is indexed in interior coordinates and,
-on MPI, must be owned-size, shaped like `interior_view(u)`. Distribute global
-data with `fill_from_global_indices!` first.
+A plain array in an in-place broadcast is indexed by **global** interior
+coordinates on the shared-memory backends, so it is domain-sized even on tiles,
+and must be **owned-size**, shaped like `interior_view(u)`, on MPI. Distribute
+global data with `fill_from_global_indices!` first.
 
 ## Treat collective calls as collective
 
