@@ -15,6 +15,7 @@ makedocs(
         "Home" => "index.md",
         "Guide" => "guide.md",
         "Index spaces" => "indexing.md",
+        "Cell and face loops" => "loops.md",
         "Good habits" => "habits.md",
         "Linear & implicit solves" => "solvers.md",
         "Examples" => "examples.md",

@@ -163,7 +163,8 @@ laplacian!(backend, (16, 16))(parent(du), parent(u), region, inv_dx2; ndrange=re
 [`CellWindow`](@ref) covers every interior cell; [`CellCheckerboard`](@ref)
 covers one colour with the launch compressed by two along one axis, which is
 why kernels check [`is_cell_index_inbounds`](@ref). [`FaceWindow`](@ref) and
-[`FaceCheckerboard`](@ref) do the same for faces.
+[`FaceCheckerboard`](@ref) do the same for faces. The ranges, the colours and
+every window are described in [Cell and face loops](loops.md).
 
 For nearest-neighbour stencils, [`linear_cell_window`](@ref) gives a
 [`LinearCellWindow`](@ref) addressed by storage **linear** index:

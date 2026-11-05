@@ -514,6 +514,10 @@ per-call overhead, not the bandwidth ceiling.
 
 ## Face loops
 
+The loop helpers, the checkerboard colours and the kernel windows have their
+own page, [Cell and face loops](loops.md); this and the next two sections are
+the summary.
+
 [`FaceRanges`](@ref)`(u)` gives the index ranges for finite-volume face updates,
 in parent-storage indices (for kernels working on `parent(u)`/`parent(du)`). The
 high-level [`accumulate_flux_divergence!`](@ref) does the whole flux-divergence

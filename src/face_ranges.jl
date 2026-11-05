@@ -133,8 +133,10 @@ using the precomputed `ranges`. This is the left / internal / right face loop in
 a single call.
 
 Each face's numerical `flux` is evaluated once from the two adjacent cell states
-and scattered with opposite signs onto the interior cells — `du[IL] -= scale*F` and
-`du[IR] += scale*F` — skipping whichever side is a ghost at a physical boundary.
+and scattered with opposite signs onto both cells — `du[IL] -= scale*F` and
+`du[IR] += scale*F`. At the two boundary faces one of the two is a ghost cell of
+`du`: allocated, never read, overwritten by the next synchronisation, so the
+loop has no branch.
 
 - `flux(UL, UR) -> F`: numerical flux between the lower (`UL`) and upper (`UR`)
   cell states.
