@@ -68,6 +68,14 @@ end
         @test (@allocated boundary_condition!(u)) == 0
     end
 
+    @testset "ghost_origin on a ThreadedHaloArray needs a tile" begin
+        t = ThreadedHaloArray(Float64, (4, 4), 1; dims=(2, 2), boundary_condition=:repeating)
+        @test_throws ArgumentError ghost_origin(t, Side(2), Dim(1))
+        @test ghost_origin(t, Side(2), Dim(1), 1) == CartesianIndex(5, 1)   # tile size is (4, 4): tile 1 high-x ghost at x=5
+        @test ghost_origin(t, Side(2), Dim(1), 2) == CartesianIndex(9, 1)   # tile 2 (x-coord 2): x=9
+        @test ghost_origin(t, Side(1), Dim(2), 2) == CartesianIndex(5, 0)
+    end
+
     @testset "ghost_origin global indices (Local, hw=1)" begin
         u = LocalHaloArray(Float64, (4, 4), 1)
         @test ghost_origin(u, Side(1), Dim(1)) == CartesianIndex(0, 1)   # low-x:  x=0, y=1

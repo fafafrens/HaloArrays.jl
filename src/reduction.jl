@@ -1,4 +1,5 @@
-# mapreduce / any / all for HaloArray (MPI) live in mpi_support.jl
+# Every reduction, on every kind: the local part per tile, then `_global` (the
+# cross-rank combine; `_allreduce` in mpi_support.jl on an MPI HaloArray).
 
 # Reduce over one or more already-resolved interior views. With a single view we
 # forward straight to Base's (efficient) reduction; with two or more we reduce
@@ -81,9 +82,9 @@ end
 # ---- local parts, written once over the tile drivers -------------------------
 # The "local part" of every reduction — this array's own cells, reduced per tile
 # and combined with `op` across tiles (`_mapreduce_tile`: single-block = one
-# inline tile; threaded = tile_mapreduce over the thread backend). The MPI
-# HaloArray methods (mpi_support.jl) wrap these SAME local parts in an
-# Allreduce, so each reduction's local math exists in exactly one place.
+# inline tile; threaded = tile_mapreduce over the thread backend). `_global`
+# below wraps these SAME local parts in the cross-rank combine, so each
+# reduction's local math exists in exactly one place.
 # `kws` here is only ever `init` (dims is routed away earlier). For the
 # COMMUTATIVE `mapreduce` path the caller passes NO kws and seeds with `init`
 # once via `_apply_init` — forwarding it into every tile counted it per tile.
@@ -184,6 +185,10 @@ end
 
 # `mapreduce(f, op, zip(u, v))` is `mapreduce(f ∘ tuple, op, u, v)`: one method
 # for every kind (single, collection, Maybe), the multi-array methods dispatch.
+# A mixed pair (a single array with a collection) has no multi-array method
+# and is an error here, like `dot`: without this it reached Base's
+# `mapreduce(f, op, A, B)`, which materializes `map(f, A, B)` — an error on a
+# distributed HaloArray, rank-/tile-local scalar indexing on the serial kinds.
 for func in (:mapreduce, :mapfoldl, :mapfoldr)
     @eval function Base.$func(
             f::F, op::OP, z::Iterators.Zip{<:Tuple{AbstractHaloArray,Vararg{AbstractHaloArray}}}; kws...,
@@ -191,6 +196,9 @@ for func in (:mapreduce, :mapfoldl, :mapfoldr)
         g(args...) = f(args)
         return $func(g, op, z.is...; kws...)
     end
+    @eval Base.$func(f, op, x::AbstractHaloArray, y::AbstractHaloArray, etc::Vararg{AbstractHaloArray}; kws...) =
+        throw(ArgumentError("$($(string(func))) over a $(nameof(typeof(x))) together with a " *
+                            "$(nameof(typeof(y))) is not defined: reduce arrays of one kind"))
 end
 
 Base.any(f::F, u::AbstractSingleHaloArray) where {F} = _global(_local_any(f, u), |, communicator(u))
@@ -308,9 +316,8 @@ Base.sum(u::AbstractSingleHaloArray) = _global(_local_sum(identity, u), +, commu
 # are plain arrays, always active; `is_active`/`interior_view`/`free!` behave
 # uniformly on all of them, so backend-generic code needs no branches. `f`
 # must preserve the element type (the distributed backend requires it; serial
-# backends match). The `dims` normalization and op unwrapping live in
-# mpi_support.jl; the HaloArray (MPI) oneshot method lives there too, built on
-# DimReductionPlan.
+# backends match). The op unwrapping lives in mpi_support.jl; the HaloArray
+# (MPI) oneshot method lives there too, built on DimReductionPlan.
 
 # Geometry of the reduced array: kept dims' sizes and boundary conditions.
 # Const-foldable tuple filter (recursive, no Vector/generator): with a literal

@@ -158,12 +158,19 @@ end
     return nothing
 end
 
-# post the face's receive and send on its slot
-@inline function _post_face!(halo, ::Side{S}, ::Dim{D}) where {S,D}
+# post the face's receive and send on its slot. The blocking and the split
+# exchange share the slots, so a slot still holding a live request means a
+# split exchange was started and not finished: posting over it would leak the
+# pending handles and leave an unmatched receive for a later exchange to pick
+# up — an error, not a silent overwrite.
+@inline function _post_face!(halo, s::Side{S}, d::Dim{D}) where {S,D}
+    _has_neighbor(halo, s, d) || return nothing
     nbrank = halo.topology.neighbors[D][S]
-    nbrank == MPI.PROC_NULL && return nothing
     comm = halo.topology.cart_comm
     slot = tag_send(Val(D), Val(S))
+    MPI.isnull(halo.comm_state.recv_reqs[slot]) && MPI.isnull(halo.comm_state.send_reqs[slot]) ||
+        throw(ArgumentError("a halo exchange is already in progress on this HaloArray; " *
+                            "call finish_halo_exchange! before starting another"))
     GC.@preserve halo begin
         MPI.Irecv!(halo.receive_bufs[D][S], comm, halo.comm_state.recv_reqs[slot];
             source=nbrank, tag=tag_recv(Val(D), Val(S)))

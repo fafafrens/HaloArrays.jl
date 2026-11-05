@@ -615,3 +615,15 @@ end
         @test (lo, hi) == (1, size(ha, dims[1] == 0 ? 1 : 2))
     end
 end
+
+@testset "posting over an in-flight split exchange is an error" begin
+    comm = MPI.COMM_WORLD
+    topology = CartesianTopology(comm, (0,); periodic=(true,))
+    ha = HaloArray(Float64, (4,), 1, topology; boundary_condition=((Periodic(), Periodic()),))
+    start_halo_exchange!(ha)
+    @test_throws ArgumentError halo_exchange!(ha)
+    @test_throws ArgumentError start_halo_exchange!(ha)
+    finish_halo_exchange!(ha)
+    @test halo_exchange!(ha) === ha          # slots are free again
+    start_halo_exchange!(ha); finish_halo_exchange!(ha)
+end
