@@ -34,6 +34,7 @@ This keeps interior ownership explicit and halo validity predictable.
 The package separates logical array shape from interior storage:
 
 - `size(u)` / `axes(u)`: global logical array shape.
+- `eachindex(u)`: the **global** indices of the cells this rank/process holds — the whole interior on the serial kinds, this rank's block on MPI — so `u[I]` is valid for every `I` in it.
 - [`interior_size`](@ref)`(u)` / [`interior_axes`](@ref)`(u)`: cells local to this rank or local backend.
 - [`interior_view`](@ref)`(u)`: writable interior cells, excluding halos.
 - `parent(u)`: raw storage including halos.
@@ -61,7 +62,7 @@ alternative named in the error.
 
 | form | why | instead |
 |:-----|:----|:--------|
-| `u[3]` — linear indexing of an N-d array | would route generic code through a slow scalar path (and is ill-defined across ranks) | `interior_view(u)[3]`, or loop `eachindex(u)` / `CartesianIndices(interior_view(u))` |
+| `u[3]` — linear indexing of an N-d array | would route generic code through a slow scalar path (and is ill-defined across ranks) | `interior_view(u)[3]`, or loop `CartesianIndices(interior_view(u))` (storage-local) or `eachindex(u)` (the global indices this rank owns, valid in `u[I]`) |
 | `u[:]`, `u[:, 1]`, `u[1:2, :]` — slices | would materialize cross-rank/tile data cell by cell | slice the view: `interior_view(u)[:, 1]` (this rank's cells), or [`gather_haloarray`](@ref)`(u)` for the true global array (on MPI: root only) |
 
 The idiomatic patterns:

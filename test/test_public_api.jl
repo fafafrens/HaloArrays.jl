@@ -123,4 +123,13 @@ end
     @test finish_halo_exchange!(local_ha) === local_ha
     @test synchronize_halo!(local_ha) === local_ha
     @test parent(local_ha) == [1.0, 1.0, 2.0, 3.0, 3.0]
+
+    # eachindex is GLOBAL on every kind (this rank's block on MPI): u[I] is valid for all of it
+    self = CartesianTopology(MPI.COMM_SELF, (1, 1); periodic=(true, true))
+    for u in (LocalHaloArray(Float64, (4, 3), 1), ThreadedHaloArray(Float64, (2, 3), 1; dims=(2, 1)),
+              HaloArray(Float64, (4, 3), 1, self; boundary_condition=:periodic))
+        fill_from_global_indices!(I -> 10I[1] + I[2], u)
+        @test eachindex(u) == CartesianIndices(axes(u))
+        @test sum(u[I] for I in eachindex(u)) == sum(u)
+    end
 end

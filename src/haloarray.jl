@@ -262,6 +262,16 @@ function interior_to_global_index(halo::HaloArray{T,N}, owned_idx::NTuple{N,<:In
     ntuple(i -> coords[i]*owned_dims[i] + owned_idx[i], Val(N))
 end
 
+# The GLOBAL indices of the cells this rank owns, so that `u[I]` is valid for
+# every `I in eachindex(u)` on every rank (the serial kinds' `eachindex` is
+# the whole interior, which is global there). The generic fallback gave the
+# interior view's 1-based indices: right on rank 0, wrong elsewhere.
+function Base.eachindex(halo::HaloArray{T,N}) where {T,N}
+    lo = interior_to_global_index(halo, ntuple(_ -> 1, Val(N)))
+    sz = interior_size(halo)
+    return CartesianIndices(ntuple(d -> lo[d]:(lo[d] + sz[d] - 1), Val(N)))
+end
+
 # Global CartesianIndex of the first ghost cell (`ghost_view(·,s,d[,tile])[1]`)
 # on the (side, dim) face — the ghost analog of `interior_to_global_index`,
 # for every single-block kind and for a ThreadedHaloArray tile: the block's

@@ -71,6 +71,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   take the same arguments.
 
 ### Fixed
+- `eachindex(u)` on an MPI `HaloArray` is the global index block this rank
+  owns, so `for I in eachindex(u); u[I]` is valid on every rank. It gave the
+  interior view's 1-based indices: correct on rank 0 only, an "index not
+  owned" error (or, with a split along another dimension, the wrong cell) on
+  the others. The serial kinds already returned the global interior.
 - Scalar indexing of a `LocalHaloArray` (`u[i, j]`, `u[i, j] = v`) allocated
   80 bytes per access through a boxed `Union{Nothing, Tuple}` splat; it is
   allocation-free now. This is the path every broadcast with a plain array and

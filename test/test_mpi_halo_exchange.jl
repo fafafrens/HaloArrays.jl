@@ -595,3 +595,23 @@ end
     global_end   = interior_to_global_index(ha, (interior_size(ha, 1),))[1]
     @test collect(interior_view(ha)) == collect(global_start:global_end)
 end
+
+@testset "MPI eachindex — the global indices this rank owns" begin
+    comm = MPI.COMM_WORLD
+    for dims in ((0, 1), (1, 0))
+        topology = CartesianTopology(comm, dims; periodic=(true, true))
+        ha = HaloArray(Float64, (4, 3), 1, topology; boundary_condition=:periodic)
+        fill_from_global_indices!(I -> 10I[1] + I[2], ha)
+        ei = eachindex(ha)
+        @test size(ei) == interior_size(ha)
+        # every owned index is addressable, and the loop sees exactly this rank's cells
+        @test sum(ha[I] for I in ei) == sum(interior_view(ha))
+        @test first(ei) == CartesianIndex(interior_to_global_index(ha, (1, 1)))
+        # the ranks' blocks tile the global shape without overlap
+        n_total = MPI.Allreduce(length(ei), +, comm)
+        @test n_total == length(ha)
+        lo = MPI.Allreduce(first(ei)[dims[1] == 0 ? 1 : 2], min, comm)
+        hi = MPI.Allreduce(last(ei)[dims[1] == 0 ? 1 : 2], max, comm)
+        @test (lo, hi) == (1, size(ha, dims[1] == 0 ? 1 : 2))
+    end
+end
