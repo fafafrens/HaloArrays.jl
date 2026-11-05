@@ -7,6 +7,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Three manual pages: *Index spaces* (global, interior, storage, launch and
+  tile coordinates, which function takes which, the conversions, the accepted
+  and refused indexing forms), *Cell and face loops* (`CellRanges`,
+  `FaceRanges`, the cell and face checkerboard colours and why one is global
+  and the other local, every kernel window and the linear windows) and *Good
+  habits* (the conventions that keep one code running on every backend).
+  `interior_to_global_index` has a docstring for every kind; the
+  `accumulate_flux_divergence!` docstring no longer claims to skip the ghost
+  side of a boundary face (it scatters onto both cells; the ghost write is
+  harmless).
 - `storage=` on every constructor: `LocalHaloArray(Float32, dims, h;
   storage=CUDA.zeros)` allocates the padded block through
   `storage(T, sizes...)` (`zeros` by default), and the same keyword on

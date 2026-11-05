@@ -66,6 +66,12 @@ MPI.Finalize()
 
 - **[Guide](guide.md)** — concepts: ownership semantics, halo exchange, boundary
   conditions, the backends, multi-field containers, and the loop/kernel helpers.
+- **[Index spaces](indexing.md)** — global, interior, storage, launch and tile
+  coordinates: which functions take which, and how to convert.
+- **[Cell and face loops](loops.md)** — `CellRanges`, `FaceRanges`, the
+  checkerboard colours, and the kernel windows for GPU sweeps.
+- **[Good habits](habits.md)** — the conventions that keep one code running on
+  every backend, with the idiomatic form of each.
 - **[Examples](examples.md)** — runnable tutorials and worked solvers (heat,
   finite volume, hydro, relativistic hydro, lattice field theory, Poisson,
   Schrödinger dynamics).

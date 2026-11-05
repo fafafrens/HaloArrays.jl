@@ -11,13 +11,11 @@
 
 `size(u)` and `axes(u)` describe the global logical domain for every halo
 container. Local interior data is accessed through [`interior_size`](@ref),
-[`interior_axes`](@ref), and [`interior_view`](@ref).
-
-Scalar indexing on `HaloArray` uses global indices, but it is local-only: it
-works only for global cells in the current MPI rank's interior region and throws otherwise.
-It is intended for diagnostics and setup, not stencil kernels or hot loops. Use
-`interior_view`, `parent`, `interior_to_global_index`, and `global_to_storage_index`
-when you need explicit local/global behavior.
+[`interior_axes`](@ref), and [`interior_view`](@ref); the padded block with its
+ghost cells is `parent(u)`. Which coordinates each function takes, and how to
+convert between them, is the subject of [Index spaces](indexing.md); the
+conventions that keep one code running on every backend are collected in
+[Good habits](habits.md).
 
 ## Typical workflow
 
@@ -31,63 +29,29 @@ This keeps interior ownership explicit and halo validity predictable.
 
 ## Global and local semantics
 
-The package separates logical array shape from interior storage:
+The package separates the logical array shape from the block it stores:
 
-- `size(u)` / `axes(u)`: global logical array shape.
-- `eachindex(u)`: the **global** indices of the cells this rank/process holds — the whole interior on the serial kinds, this rank's block on MPI — so `u[I]` is valid for every `I` in it.
-- [`interior_size`](@ref)`(u)` / [`interior_axes`](@ref)`(u)`: cells local to this rank or local backend.
-- [`interior_view`](@ref)`(u)`: writable interior cells, excluding halos.
-- `parent(u)`: raw storage including halos.
-- [`storage_size`](@ref)`(u)`: raw storage size including halos.
+- `size(u)` / `axes(u)`: the global logical shape, the same on every rank.
+- `eachindex(u)`: the **global** indices of the cells this block holds, so
+  `u[I]` is valid for every `I` in it on every rank.
+- [`interior_size`](@ref)`(u)` / [`interior_axes`](@ref)`(u)`: the owned cells,
+  ghosts excluded.
+- [`interior_view`](@ref)`(u)`: a writable view of the owned cells.
+- `parent(u)`: the padded block, ghosts included; [`storage_size`](@ref)`(u)`
+  its size.
 
-For MPI-backed `HaloArray`, scalar `u[I...]` does not communicate. If `I` is not
-in the current rank's interior region, it errors. This keeps expensive communication out of
-generic indexing and makes performance-critical code use local views explicitly.
-
-## Indexing
-
-A halo array reports its **global** shape but stores only this rank's/tile's
-piece, so it deliberately supports a *narrower* indexing surface than a plain
-`AbstractArray` — everything it refuses, it refuses loudly, with the fast
-alternative named in the error.
-
-**What works:**
-
-| form | behaviour |
-|:-----|:----------|
-| `u[i, j, …]` (all `ndims` indices, **global** coordinates) | reads/writes the cell — on MPI only for cells this rank owns (warns; diagnostics only, not for hot loops) |
-| `u[i, j, …, 1]` (trailing `1`s past `ndims`) | allowed, per the `AbstractArray` contract (generic LinearAlgebra code such as `Diagonal`'s `ldiv!` relies on it) |
-
-**What is refused, and what to use instead:**
-
-| form | why | instead |
-|:-----|:----|:--------|
-| `u[3]` — linear indexing of an N-d array | would route generic code through a slow scalar path (and is ill-defined across ranks) | `interior_view(u)[3]`, or loop `CartesianIndices(interior_view(u))` (storage-local) or `eachindex(u)` (the global indices this rank owns, valid in `u[I]`) |
-| `u[:]`, `u[:, 1]`, `u[1:2, :]` — slices | would materialize cross-rank/tile data cell by cell | slice the view: `interior_view(u)[:, 1]` (this rank's cells), or [`gather_haloarray`](@ref)`(u)` for the true global array (on MPI: root only) |
-
-The idiomatic patterns:
+Scalar `u[I...]` takes global coordinates and never communicates: on an MPI
+`HaloArray` it reaches this rank's cells only and warns that it is for
+diagnostics. Linear indexing and slices are refused. The full account of the
+coordinate systems, the accepted and refused forms and the idiomatic patterns
+is in [Index spaces](indexing.md).
 
 ```julia
-interior_view(u) .= data              # bulk initialisation of this rank's cells
+interior_view(u) .= data              # bulk initialisation of this block's cells
 fill_from_global_indices!(f, u)       # initial condition from GLOBAL indices, any backend
-interior_view(u)[2, :]                # arbitrary slicing — it is a normal array
 parent(u)[I...]                       # storage coordinates (ghosts included), for stencils
 A = gather_haloarray(u)               # the assembled global array (on the MPI root)
 ```
-
-Everything performance-relevant — broadcast, reductions, `dot`/`norm`, the
-BLAS-1 updates — is specialized and never touches scalar indexing, so these
-restrictions only surface in hand-written loops over the array itself.
-
-The same global-vs-local rule governs **plain-array operands in an in-place
-broadcast** (`u .= u .+ g`). On the shared-memory backends a plain operand is
-indexed by *global* interior coordinates — a `ThreadedHaloArray` hands each
-tile a view of its own global window, with the usual size-1 broadcast
-expansion per dimension. On a distributed `HaloArray` a plain operand must be
-**owned-size** (rank-local, `interior_view`-shaped): a global-shaped operand
-would require every rank to hold the whole array or an implicit scatter, so
-distribute global data explicitly (e.g. [`fill_from_global_indices!`](@ref))
-and broadcast with local operands.
 
 ## Halo exchange
 
@@ -209,7 +173,9 @@ applies physical boundary conditions where the topology has `MPI.PROC_NULL`
 neighbors. For `LocalHaloArray`, it only applies boundary conditions.
 
 Use the split async API ([`start_halo_exchange!`](@ref) + [`finish_halo_exchange!`](@ref))
-to overlap communication with independent computation.
+to overlap communication with independent computation. The pair is the exchange
+alone; call [`boundary_condition!`](@ref)`(u)` after the finish to fill the
+physical-wall ghosts, as `synchronize_halo!` would.
 
 All mutating drivers (`halo_exchange!`, `synchronize_halo!`,
 `boundary_condition!`, `fill!`, `copyto!`, the BLAS-1 updates, …) return their
@@ -409,7 +375,9 @@ r = mapreduce(abs2, +, u; dims=2)   # explicit form, same result
 For an MPI `HaloArray` the collapsed result lives only on the **coordinate‑0
 slice** of the reduced dimensions and is returned as a [`MaybeHaloArray`](@ref):
 `is_active(r)` is `true` on the ranks that hold it (and always `true` for serial
-backends), `interior_view(r)` reads it there, and [`free!`](@ref)`(r)` releases
+backends), [`gather_haloarray`](@ref)`(r)` assembles it there (a copy on
+`LocalHaloArray`, the tiles stitched on `ThreadedHaloArray`, the root of the
+active ranks on MPI, `nothing` elsewhere), and [`free!`](@ref)`(r)` releases
 the sub-communicator it owns (optional — otherwise reclaimed at `MPI.Finalize`;
 call it to keep communicator use bounded when reducing in a loop). These three
 behave uniformly on every return kind, so reduction-consuming code needs no
@@ -417,9 +385,8 @@ backend branches:
 
 ```julia
 r = sum(u; dims=2)
-if is_active(r)
-    save(interior_view(r))
-end
+P = gather_haloarray(r)      # the assembled profile, or nothing on a rank that does not hold it
+P === nothing || save(P)
 free!(r)
 ```
 
@@ -549,6 +516,10 @@ past the machine's memory bandwidth — the backend choice only changes the *fix
 per-call overhead, not the bandwidth ceiling.
 
 ## Face loops
+
+The loop helpers, the checkerboard colours and the kernel windows have their
+own page, [Cell and face loops](loops.md); this and the next two sections are
+the summary.
 
 [`FaceRanges`](@ref)`(u)` gives the index ranges for finite-volume face updates,
 in parent-storage indices (for kernels working on `parent(u)`/`parent(du)`). The

@@ -204,6 +204,19 @@ this process can update directly.
 @inline interior_axes(halo::AbstractHaloArray, i::Int) = interior_axes(halo)[i]
 
 function storage_size end
+
+"""
+    interior_to_global_index(u, I) -> NTuple
+    interior_to_global_index(u, tile_id, I) -> NTuple
+
+Map an **interior** index tuple `I` — 1-based over the cells this block owns,
+ghosts excluded — to the **global** index of that cell in the whole domain. On a
+[`LocalHaloArray`](@ref) the two coincide; on an MPI [`HaloArray`](@ref) the
+rank's block offset is added; on a [`ThreadedHaloArray`](@ref) pass the tile,
+whose interior is per tile. The offset is constant per block, so take it once:
+`interior_to_global_index(u, ntuple(_ -> 1, ndims(u)))` is the global index of
+the block's first owned cell. See the *Index spaces* page of the manual.
+"""
 function interior_to_global_index end
 
 # Per-tile form: single-block backends are a one-tile decomposition, so the
