@@ -128,6 +128,49 @@ parity of the **storage** coordinate, not the global one: the race it prevents
 is between writes into one block's storage, and nothing has to agree across a
 seam. The sum of the two colours is the full face set.
 
+## Several fields at one cell
+
+The ranges of a collection are spatial, so a loop over them visits one cell of
+**every** field at once. Two accessors read and write all the fields there,
+with the same storage index the ranges produce and the same tile argument as
+the ranges were built with, so no coordinate ever changes hands:
+
+- [`sitevector`](@ref)`(state, I[, t])` returns the fields at cell `I` as an
+  `SVector{N}`, `N` known from the type of `state`: a copy, for arithmetic.
+- [`siteview`](@ref)`(state, I[, t])` returns a lazy, writable array shaped
+  like the fields, for writing back.
+
+A cell update of a conserved state, every field read once, every field written
+once, is then one `SVector` expression:
+
+```julia
+cr = CellRanges(state)                                 # spatial ranges of the collection
+e1, e2 = unit_vector(state, 1), unit_vector(state, 2)
+for I in interior_cells(cr)
+    q  = sitevector(state, I)                          # SVector{4}: ρ, ρu, ρv, E at this cell
+    qE = sitevector(state, I + e1)                     # the neighbour's state
+    siteview(dstate, I) .= rhs(q, qE, sitevector(state, I - e1),
+                               sitevector(state, I + e2), sitevector(state, I - e2))
+end
+```
+
+The same two calls are the `read` and `scatter!` hooks of
+[`accumulate_flux_divergence!`](@ref) for a multi-field flux, where the
+numerical flux takes and returns an `SVector`:
+
+```julia
+fr = FaceRanges(state)
+accumulate_flux_divergence!(field_storages(dstate), field_storages(state), fr, dim, inv_dx, hll_flux;
+    read     = (_, I) -> sitevector(state, I),
+    scatter! = (_, I, s, F) -> (siteview(dstate, I) .+= s .* F))
+```
+
+On a `ThreadedHaloArray` collection pass the tile to both accessors, `sitevector(state,
+I, t)` and `siteview(dstate, I, t)`, inside the tile loop. `sitevector` needs a
+compile-time field count, so it serves a `MultiHaloArray` (nested or not) and a
+single array; an `ArrayOfHaloArray` backed by an `Array` has a runtime field
+count and uses `SVector{N}(siteview(state, I))` with `N` written out.
+
 ## Kernel windows
 
 A `CartesianIndices` is a poor kernel argument. The windows are the same
@@ -212,5 +255,6 @@ and the check returns `true`.
 | in-place nearest-neighbour update (Gauss–Seidel, SOR, Metropolis) | `interior_cells(cr, color)`, or `CellCheckerboard`; `synchronize_halo!` between the colours |
 | conservative flux update | `interior_faces(fr, d)` or `accumulate_flux_divergence!`; `FaceWindow` on a GPU |
 | the same with a parallel scatter and no atomics | `interior_faces(fr, d, color)`, or `FaceCheckerboard` |
+| all fields of a collection at one cell | `sitevector` to read, `siteview` to write, at the loop's storage index |
 | nearest-neighbour stencil on a GPU | `LinearCellWindow` with `cell_strides` |
 | several tiles | one `CellRanges(u, t)`, and one window, per tile |
