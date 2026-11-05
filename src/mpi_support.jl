@@ -159,9 +159,9 @@ end
 end
 
 # post the face's receive and send on its slot
-@inline function _post_face!(halo, ::Side{S}, ::Dim{D}) where {S,D}
+@inline function _post_face!(halo, s::Side{S}, d::Dim{D}) where {S,D}
+    _has_neighbor(halo, s, d) || return nothing
     nbrank = halo.topology.neighbors[D][S]
-    nbrank == MPI.PROC_NULL && return nothing
     comm = halo.topology.cart_comm
     slot = tag_send(Val(D), Val(S))
     GC.@preserve halo begin
@@ -185,10 +185,28 @@ end
     return nothing
 end
 
+# The blocking and the split exchange share the request slots, so a slot still
+# holding a live request means a split exchange was started and not finished.
+# Both drivers check this BEFORE packing: the outstanding sends may still be
+# reading `send_bufs`, and a second pack would overwrite them under MPI; posting
+# over the slots would leak the handles and leave an unmatched receive for a
+# later exchange to pick up. An error, with the in-flight exchange untouched.
+# (Read on the raw handle vectors: `MPI.isnull` per item converts through a
+# preserved pointer and cost ~80 ns per exchange on a 1-rank 3-D block.)
+function _check_idle(halo::HaloArray)
+    cs = halo.comm_state
+    null = MPI.API.MPI_REQUEST_NULL[]
+    idle = all(==(null), cs.recv_reqs.vals) && all(==(null), cs.send_reqs.vals)
+    idle || throw(ArgumentError("a halo exchange is already in progress on this HaloArray; " *
+                                "call finish_halo_exchange! before starting another"))
+    return nothing
+end
+
 # ---- public exchange API ----------------------------------------------
 # All return `halo`, like every other backend's mutating driver.
 
 function halo_exchange!(halo::HaloArray{T,N}; threads::Bool=false) where {T,N}
+    _check_idle(halo)
     _foreach_face(_pack_face!, halo, Val(N))
     _device_synchronize(parent(halo))
     _foreach_face(_post_face!, halo, Val(N))
@@ -201,6 +219,7 @@ function halo_exchange!(halo::HaloArray{T,N}; threads::Bool=false) where {T,N}
 end
 
 function start_halo_exchange!(halo::HaloArray{T,N}) where {T,N}
+    _check_idle(halo)
     _foreach_face(_pack_face!, halo, Val(N))
     _device_synchronize(parent(halo))
     _foreach_face(_post_face!, halo, Val(N))

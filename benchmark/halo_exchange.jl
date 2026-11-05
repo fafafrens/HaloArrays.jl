@@ -25,20 +25,15 @@ function selected_methods(options)
     return names
 end
 
+# every selected method must leave the same halo as the first one
 function sanity_check!(halo, names, methods, comm)
-    fill_benchmark_data!(halo)
-    methods["waitall_unsafe"](halo)
-    reference = copy(parent(halo))
-
-    ok = true
-    for name in names
+    results = map(names) do name
         fill_benchmark_data!(halo)
         methods[name](halo)
-        ok &= parent(halo) == reference
+        copy(parent(halo))
     end
-
-    all_ok = MPI.Allreduce(ok, &, comm)
-    all_ok || error("At least one exchange method produced a different halo result")
+    ok = all(r -> r == results[1], results)
+    MPI.Allreduce(ok, &, comm) || error("At least one exchange method produced a different halo result")
     return nothing
 end
 

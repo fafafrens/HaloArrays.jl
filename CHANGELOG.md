@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-11-05
+
 ### Added
 - Three manual pages: *Index spaces* (global, interior, storage, launch and
   tile coordinates, which function takes which, the conversions, the accepted
@@ -24,6 +26,47 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   storage), `MultiHaloArray` and `ArrayOfHaloArray` places every tile or field
   there. It replaces the `storage=` that only the local `ArrayOfHaloArray`
   form had.
+
+- The rule contract for boundary conditions: a condition is callable as
+  `bc(u, k)` and returns one ghost cell's value, `u` a `FaceCells` accessor
+  (`u(j)` the interior cell `j` in from the wall, `far(u)` the same from the
+  opposite wall, `global_index(u)` the ghost cell's global index) and `k` the
+  ghost cell's distance from the wall. The built-ins are one line each; a
+  custom condition is a type with one call method, or a bare function
+  `(u, k) -> value` in the condition tuple (wrapped as `FunctionBC`). The
+  copy conditions (`Periodic`, `Repeating`, `Mirror`) return the source cell
+  as it is — a copy, so a `BigFloat` field keeps its precision whatever the
+  current default; `Extrapolation` lowers to a `Stencil` in
+  `prepare_boundary(bc, ::FaceGeometry)` (weighted interior cells per ghost
+  layer, built once per face); every other rule is called as it is. One method
+  runs on the CPU, in a kernel on GPU storage, per tile and on MPI physical
+  faces.
+- On GPU storage, `synchronize_halo!` fills every rule face of a block in
+  **one launch**: the KernelAbstractions extension scans the prepared faces
+  (`FaceGeometry` + prepared rule) in a single kernel and applies each face's
+  stencil or custom rule — any mix of conditions, `NoBoundaryCondition` and
+  exchange faces skipped, on `LocalHaloArray` and on the physical faces of an
+  MPI `HaloArray`; it replaces the all-periodic kernel of 0.16's extension
+  draft (#97), which it outperforms. Metal, 48⁴ Float32: 0.057 ms per
+  refresh all-periodic, 0.059 with mixed conditions (halo 2: 0.108), 128³:
+  0.011 ms, vs 0.06–0.17 ms with one launch per face; bit-identical to the
+  CPU.
+- `HaloArraysKernelAbstractionsExt` (loads with KernelAbstractions and
+  GPUArraysCore, i.e. with any GPU array package): the face copies of
+  `synchronize_halo!` on GPU storage run as kernels instead
+  of broadcasts on views — one kernel per slab for the exchange-buffer
+  pack/unpack and for mixed boundary conditions, one fused kernel for an
+  all-periodic `LocalHaloArray`. A refresh of a 48⁴ Float32 block on Metal goes
+  from 0.17 ms to 0.06 ms (halo 2: 0.37 → 0.11 ms), bit-identical. CPU storage,
+  and any run without the extension, keep the previous broadcasts.
+- `adapt` moves the boundary conditions with the halo array: a `FunctionBC`
+  adapts its captures (`Adapt.adapt_structure(to, ::FunctionBC)`), so a rule
+  that reads a lookup table or an inflow profile stored in an array runs in
+  the GPU fill kernel — the table captured on the host moves to the device
+  with `adapt(CuArray, u)`, a device table captured directly is converted to
+  its kernel form at launch. The built-in conditions hold no arrays and are
+  unchanged; a custom rule type with array fields defines its own
+  `Adapt.adapt_structure` method.
 
 ### Changed
 - One constructor per collection family. `MultiHaloArray(FT, T, geometry,
@@ -75,6 +118,25 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   tile-first `boundary_condition!(t, tile, side, dim)` nothing called.
   `HaloArray`'s `show` uses the `LocalHaloArray` wording.
 
+- **Breaking:** `FunctionBC(f)` takes the per-cell rule `f(u, k) -> value`
+  instead of the slab function `f(ghost, edge, side, dim, hw, origin)`. The
+  slab form had no GPU kernel and duplicated what a rule expresses in one line
+  (`(u, k) -> 2g - u(0)` for a Dirichlet wall, `(u, k) -> value(Tuple(global_index(u)))`
+  for a position-dependent one); `grid.jl`'s axis continuation and the DG
+  example are converted.
+- `Mirror`, `Repeating`, `Extrapolation` and (on `LocalHaloArray`) `Periodic`
+  are implemented as stencils (one traversal of the face per condition) instead
+  of broadcasts on reversed / sliced views; same values, integer-exact
+  extrapolation weights. The weights are computed from binomials with overflow
+  checking (the previous product form overflowed for high orders). The slab
+  helpers `_reflect_into!`, `_repeating_into!`, `_extrapolate_into!` and
+  `_band_view` are gone (internal).
+- **Breaking:** the extrapolation order is a type parameter,
+  `Extrapolation{order}` (`Extrapolation(order)` still constructs it; the
+  `order` field is gone): the stencil it lowers to is sized at compile time,
+  for any order. Conditions of different orders in one `ArrayOfHaloArray` are
+  different types (unlike the two `Mirror` parities).
+
 ### Removed
 - Every deprecated spelling, all silent since their replacement arrived:
   `LocalMultiHaloArray` / `ThreadedMultiHaloArray` (use
@@ -98,6 +160,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `MaybeHaloArray`.
 
 ### Fixed
+- Posting a halo exchange while a split exchange is in flight on the same
+  `HaloArray` (`start_halo_exchange!` without `finish_halo_exchange!`) is an
+  `ArgumentError`; the blocking and the split exchange share request slots, and
+  the second post overwrote live handles.
+- The boundary fill on an empty block (a zero-extent rank of an uneven
+  decomposition) is a no-op: the face normal to the empty dimension has a
+  ghost layer in storage but no interior, and `FaceGeometry` gives it an
+  empty ghost range (it was a nonempty range with zero interior cells, so the
+  rule's cell requirement threw). `ghost_origin` no longer bounds-checks the
+  block either; on a `ThreadedHaloArray` its tile argument is required (the
+  first tile's origin silently stood in for a missing one).
+- `mapreduce`/`mapfoldl`/`mapfoldr` over a single array zipped with a
+  collection is an `ArgumentError`, like `dot`; it reached Base's
+  materializing multi-array fallback.
+- The `getindex` and `setindex!` local-only warnings on an MPI `HaloArray`
+  each warn once (they shared one `maxlog=1` site, so only the first ever did).
 - `eachindex(u)` on an MPI `HaloArray` is the global index block this rank
   owns, so `for I in eachindex(u); u[I]` is valid on every rank. It gave the
   interior view's 1-based indices: correct on rank 0 only, an "index not
@@ -121,71 +199,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `dot` on array-valued cells goes through `LinearAlgebra.dot` (allocation-free)
   instead of a two-iterator `mapreduce` that allocated per cell.
 
-## [0.16.0] — 2026-11-04
-
-### Added
-- The rule contract for boundary conditions: a condition is callable as
-  `bc(u, k)` and returns one ghost cell's value, `u` a `FaceCells` accessor
-  (`u(j)` the interior cell `j` in from the wall, `far(u)` the same from the
-  opposite wall, `global_index(u)` the ghost cell's global index) and `k` the
-  ghost cell's distance from the wall. The built-ins are one line each; a
-  custom condition is a type with one call method, or a bare function
-  `(u, k) -> value` in the condition tuple (wrapped as `FunctionBC`). The
-  copy conditions (`Periodic`, `Repeating`, `Mirror`) return the source cell
-  as it is — a copy, so a `BigFloat` field keeps its precision whatever the
-  current default; `Extrapolation` lowers to a `Stencil` in
-  `prepare_boundary(bc, ::FaceGeometry)` (weighted interior cells per ghost
-  layer, built once per face); every other rule is called as it is. One method
-  runs on the CPU, in a kernel on GPU storage, per tile and on MPI physical
-  faces.
-- On GPU storage, `synchronize_halo!` fills every rule face of a block in
-  **one launch**: the KernelAbstractions extension scans the prepared faces
-  (`FaceGeometry` + prepared rule) in a single kernel and applies each face's
-  stencil or custom rule — any mix of conditions, `NoBoundaryCondition` and
-  exchange faces skipped, on `LocalHaloArray` and on the physical faces of an
-  MPI `HaloArray`; it replaces the all-periodic kernel of 0.16's extension
-  draft (#97), which it outperforms. Metal, 48⁴ Float32: 0.057 ms per
-  refresh all-periodic, 0.059 with mixed conditions (halo 2: 0.108), 128³:
-  0.011 ms, vs 0.06–0.17 ms with one launch per face; bit-identical to the
-  CPU.
-- `HaloArraysKernelAbstractionsExt` (loads with KernelAbstractions and
-  GPUArraysCore, i.e. with any GPU array package): the face copies of
-  `synchronize_halo!` on GPU storage run as kernels instead
-  of broadcasts on views — one kernel per slab for the exchange-buffer
-  pack/unpack and for mixed boundary conditions, one fused kernel for an
-  all-periodic `LocalHaloArray`. A refresh of a 48⁴ Float32 block on Metal goes
-  from 0.17 ms to 0.06 ms (halo 2: 0.37 → 0.11 ms), bit-identical. CPU storage,
-  and any run without the extension, keep the previous broadcasts.
-- `adapt` moves the boundary conditions with the halo array: a `FunctionBC`
-  adapts its captures (`Adapt.adapt_structure(to, ::FunctionBC)`), so a rule
-  that reads a lookup table or an inflow profile stored in an array runs in
-  the GPU fill kernel — the table captured on the host moves to the device
-  with `adapt(CuArray, u)`, a device table captured directly is converted to
-  its kernel form at launch. The built-in conditions hold no arrays and are
-  unchanged; a custom rule type with array fields defines its own
-  `Adapt.adapt_structure` method.
-
-### Changed
-- **Breaking:** `FunctionBC(f)` takes the per-cell rule `f(u, k) -> value`
-  instead of the slab function `f(ghost, edge, side, dim, hw, origin)`. The
-  slab form had no GPU kernel and duplicated what a rule expresses in one line
-  (`(u, k) -> 2g - u(0)` for a Dirichlet wall, `(u, k) -> value(Tuple(global_index(u)))`
-  for a position-dependent one); `grid.jl`'s axis continuation and the DG
-  example are converted.
-- `Mirror`, `Repeating`, `Extrapolation` and (on `LocalHaloArray`) `Periodic`
-  are implemented as stencils (one traversal of the face per condition) instead
-  of broadcasts on reversed / sliced views; same values, integer-exact
-  extrapolation weights. The weights are computed from binomials with overflow
-  checking (the previous product form overflowed for high orders). The slab
-  helpers `_reflect_into!`, `_repeating_into!`, `_extrapolate_into!` and
-  `_band_view` are gone (internal).
-- **Breaking:** the extrapolation order is a type parameter,
-  `Extrapolation{order}` (`Extrapolation(order)` still constructs it; the
-  `order` field is gone): the stencil it lowers to is sized at compile time,
-  for any order. Conditions of different orders in one `ArrayOfHaloArray` are
-  different types (unlike the two `Mirror` parities).
-
-### Fixed
 - MPI `HaloArray` on GPU storage: the sends read device memory directly, and
   nothing ordered them after the asynchronous pack copies. The exchange now
   packs every face first, synchronizes the device (through the extension; a

@@ -69,3 +69,11 @@ end
     @test dot(u, u) == 5.0 * 12
     @test _alloc(dot, u, u) == 0
 end
+
+@testset "mixed zip reductions are an error, like mixed dot" begin
+    u = LocalHaloArray(Float64, (4, 4), 1; boundary_condition=:repeating)
+    c = MultiHaloArray(LocalHaloArray, Float64, (4, 4), 1; fields=(:a, :b), boundary_condition=:repeating)
+    @test_throws ArgumentError mapreduce(((a, b),) -> a * b, +, zip(u, c))
+    @test_throws ArgumentError mapreduce((a, b) -> a * b, +, u, c)
+    @test_throws ArgumentError mapfoldl((a, b) -> a * b, +, c, u)
+end

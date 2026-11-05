@@ -58,9 +58,13 @@ end
 # ---- AbstractHaloCollection (covers MultiHaloArray + ArrayOfHaloArray) --
 
 function halo_exchange!(halo::AbstractHaloCollection; threads::Bool=false)
-    foreach_field!(f -> halo_exchange!(f; threads), halo)
+    # two constant calls rather than a closure over `threads`, as in the
+    # collection `boundary_condition!`: the closure allocates 16 bytes per
+    # call under coverage tracking on Julia 1.10 (compile-order dependent)
+    threads ? foreach_field!(_halo_exchange_threaded!, halo) : foreach_field!(halo_exchange!, halo)
     return halo
 end
+_halo_exchange_threaded!(f) = halo_exchange!(f; threads=true)
 
 function start_halo_exchange!(halo::AbstractHaloCollection)
     foreach_field!(start_halo_exchange!, halo)

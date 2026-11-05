@@ -192,3 +192,22 @@ end
     synchronize_halo!(u)
     @test @allocated(synchronize_halo!(u)) == 0
 end
+
+@testset "an empty block has nothing to fill (zero-extent interior)" begin
+    # a zero-sized rank of an uneven decomposition reaches the fill through the
+    # same single-block path; the face normal to the empty dimension has a
+    # ghost layer in storage but no interior to read, so it must be skipped,
+    # not rejected by the rule's cell requirement
+    for (sz, bc) in (((0,), :repeating), ((0,), :reflecting), ((0, 4), :repeating), ((4, 0), :reflecting))
+        u = LocalHaloArray(Float64, sz, 1; boundary_condition=bc)
+        fill!(parent(u), 7.0)
+        @test boundary_condition!(u) === u
+        @test all(==(7.0), parent(u))                       # nothing written
+        @test synchronize_halo!(u) === u
+    end
+    u = LocalHaloArray(Float64, (0,), 2; boundary_condition=((Extrapolation(1), Extrapolation(1)),))
+    @test boundary_condition!(u) === u                       # a rule needing 2 cells, on 0
+    # a nonempty block keeps its validation
+    v = LocalHaloArray(Float64, (1,), 2; boundary_condition=((Extrapolation(1), Extrapolation(1)),))
+    @test_throws ArgumentError boundary_condition!(v)
+end

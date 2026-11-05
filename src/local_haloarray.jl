@@ -82,6 +82,9 @@ is_root(::LocalHaloArray; root::Integer=0) = (root == 0)
 # and `show` are written once on the union (the broadcast styles likewise).
 const _SingleBlock{T,N} = Union{HaloArray{T,N},LocalHaloArray{T,N}}
 
+# the block origin of a LocalHaloArray is the global origin (haloarray.jl)
+@inline _block_origin(::LocalHaloArray{T,N}, _) where {T,N} = ntuple(_ -> 1, Val(N))
+
 """
     interior_view(u) -> view
 
@@ -130,17 +133,21 @@ end
 _not_owned(halo::LocalHaloArray, idx) = throw(BoundsError(halo, idx))
 _not_owned(::HaloArray, idx) = throw(ArgumentError(
     "Global index $idx is not in this MPI rank's interior region; HaloArray scalar indexing is local-only."))
-_index_note(::LocalHaloArray, op) = nothing
-_index_note(::HaloArray, op) =
-    @warn "Global scalar $op on HaloArray is local-only (diagnostics only, not for hot loops)." maxlog=1
+# One `@warn` site per operation: `maxlog` counts per source location, so a
+# shared site would warn for the first of the two and never for the other.
+_index_note(::LocalHaloArray, ::Val) = nothing
+_index_note(::HaloArray, ::Val{:getindex}) =
+    @warn "Global scalar getindex on HaloArray is local-only (diagnostics only, not for hot loops)." maxlog=1
+_index_note(::HaloArray, ::Val{:setindex!}) =
+    @warn "Global scalar setindex! on HaloArray is local-only (diagnostics only, not for hot loops)." maxlog=1
 
 function Base.getindex(halo::_SingleBlock, I::Vararg{Integer})
-    _index_note(halo, "getindex")
+    _index_note(halo, Val(:getindex))
     @inbounds return parent(halo)[_storage_index(halo, I)...]
 end
 
 function Base.setindex!(halo::_SingleBlock, value, I::Vararg{Integer})
-    _index_note(halo, "setindex!")
+    _index_note(halo, Val(:setindex!))
     @inbounds parent(halo)[_storage_index(halo, I)...] = value
     return halo
 end

@@ -277,7 +277,15 @@ with the extra `tile_id` since the interior region is per tile.
         throw(BoundsError(halo, owned_idx))
     return ntuple(d -> (coord[d] - 1) * ts[d] + owned_idx[d], Val(N))
 end
-# ghost_origin(halo, side, dim, tile_id): the generic single-kind method (haloarray.jl)
+# ghost_origin(halo, side, dim, tile_id): the generic single-kind method
+# (haloarray.jl) over this per-tile block origin; the tile is required.
+@inline function _block_origin(halo::ThreadedHaloArray{T,N}, tile_id::Integer) where {T,N}
+    coord = tile_coordinates(halo, tile_id)
+    ts    = tile_size(halo)
+    return ntuple(d -> (coord[d] - 1) * ts[d] + 1, Val(N))
+end
+_block_origin(::ThreadedHaloArray, ::Nothing) = throw(ArgumentError(
+    "ghost_origin on a ThreadedHaloArray needs a tile id: ghost_origin(u, side, dim, tile)"))
 @inline _global_size(halo::ThreadedHaloArray) = interior_size(halo)
 @inline is_root(halo::ThreadedHaloArray; root::Integer=0) = is_root(halo.topology; root=root)
 # is_active, communicator inherited from AbstractSerialHaloArray

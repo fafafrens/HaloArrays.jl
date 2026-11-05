@@ -272,6 +272,19 @@ function Base.eachindex(halo::HaloArray{T,N}) where {T,N}
     return CartesianIndices(ntuple(d -> lo[d]:(lo[d] + sz[d] - 1), Val(N)))
 end
 
+# Global index of a block's first interior cell `(1,…,1)`: the rank / tile
+# offset, UNCHECKED — an empty block (a zero-extent rank of an uneven
+# decomposition) still has an origin, and the boundary fill reads it before its
+# "nothing to fill" early-out. `interior_to_global_index` is this plus the
+# bounds check. The tile argument is ignored by the single-block kinds and
+# required by a ThreadedHaloArray (threaded_haloarray.jl): without it the
+# first tile's origin would silently stand in for the whole array's.
+@inline function _block_origin(halo::HaloArray{T,N}, _) where {T,N}
+    coords     = halo.topology.cart_coords
+    owned_dims = interior_size(halo)
+    return ntuple(i -> coords[i]*owned_dims[i] + 1, Val(N))
+end
+
 # Global CartesianIndex of the first ghost cell (`ghost_view(·,s,d[,tile])[1]`)
 # on the (side, dim) face — the ghost analog of `interior_to_global_index`,
 # for every single-block kind and for a ThreadedHaloArray tile: the block's
@@ -279,9 +292,8 @@ end
 # low side, `n+1` on the high side). `ghost[J]` then maps to `origin - oneunit + J`.
 @inline function ghost_origin(halo::AbstractSingleHaloArray{T,N}, ::Side{S}, ::Dim{D},
         tile=nothing) where {T,N,S,D}
-    t = tile === nothing ? 1 : tile
-    first_cell = interior_to_global_index(halo, t, ntuple(_ -> 1, Val(N)))
-    shift = S == 1 ? -halo_width(halo) : length(interior_range(halo, t)[D])
+    first_cell = _block_origin(halo, tile)
+    shift = S == 1 ? -halo_width(halo) : length(interior_range(halo)[D])
     return CartesianIndex(Base.setindex(first_cell, first_cell[D] + shift, D))
 end
 
