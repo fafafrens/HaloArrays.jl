@@ -216,16 +216,6 @@ end
     keys(getfield(dest, :arrays)) == keys(getfield(src, :arrays)) ||
         throw(DimensionMismatch("collection copyto! requires matching field layout"))
 
-to_tuple(c::FieldCollection) = (_fields(c)...,)
-
-"""
-    active_fields(c)
-
-`is_active` of every field, in the same container kind (a `NamedTuple` of Bools
-for [`MultiHaloArray`](@ref), an array of Bools for [`ArrayOfHaloArray`](@ref)).
-"""
-active_fields(c::FieldCollection) = map(is_active, getfield(c, :arrays))
-
 # One tile accessor for both flavors: the result keeps the container kind.
 @inline tile_parent(c::FieldCollection, tile_id::Integer) =
     map(a -> tile_parent(a, tile_id), getfield(c, :arrays))

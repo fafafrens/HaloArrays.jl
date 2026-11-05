@@ -66,9 +66,26 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `HaloArray`'s `show` uses the `LocalHaloArray` wording.
 
 ### Removed
-- The deprecated `LocalMultiHaloArray` and `ThreadedMultiHaloArray` names:
-  `MultiHaloArray(LocalHaloArray, …)` / `MultiHaloArray(ThreadedHaloArray, …)`
-  take the same arguments.
+- Every deprecated spelling, all silent since their replacement arrived:
+  `LocalMultiHaloArray` / `ThreadedMultiHaloArray` (use
+  `MultiHaloArray(LocalHaloArray, …)` / `MultiHaloArray(ThreadedHaloArray, …)`);
+  `halo_exchange_threads!` / `boundary_condition_threads!` /
+  `synchronize_halo_threads!` (the `threads=true` keyword);
+  `mapreduce_haloarray_dims(f, op, u, dims)` (`mapreduce(f, op, u; dims)`);
+  `global_size(u)` and the fallback that let a downstream type define it
+  instead of `_global_size` (`size(u)` is global on every kind; on an inactive
+  `MaybeHaloArray` use `size(parent(u))`); the grid accessors with the
+  coordinate system as first argument, `cell_center(system, g, …)` and six
+  siblings from 0.10 (the geometry carries its system); the pre-0.3
+  four-argument `apply_coupled_bc!(bc, state, side, dim)` form and the
+  `applicable` router in front of the user's method — a coupled condition
+  defines the one `tile`-generic method, and a missing one is a `MethodError`.
+- Uncalled definitions: `@maybe_delegate`, `apply_if_active`, `to_tuple`,
+  `active_fields`, the one-argument `similar(::Broadcasted)` on the halo
+  styles (Base always passes the element type), and the hand-written
+  `size(u, i)`, `axes(u, i)`, `length`, `ndims`, `eltype` that repeated
+  Base's `AbstractArray` defaults on the single kinds, the collections and
+  `MaybeHaloArray`.
 
 ### Fixed
 - `eachindex(u)` on an MPI `HaloArray` is the global index block this rank

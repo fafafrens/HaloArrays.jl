@@ -406,9 +406,6 @@ boundary_condition!(halo::ThreadedHaloArray; threads::Bool=false) =
 synchronize_halo!(halo::ThreadedHaloArray; threads::Bool=false) =
     _each_tile!(_threaded_synchronize_tile!, halo, threads)
 
-Base.@deprecate halo_exchange_threads!(halo) halo_exchange!(halo; threads=true) false
-Base.@deprecate boundary_condition_threads!(halo) boundary_condition!(halo; threads=true) false
-Base.@deprecate synchronize_halo_threads!(halo) synchronize_halo!(halo; threads=true) false
 
 start_halo_exchange!(halo::ThreadedHaloArray) = halo_exchange!(halo)
 finish_halo_exchange!(halo::ThreadedHaloArray) = halo

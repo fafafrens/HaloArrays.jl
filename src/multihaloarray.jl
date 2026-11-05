@@ -61,7 +61,7 @@ number of leaf fields; a single halo array has field shape `()`.
 # Everything else MultiHaloArray needs is container-generic and defined once on
 # FieldCollection (field_collection.jl) / AbstractHaloCollection
 # (abstract_haloarray.jl): the _fields/_first_field/_map_fields/_check_same_fields
-# hooks, tile_parent, to_tuple, active_fields, integer+Cartesian getindex/
+# hooks, tile_parent, integer+Cartesian getindex/
 # setindex!, similar(c[, T][, dims]), copy/copyto!/fill!/zero, map, interior_view,
 # map_over_field, all/any, and halo_backend/halo_width/tile_*/is_active/is_root.
 

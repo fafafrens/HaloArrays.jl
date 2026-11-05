@@ -457,40 +457,14 @@ The spatial dimension is taken from the collection's type
 allocation-free. Mark the coupled edges [`NoBoundaryCondition`](@ref) so
 `synchronize_halo!` leaves them for this call; for a *mix* of coupled and
 ordinary boundaries, call the per-face form on the specific `(side, dim)`.
-
-!!! compat "Legacy signatures (pre-0.3)"
-    The old split signatures still work: a **four-argument** method
-    `apply_coupled_bc!(bc, state, s, d)` (Local/MPI whole-array) and a
-    **five-argument** `(bc, state, s, d, tile_id::Integer)` (per threaded tile).
-    New code should define the single `tile`-generic method above instead.
 """
-function apply_coupled_bc!(bc::AbstractCoupledBoundaryCondition,
-        state, ::Side{S}, ::Dim{D}) where {S,D}
-    throw(ArgumentError(
-        "no apply_coupled_bc! for $(typeof(bc)) at side $S dim $D; define " *
-        "`HaloArrays.apply_coupled_bc!(bc::$(nameof(typeof(bc))), state, ::Side, ::Dim, tile)` " *
-        "(read `edge_view(field, s, d, tile)`, write `ghost_view(field, s, d, tile)`)"))
-end
+function apply_coupled_bc! end
 
-# Route one face to the user's method. The canonical signature is the 5-arg
-# `(bc, state, side, dim, tile)`; when only the legacy 4-arg (Local/MPI) method
-# exists, fall back to it. The `applicable` check (runtime method lookup) runs
-# once per face per application — noise next to the ghost fill itself. There is
-# deliberately NO generic throwing 5-arg fallback method: it would be dispatch-
-# ambiguous with user methods that leave `tile` untyped, so the missing-method
-# error lives here instead.
-@inline function _coupled_face_call!(bc, state, side::Side{S}, dim::Dim{D}, tile) where {S,D}
-    if applicable(apply_coupled_bc!, bc, state, side, dim, tile)
-        apply_coupled_bc!(bc, state, side, dim, tile)
-    elseif tile === nothing
-        apply_coupled_bc!(bc, state, side, dim)   # legacy 4-arg (or its helpful error)
-    else
-        throw(ArgumentError(
-            "no apply_coupled_bc! for $(typeof(bc)) at side $S dim $D tile $tile; define " *
-            "`HaloArrays.apply_coupled_bc!(bc::$(nameof(typeof(bc))), state, ::Side, ::Dim, tile)`"))
-    end
-    return nothing
-end
+# One face goes straight to the user's `apply_coupled_bc!(bc, state, side, dim,
+# tile)`: `tile` is `nothing` on a single block, the tile id on a threaded
+# field. A condition without that method is a plain MethodError. (No generic
+# throwing fallback: it would be ambiguous with user methods that leave `tile`
+# untyped.)
 
 # Apply the coupled BC on one physical face. The per-field path (Local/MPI) makes
 # a single whole-array call (tile = nothing); the threaded path visits only the
@@ -499,7 +473,7 @@ end
     _apply_coupled_face!(halo_backend(state), bc, state, side, dim)
 
 @inline function _apply_coupled_face!(::AbstractHaloBackend, bc, state, side::Side, dim::Dim)
-    is_physical_boundary(state, side, dim) && _coupled_face_call!(bc, state, side, dim, nothing)
+    is_physical_boundary(state, side, dim) && apply_coupled_bc!(bc, state, side, dim, nothing)
     return nothing
 end
 
@@ -507,7 +481,7 @@ end
         side::Side{S}, dim::Dim{D}) where {S,D}
     for tile_id in 1:tile_count(state)
         neighbor_tile_id(state, tile_id, D, S) == 0 &&
-            _coupled_face_call!(bc, state, side, dim, tile_id)
+            apply_coupled_bc!(bc, state, side, dim, tile_id)
     end
     return nothing
 end

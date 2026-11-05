@@ -173,14 +173,7 @@ function Base.similar(bc::Broadcasted{<:HaloArrayStyle}, ::Type{T}) where {T}
     return similar(_find_operand(_SingleBlock, bc), T)
 end
 
-function Base.similar(bc::Broadcasted{<:HaloArrayStyle})
-    return similar(_find_operand(_SingleBlock, bc))
-end
-
 function Base.similar(bc::Broadcasted{<:ThreadedHaloArrayStyle}, ::Type{T}) where {T}
     return similar(_find_operand(ThreadedHaloArray, bc), T)
 end
 
-function Base.similar(bc::Broadcasted{<:ThreadedHaloArrayStyle})
-    return similar(_find_operand(ThreadedHaloArray, bc))
-end

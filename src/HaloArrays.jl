@@ -94,7 +94,6 @@ export interior_view,
     field_shape,
     halo_width,
     communicator,
-    global_size,
     tile_size,
     tile_count,
     tile_parent,
@@ -151,7 +150,6 @@ export CoordinateSystem,
 
 # Boundary conditions
 export boundary_condition!,
-    boundary_condition_threads!,
     AbstractCoupledBoundaryCondition,
     apply_coupled_bc!,
     is_physical_boundary,
@@ -159,11 +157,9 @@ export boundary_condition!,
 
 # Halo exchange
 export halo_exchange!,
-    halo_exchange_threads!,
     start_halo_exchange!,
     finish_halo_exchange!,
     synchronize_halo!,
-    synchronize_halo_threads!,
     edge_view,
     ghost_view,
     swap!,
@@ -176,8 +172,7 @@ export halo_exchange!,
     HaloFGMRES
 
 # Reductions and gather
-export mapreduce_haloarray_dims,
-    DimReductionPlan,
+export DimReductionPlan,
     reduce!,
     free!,
     gather_haloarray

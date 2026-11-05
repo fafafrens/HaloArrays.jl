@@ -259,13 +259,8 @@ end
     # the helpers need no system; the result is the polar one
     r, hr, hθ = g.r[2, 2], g.hr[2, 2], g.hθ[2, 2]          # storage index (3, 3) is cell (2, 2)
     @test cell_volume(g, I) ≈ r * hr * hθ
-    # deprecated system-first forms: same results with the matching system …
-    @test (@test_deprecated cell_volume(Polar(), g, I)) == cell_volume(g, I)
-    @test (@test_deprecated face_area(Polar(), g, Dim(1), I)) == face_area(g, Dim(1), I)
-    @test (@test_deprecated cell_volume(Polar(), parent(g), I)) == cell_volume(g, I)   # raw collection
-    # … and an error, not a silently wrong number, with another system
-    @test_throws ArgumentError cell_volume(Cartesian(), g, I)
-    @test_throws ArgumentError face_distance(Spherical(), g, Dim(2), I)
+    # the system-first forms are gone: the geometry carries its system
+    @test_throws MethodError cell_volume(Polar(), g, I)
     # a threaded geometry keeps its system too
     t  = ThreadedHaloArray(Float64, (6, 2), 1; dims=(1, 2))
     gt = cell_geometry(t, UniformAxis(0, 1), UniformAxis(0, 1); system=Cylindrical())

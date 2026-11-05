@@ -5,9 +5,9 @@ using HaloArrays
 # field's interior edge. This cannot be expressed as an independent per-field BC,
 # which is exactly the case the coupled hook exists for.
 #
-# Canonical form (0.3+): ONE tile-generic method; `tile` is `nothing` on
-# Local/MPI fields and the boundary tile id on threaded fields — passed straight
-# through to edge_view/ghost_view.
+# ONE tile-generic method; `tile` is `nothing` on Local/MPI fields and the
+# boundary tile id on threaded fields — passed straight through to
+# edge_view/ghost_view.
 struct SwapBC <: AbstractCoupledBoundaryCondition end
 function HaloArrays.apply_coupled_bc!(::SwapBC, state, s::Side{S}, d::Dim{D}, tile) where {S,D}
     a, b = eachfield(state)
@@ -16,28 +16,12 @@ function HaloArrays.apply_coupled_bc!(::SwapBC, state, s::Side{S}, d::Dim{D}, ti
     return nothing
 end
 
-# The same BC in the pre-0.3 legacy form (4-arg whole-array + 5-arg per-tile),
-# kept to lock the backward-compat dispatch path.
-struct LegacySwapBC <: AbstractCoupledBoundaryCondition end
-function HaloArrays.apply_coupled_bc!(::LegacySwapBC, state, s::Side{S}, d::Dim{D}) where {S,D}
-    a, b = eachfield(state)
-    ghost_view(a, s, d) .= edge_view(b, s, d)
-    ghost_view(b, s, d) .= edge_view(a, s, d)
-    return nothing
-end
-function HaloArrays.apply_coupled_bc!(::LegacySwapBC, state, s::Side{S}, d::Dim{D}, tile_id::Integer) where {S,D}
-    a, b = eachfield(state)
-    ghost_view(a, s, d, tile_id) .= edge_view(b, s, d, tile_id)
-    ghost_view(b, s, d, tile_id) .= edge_view(a, s, d, tile_id)
-    return nothing
-end
-
 struct UnimplementedBC <: AbstractCoupledBoundaryCondition end
 
 @testset "Coupled boundary conditions" begin
     nx = 6
 
-    @testset "swap BC ($(nameof(typeof(bc)))) on $(nameof(typeof(make())))" for bc in (SwapBC(), LegacySwapBC()), make in (
+    @testset "swap BC ($(nameof(typeof(bc)))) on $(nameof(typeof(make())))" for bc in (SwapBC(),), make in (
             () -> ArrayOfHaloArray(LocalHaloArray, Float64, (2,), (nx,), 1;
                       boundary_condition=((:noboundary, :noboundary),)),
             () -> MultiHaloArray(LocalHaloArray, Float64, (nx,), 1; boundary_conditions=(
@@ -90,10 +74,10 @@ struct UnimplementedBC <: AbstractCoupledBoundaryCondition end
         state = ArrayOfHaloArray(LocalHaloArray, Float64, (2,), (4,), 1;
             boundary_condition=((:noboundary, :noboundary),))
         @test length(eachfield(state)) == 2
-        @test_throws ArgumentError apply_coupled_bc!(UnimplementedBC(), state)
+        @test_throws MethodError apply_coupled_bc!(UnimplementedBC(), state)
     end
 
-    @testset "threaded fields ($(nameof(typeof(bc))), boundary tiles only)" for bc in (SwapBC(), LegacySwapBC())
+    @testset "threaded fields ($(nameof(typeof(bc))), boundary tiles only)" for bc in (SwapBC(),)
         # 8 cells over 2 tiles of 4; tile 1 owns 1..4, tile 2 owns 5..8.
         state = ArrayOfHaloArray(ThreadedHaloArray, Float64, (2,), (4,), 1;
             dims=(2,), boundary_condition=:noboundary)

@@ -35,21 +35,11 @@ Base.parent(m::MaybeHaloArray) = m.data
 # which allocate from `axes` — would rebuild the inner shape and fill garbage.
 Base.axes(m::MaybeHaloArray{T,N}) where {T,N} =
     is_active(m) ? axes(m.data) : ntuple(_ -> Base.OneTo(0), Val(N))
-# Trailing dims beyond ndims are OneTo(1) (the AbstractArray contract, e.g.
-# `A[i, 1]` on a vector) — same as the AbstractSingleHaloArray `axes(u, i)`.
-Base.axes(m::MaybeHaloArray, i::Int) = i <= ndims(m) ? axes(m)[i] : Base.OneTo(1)
-
-Base.ndims(::Type{<:MaybeHaloArray{T,N,A}}) where {T,N,A} = N
-
-Base.ndims(m::MaybeHaloArray{T,N,A}) where {T,N,A} = N
 
 @inline halo_width(::Type{<:MaybeHaloArray{T,N,A}}) where {T,N,A} = halo_width(A)
 
 @inline halo_width(m::MaybeHaloArray) = halo_width(m.data)
 
-Base.eltype(::Type{<:MaybeHaloArray{T,N,A}}) where {T,N,A} = T
-Base.eltype(::MaybeHaloArray{T,N,A}) where {T,N,A} = T
-Base.length(m::MaybeHaloArray) = m.active ? length(m.data) : 0
 Base.eachindex(m::MaybeHaloArray{T,N,A}) where {T,N,A} =
     is_active(m) ? eachindex(m.data) : CartesianIndices(ntuple(_ -> 1:0, Val(N)))
 
@@ -112,24 +102,6 @@ function unwrap(m::MaybeHaloArray)
     else
         throw(ErrorException("MaybeHaloArray: attempt to unwrap inactive value"))
     end
-end
-
-function apply_if_active(f::Function, m::MaybeHaloArray, args...; kwargs...)
-    m.active ? f(m.data, args...; kwargs...) : nothing
-end
-
-macro maybe_delegate(funs...)
-    bodies = Expr[]
-    for fn in funs
-        push!(bodies, :(function $(esc(fn))(m::MaybeHaloArray, args...; kwargs...)
-            if m.active
-                return $(esc(fn))(m.data, args...; kwargs...)
-            else
-                return nothing
-            end
-        end))
-    end
-    return Expr(:block, bodies...)
 end
 
 function Base.similar(m::MaybeHaloArray, ::Type{T}) where {T}

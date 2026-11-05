@@ -2,29 +2,20 @@ using Test
 using MPI
 using HaloArrays
 
-struct LegacyHalo <: HaloArrays.AbstractSingleHaloArray{Float64,2} end
-HaloArrays.global_size(::LegacyHalo) = (7, 5)
 struct NoSizeHalo <: HaloArrays.AbstractSingleHaloArray{Float64,2} end
 
-@testset "deprecated names still work and agree with the new spellings" begin
+@testset "shape contract: size is the one primitive, threads= is accepted everywhere" begin
     u = LocalHaloArray(Float64, (4, 3), 1; boundary_condition=:periodic)
     fill!(u, 2.0)
-    @test global_size(u) == size(u) == (4, 3)
-    # A downstream array type that implemented the old global_size interface
-    # still gets `size` through it; one with neither method errors cleanly.
-    @test size(LegacyHalo()) == (7, 5)
-    @test_throws MethodError size(NoSizeHalo())
+    @test size(u) == (4, 3) && size(u, 3) == 1 && axes(u, 3) == Base.OneTo(1) && length(u) == 12
+    @test_throws MethodError size(NoSizeHalo())   # a kind without _global_size errors cleanly
     inactive = MaybeHaloArray(u, false)          # an MPI dims= result on a non-owning rank
-    @test size(inactive) == (0, 0)               # by design
-    @test global_size(inactive) == (4, 3)        # the alias keeps looking through, as before
-    @test mapreduce_haloarray_dims(identity, +, u, 2) == sum(u; dims=2)
+    @test size(inactive) == (0, 0) && length(inactive) == 0 && ndims(inactive) == 2 && eltype(inactive) === Float64
+    @test size(parent(inactive)) == (4, 3)       # the wrapped geometry
     new = MultiHaloArray(LocalHaloArray, Float64, (4, 3), 1; fields=(:a, :b), boundary_condition=:periodic)
-    @test propertynames(new) == (:a, :b)
+    @test propertynames(new) == (:a, :b) && size(new, 4) == 1 && length(new) == 24
     t = ThreadedHaloArray(Float64, (2, 3), 1; dims=(2, 1), boundary_condition=:periodic)
     fill!(t, 1.0)
-    @test synchronize_halo_threads!(t) === t
-    @test halo_exchange_threads!(t) === t
-    @test boundary_condition_threads!(t) === t
     @test synchronize_halo!(t; threads=true) === t
     @test synchronize_halo!(u; threads=true) === u          # accepted and ignored off-thread
     @test synchronize_halo!(new; threads=true) === new

@@ -458,31 +458,6 @@ grids whose normals vary per face.
 """
 @inline face_normal(g::CellGeometry, d::Dim, I, tile=nothing) = _face_normal(coordinate_system(g), parent(g), d, I, tile)
 
-# ---- deprecated: the coordinate system as an argument (0.10) ----------------------
-# The system-first forms keep working for one release: on a raw MultiHaloArray
-# they wrap it with the given system, on a CellGeometry they check that the
-# given system is the geometry's own and throw otherwise.
-@inline _with_system(sys::CoordinateSystem, g::MultiHaloArray) = CellGeometry(sys, g)
-function _with_system(sys::CoordinateSystem, g::CellGeometry)
-    sys === coordinate_system(g) || throw(ArgumentError(
-        "coordinate system $(nameof(typeof(sys))) does not match the geometry's $(nameof(typeof(coordinate_system(g))))"))
-    return g
-end
-for f in (:cell_center, :cell_width, :cell_volume)
-    @eval function $f(sys::CoordinateSystem, g::Union{MultiHaloArray,CellGeometry}, I, tile=nothing)
-        Base.depwarn(string("`", $(QuoteNode(f)), "(system, g, …)` is deprecated: the geometry from ",
-            "`cell_geometry` carries its system, call `", $(QuoteNode(f)), "(g, …)`."), $(QuoteNode(f)))
-        return $f(_with_system(sys, g), I, tile)
-    end
-end
-for f in (:face_center, :face_distance, :face_area, :face_normal)
-    @eval function $f(sys::CoordinateSystem, g::Union{MultiHaloArray,CellGeometry}, d::Dim, I, tile=nothing)
-        Base.depwarn(string("`", $(QuoteNode(f)), "(system, g, …)` is deprecated: the geometry from ",
-            "`cell_geometry` carries its system, call `", $(QuoteNode(f)), "(g, …)`."), $(QuoteNode(f)))
-        return $f(_with_system(sys, g), d, I, tile)
-    end
-end
-
 # ---- direction iteration -------------------------------------------------------
 
 """

@@ -724,7 +724,3 @@ end
         j === nothing ? Tuple(ok)[findfirst(==(d), kept)::Int] : Tuple(rk)[j]
     end
 end
-
-# The keyword form `mapreduce(f, op, u; dims=…)` (and `sum(u; dims=…)` etc.) is
-# the API; the positional name remains as a deprecated alias.
-Base.@deprecate mapreduce_haloarray_dims(f, op, u, dims) mapreduce(f, op, u; dims=dims) false
