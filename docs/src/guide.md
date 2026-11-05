@@ -173,7 +173,9 @@ applies physical boundary conditions where the topology has `MPI.PROC_NULL`
 neighbors. For `LocalHaloArray`, it only applies boundary conditions.
 
 Use the split async API ([`start_halo_exchange!`](@ref) + [`finish_halo_exchange!`](@ref))
-to overlap communication with independent computation.
+to overlap communication with independent computation. The pair is the exchange
+alone; call [`boundary_condition!`](@ref)`(u)` after the finish to fill the
+physical-wall ghosts, as `synchronize_halo!` would.
 
 All mutating drivers (`halo_exchange!`, `synchronize_halo!`,
 `boundary_condition!`, `fill!`, `copyto!`, the BLAS-1 updates, …) return their
@@ -373,7 +375,9 @@ r = mapreduce(abs2, +, u; dims=2)   # explicit form, same result
 For an MPI `HaloArray` the collapsed result lives only on the **coordinate‑0
 slice** of the reduced dimensions and is returned as a [`MaybeHaloArray`](@ref):
 `is_active(r)` is `true` on the ranks that hold it (and always `true` for serial
-backends), `interior_view(r)` reads it there, and [`free!`](@ref)`(r)` releases
+backends), [`gather_haloarray`](@ref)`(r)` assembles it there (a copy on
+`LocalHaloArray`, the tiles stitched on `ThreadedHaloArray`, the root of the
+active ranks on MPI, `nothing` elsewhere), and [`free!`](@ref)`(r)` releases
 the sub-communicator it owns (optional — otherwise reclaimed at `MPI.Finalize`;
 call it to keep communicator use bounded when reducing in a loop). These three
 behave uniformly on every return kind, so reduction-consuming code needs no
@@ -381,9 +385,8 @@ backend branches:
 
 ```julia
 r = sum(u; dims=2)
-if is_active(r)
-    save(interior_view(r))
-end
+P = gather_haloarray(r)      # the assembled profile, or nothing on a rank that does not hold it
+P === nothing || save(P)
 free!(r)
 ```
 

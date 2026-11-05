@@ -118,13 +118,16 @@ This is where stencils live, because here a neighbour is just an offset and the
 ghosts make every neighbour read in-bounds:
 
 ```julia
-h  = halo_width(u)
-s  = parent(u)
+s, d = parent(u), parent(du)                         # both padded blocks: storage coordinates on both sides
 e1 = unit_vector(u, 1)
 for I in CartesianIndices(interior_range(u))         # interior cells, storage coordinates
-    du[I] = (s[I + e1] - 2s[I] + s[I - e1]) * inv_dx2
+    d[I] = (s[I + e1] - 2s[I] + s[I - e1]) * inv_dx2
 end
 ```
+
+Index the **storage** on both sides. `du[I]` would read `I` as a global index,
+and with a nonzero halo width every write would land one halo width off, until
+it fell outside the owned cells and errored.
 
 The loop helpers all speak storage coordinates:
 

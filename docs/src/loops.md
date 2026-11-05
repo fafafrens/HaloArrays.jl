@@ -74,6 +74,7 @@ lets the last coordinate step by two. Iterate the tuple, then each range:
 
 ```julia
 cr = CellRanges(u)
+s, f = parent(u), parent(rhs)   # padded blocks, storage coordinates on both sides
 for color in (0, 1)
     @inbounds for sub in interior_cells(cr, color), I in sub
         s[I] = 0.25 * (s[I + e1] + s[I - e1] + s[I + e2] + s[I - e2] - h2 * f[I])

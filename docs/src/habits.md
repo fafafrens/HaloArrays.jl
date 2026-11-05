@@ -31,7 +31,19 @@ synchronisation.
 
 Use the split form, [`start_halo_exchange!`](@ref) and
 [`finish_halo_exchange!`](@ref), only to overlap communication with work that
-does not read the ghosts.
+does not read the ghosts. The pair is the **exchange alone**: it fills the ghosts
+that face a neighbouring rank or tile and does nothing at a physical wall (on a
+`LocalHaloArray` both calls are no-ops). The physical-wall ghosts stay stale
+until you call [`boundary_condition!`](@ref) after the finish, which is the
+second half of what `synchronize_halo!` does:
+
+```julia
+start_halo_exchange!(u)
+interior_only_work!(u)        # reads no ghost cell
+finish_halo_exchange!(u)
+boundary_condition!(u)        # now every ghost is valid
+stencil!(du, u)
+```
 
 ## Initialise from global indices
 
@@ -128,13 +140,17 @@ A = gather_haloarray(u)               # every rank calls it
 is_root(u) && h5write("snap.h5", "rho", A)
 
 r = sum(u; dims=2)                    # every rank calls it
-is_active(r) && save(interior_view(r))
+P = gather_haloarray(r)               # the assembled profile, or nothing on a rank that does not hold it
+P === nothing || save(P)
 free!(r)
 ```
 
-[`is_root`](@ref) and [`is_active`](@ref) are `true` on the serial backends, so
-the pattern needs no backend branch. Diagnostics that read `u[I]` on one rank
-are fine; they do not communicate.
+[`is_root`](@ref) and [`is_active`](@ref) are `true` on the serial backends,
+and `gather_haloarray` returns the array on every serial kind (stitching the
+tiles of a `ThreadedHaloArray`), so the pattern needs no backend branch. Do not
+reach into a reduced result with `interior_view(r)`: on a threaded result the
+interior is per tile, `interior_view(r, t)`. Diagnostics that read `u[I]` on
+one rank are fine; they do not communicate.
 
 ## Allocate once
 
