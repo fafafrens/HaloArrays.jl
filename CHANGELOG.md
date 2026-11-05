@@ -6,7 +6,32 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- `storage=` on every constructor: `LocalHaloArray(Float32, dims, h;
+  storage=CUDA.zeros)` allocates the padded block through
+  `storage(T, sizes...)` (`zeros` by default), and the same keyword on
+  `ThreadedHaloArray`, the MPI `HaloArray` (its exchange buffers follow the
+  storage), `MultiHaloArray` and `ArrayOfHaloArray` places every tile or field
+  there. It replaces the `storage=` that only the local `ArrayOfHaloArray`
+  form had.
+
 ### Changed
+- One constructor per collection family. `MultiHaloArray(FT, T, geometry,
+  halo[, topology]; fields, boundary_condition | boundary_conditions,
+  kwargs...)` and `ArrayOfHaloArray(FT, T, field_shape, geometry, halo[,
+  topology]; …)` (or `boundary_conditions` alone, whose size is the field
+  shape) resolve the conditions and map the backend's own constructor
+  `FT(T, geometry, halo[, topology]; boundary_condition=bc, kwargs...)` over
+  them; the topology and every other keyword (`dims`, `thread_backend`,
+  `storage`) pass through. The nine `MultiHaloArray` and eleven
+  `ArrayOfHaloArray` per-backend methods, the four `_make_field` helpers and
+  the private local field builder are gone; the `field_shape` form now works
+  for MPI fields too. `HaloArray` keeps the data form, the topology form, the
+  inferred-topology form and the `Float64` forwarder: the positional
+  boundary-condition forms `HaloArray(T, dims, halo, topology, bc)` and
+  `HaloArray(T, dims, halo, bc)` are removed (use `boundary_condition=`).
+  Integer arguments (`Int32` dims, `Int8` halo) are normalized everywhere.
+
 - Every reduction is written once: the local part (per tile) followed by
   `_global(r, op, communicator(u))`, which is the identity on the serial
   backends and one `Allreduce` on an MPI `HaloArray`. The eleven
@@ -39,6 +64,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the duplicated `versors`/`map`, `full_range`, `full_tile_size`, the
   tile-first `boundary_condition!(t, tile, side, dim)` nothing called.
   `HaloArray`'s `show` uses the `LocalHaloArray` wording.
+
+### Removed
+- The deprecated `LocalMultiHaloArray` and `ThreadedMultiHaloArray` names:
+  `MultiHaloArray(LocalHaloArray, …)` / `MultiHaloArray(ThreadedHaloArray, …)`
+  take the same arguments.
 
 ### Fixed
 - Scalar indexing of a `LocalHaloArray` (`u[i, j]`, `u[i, j] = v`) allocated

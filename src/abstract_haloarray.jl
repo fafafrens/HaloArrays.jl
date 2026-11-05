@@ -306,6 +306,14 @@ function is_root end
 @inline interior_range(halo::AbstractSingleHaloArray, ::Integer) = interior_range(halo)
 @inline interior_view(halo::AbstractSingleHaloArray, ::Integer) = interior_view(halo)
 
+# One padded storage block: an `owned` interior with `halo` ghost cells on
+# every side, allocated by `storage(T, sizes...)`. Every single-kind
+# constructor takes `storage=` (default `zeros`) and allocates through this,
+# so `storage=CUDA.zeros` / `Metal.zeros` is the one way to say where an
+# array's memory lives, and the collection constructors pass it down.
+@inline _padded_storage(storage, ::Type{T}, owned::NTuple{N,<:Integer}, halo::Integer) where {T,N} =
+    storage(T, ntuple(d -> Int(owned[d]) + 2 * Int(halo), Val(N))...)
+
 # The two drivers over that decomposition. A single-block array runs the
 # per-tile kernel inline on its lone tile; a ThreadedHaloArray (methods with its
 # type, threaded_haloarray.jl) splits its tiles across the thread backend. Every

@@ -1,5 +1,5 @@
 """
-    LocalHaloArray(T, owned_dims, halo; boundary_condition=:repeating)
+    LocalHaloArray(T, owned_dims, halo; boundary_condition=:repeating, storage=zeros)
     LocalHaloArray(data::AbstractArray, halo, boundary_condition)
 
 A single-process halo array: a plain array padded with `halo` ghost cells on
@@ -17,12 +17,16 @@ and `eachindex` address the interior cells only; the ghost padding is hidden.
   [`boundary_condition!`](@ref). A symbol (`:periodic`, `:repeating`,
   `:reflecting`, `:antireflecting`), a boundary-condition instance, or a
   per-dimension tuple of `(left, right)` pairs. See [`Periodic`](@ref) etc.
+- `storage`: the allocator for the padded block, called as
+  `storage(T, sizes...)`. `zeros` by default; `CUDA.zeros` / `Metal.zeros`
+  places the array on a device.
 
 # Examples
 ```julia
 u = LocalHaloArray(Float64, (64, 64), 1; boundary_condition=:periodic)
 interior_view(u) .= 1.0      # write the interior cells
 synchronize_halo!(u)         # fill ghost cells from the boundary condition
+g = LocalHaloArray(Float32, (64, 64), 1; boundary_condition=:periodic, storage=Metal.zeros)
 ```
 
 See also [`HaloArray`](@ref) (MPI), [`ThreadedHaloArray`](@ref) (threads),
@@ -54,15 +58,13 @@ function _check_periodic_extent(fullsize::NTuple{N,Int}, halo::Int, bc) where {N
     return nothing
 end
 
-function LocalHaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int; boundary_condition=:repeating) where {T,N}
-    fullsize = ntuple(i -> owned_dims[i] + 2 * halo, Val(N))
-    data = zeros(T, fullsize...)
-    return LocalHaloArray(data, halo, boundary_condition)
+function LocalHaloArray(::Type{T}, owned_dims::NTuple{N,<:Integer}, halo::Integer;
+        boundary_condition=:repeating, storage=zeros) where {T,N}
+    return LocalHaloArray(_padded_storage(storage, T, owned_dims, halo), Int(halo), boundary_condition)
 end
 
-function LocalHaloArray(owned_dims::NTuple{N,Int}, halo::Int; boundary_condition=:repeating) where {N}
-    return LocalHaloArray(Float64, owned_dims, halo; boundary_condition)
-end
+LocalHaloArray(owned_dims::NTuple{N,<:Integer}, halo::Integer; kwargs...) where {N} =
+    LocalHaloArray(Float64, owned_dims, halo; kwargs...)
 
 # size, axes, length, eltype, ndims, parent, interior_axes, eachindex, iterate
 # inherited from AbstractSingleHaloArray / AbstractArray.

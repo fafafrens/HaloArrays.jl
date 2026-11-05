@@ -602,3 +602,11 @@ rule face of a block — any mix of built-in and custom conditions — in one
 launch, the MPI exchange buffers use one kernel per face, and the MPI exchange
 synchronizes the device before posting its sends. Nothing changes for CPU
 storage.
+
+Where an array's memory lives is the `storage=` keyword of every constructor:
+`LocalHaloArray(Float32, (64, 64), 1; boundary_condition=:periodic, storage=CUDA.zeros)`
+allocates the padded block on the device (`storage(T, sizes...)` is the
+allocator; `zeros` by default), and the same keyword on a `ThreadedHaloArray`,
+an MPI `HaloArray` (its exchange buffers follow), a `MultiHaloArray` or an
+`ArrayOfHaloArray` places every tile or field there. Wrapping an existing
+device array, `LocalHaloArray(CuArray(data), halo, bc)`, is the other way in.

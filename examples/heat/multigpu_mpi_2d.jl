@@ -101,7 +101,7 @@ gx, gy = LOCAL .* topo.dims
 # host HaloArray of the same topology, then move its parent to the device and wrap
 # it — the cpu_vs_gpu_2d.jl pattern. Only this one-time setup is staged through the
 # host; the MPI exchange and KA stencil below are device-native.
-host = HaloArray(T, LOCAL, HALO, topo, bc)
+host = HaloArray(T, LOCAL, HALO, topo; boundary_condition=bc)
 fill_from_global_indices!(I -> sinpi(2I[1] / gx) * sinpi(2I[2] / gy), host)
 u    = HaloArray(to_device(parent(host)), HALO, topo, bc)   # device, IC already set
 unew = HaloArray(to_device(zeros(T, FULL...)), HALO, topo, bc)

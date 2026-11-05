@@ -18,13 +18,10 @@ struct NoSizeHalo <: HaloArrays.AbstractSingleHaloArray{Float64,2} end
     @test size(inactive) == (0, 0)               # by design
     @test global_size(inactive) == (4, 3)        # the alias keeps looking through, as before
     @test mapreduce_haloarray_dims(identity, +, u, 2) == sum(u; dims=2)
-    old = LocalMultiHaloArray(Float64, (4, 3), 1; fields=(:a, :b), boundary_condition=:periodic)
     new = MultiHaloArray(LocalHaloArray, Float64, (4, 3), 1; fields=(:a, :b), boundary_condition=:periodic)
-    @test propertynames(old) == propertynames(new) == (:a, :b)
-    @test LocalMultiHaloArray((; a=u, b=copy(u))) isa MultiHaloArray
+    @test propertynames(new) == (:a, :b)
     t = ThreadedHaloArray(Float64, (2, 3), 1; dims=(2, 1), boundary_condition=:periodic)
     fill!(t, 1.0)
-    @test ThreadedMultiHaloArray(Float64, (2, 3), 1; dims=(2, 1), fields=(:a,), boundary_condition=:periodic) isa MultiHaloArray
     @test synchronize_halo_threads!(t) === t
     @test halo_exchange_threads!(t) === t
     @test boundary_condition_threads!(t) === t

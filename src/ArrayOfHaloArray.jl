@@ -2,98 +2,36 @@
 # and the ground-truth ArrayOfHaloArray(::AbstractArray) constructor live in
 # field_collection.jl. _spatial_* geometry helpers live in abstract_haloarray.jl.
 
-# MPI-backed fields — field-type-first, like the LocalHaloArray/ThreadedHaloArray
-# constructors below. The shape of `boundary_conditions` fixes the field shape.
-# (The element-type-first forms were removed: a dual-meaning first argument
-# caused method ambiguities against the specialized field-type constructors.)
-function ArrayOfHaloArray(FT::Type{<:HaloArray}, ::Type{T}, owned_dims::NTuple{N,Int},
-        halo::Int, topology::CartesianTopology{N};
-        boundary_conditions::AbstractArray) where {T,N}
-    return ArrayOfHaloArray(map(bc -> _make_field(FT, T, owned_dims, halo, topology, bc), boundary_conditions))
+# One constructor for every backend, as for MultiHaloArray: the boundary
+# conditions become an array of `field_shape` (one `boundary_condition` for
+# all, or `boundary_conditions` already in that shape), and one field is built
+# per entry with `FT(T, geometry, halo[, topology]; …)`; the topology and the
+# remaining keywords (`dims`, `thread_backend`, `storage`, …) pass through.
+# Given only a `boundary_conditions` array, its size is the field shape.
+function ArrayOfHaloArray(FT::Type{<:AbstractSingleHaloArray}, ::Type{T},
+        field_shape::NTuple{F,<:Integer}, geometry::NTuple{N,<:Integer}, halo::Integer, topology...;
+        boundary_condition=:repeating, boundary_conditions=nothing, kwargs...) where {T,F,N}
+    shape = ntuple(d -> Int(field_shape[d]), Val(F))
+    bcs = _arrayofhaloarray_boundary_conditions(shape, boundary_condition, boundary_conditions)
+    return ArrayOfHaloArray(map(bc -> FT(T, geometry, halo, topology...; boundary_condition=bc, kwargs...), bcs))
 end
 
-function ArrayOfHaloArray(FT::Type{<:HaloArray}, ::Type{T}, owned_dims::NTuple{N,Int},
-        halo::Int; boundary_conditions::AbstractArray) where {T,N}
-    return ArrayOfHaloArray(map(bc -> _make_field(FT, T, owned_dims, halo, bc), boundary_conditions))
+function ArrayOfHaloArray(FT::Type{<:AbstractSingleHaloArray}, ::Type{T},
+        geometry::NTuple{N,<:Integer}, halo::Integer, topology...;
+        boundary_conditions::AbstractArray, kwargs...) where {T,N}
+    return ArrayOfHaloArray(FT, T, size(boundary_conditions), geometry, halo, topology...;
+        boundary_conditions, kwargs...)
 end
 
-function ArrayOfHaloArray(FT::Type{LocalHaloArray}, ::Type{T}, owned_dims::NTuple{N,Int},
-        halo::Int; boundary_conditions::AbstractArray) where {T,N}
-    return ArrayOfHaloArray(map(bc -> _make_field(FT, T, owned_dims, halo, bc), boundary_conditions))
-end
-
-function ArrayOfHaloArray(::Type{LocalHaloArray}, owned_dims::NTuple{N,Int}, halo::Int;
-        boundary_conditions::AbstractArray) where {N}
-    return ArrayOfHaloArray(LocalHaloArray, Float64, owned_dims, halo;
-        boundary_conditions=boundary_conditions)
-end
+ArrayOfHaloArray(FT::Type{<:AbstractSingleHaloArray}, shape::NTuple{N,<:Integer}, args...; kwargs...) where {N} =
+    ArrayOfHaloArray(FT, Float64, shape, args...; kwargs...)
 
 function _arrayofhaloarray_boundary_conditions(field_shape::NTuple{F,Int},
         boundary_condition, boundary_conditions) where {F}
-    if boundary_conditions === nothing
-        return fill(boundary_condition, field_shape)
-    end
-
+    boundary_conditions === nothing && return fill(boundary_condition, field_shape)
     size(boundary_conditions) == field_shape ||
         throw(DimensionMismatch("boundary_conditions shape $(size(boundary_conditions)) != field shape $field_shape"))
     return boundary_conditions
-end
-
-function _local_arrayofhaloarray_field(::Type{T}, owned_dims::NTuple{N,Int},
-        halo::Int, boundary_condition, storage) where {T,N}
-    fullsize = ntuple(d -> Int(owned_dims[d]) + 2 * halo, Val(N))
-    data = storage(T, fullsize...)
-    return LocalHaloArray(data, halo, boundary_condition)
-end
-
-function ArrayOfHaloArray(::Type{LocalHaloArray}, ::Type{T},
-        field_shape::NTuple{F,<:Integer}, owned_dims::NTuple{N,<:Integer},
-        halo::Integer;
-        boundary_condition=:repeating,
-        boundary_conditions=nothing,
-        storage=zeros) where {T,F,N}
-    shape = ntuple(d -> Int(field_shape[d]), Val(F))
-    owned = ntuple(d -> Int(owned_dims[d]), Val(N))
-    h = Int(halo)
-    bcs = _arrayofhaloarray_boundary_conditions(shape, boundary_condition, boundary_conditions)
-    arrays = map(bcs) do bc
-        _local_arrayofhaloarray_field(T, owned, h, bc, storage)
-    end
-    return ArrayOfHaloArray(arrays)
-end
-
-function ArrayOfHaloArray(::Type{LocalHaloArray},
-        field_shape::NTuple{F,<:Integer}, owned_dims::NTuple{N,<:Integer},
-        halo::Integer; kwargs...) where {F,N}
-    return ArrayOfHaloArray(LocalHaloArray, Float64, field_shape, owned_dims, halo; kwargs...)
-end
-
-function ArrayOfHaloArray(FT::Type{ThreadedHaloArray}, ::Type{T}, tile_size::NTuple{N,<:Integer},
-        halo::Integer; dims::NTuple{N,<:Integer}, boundary_conditions::AbstractArray) where {T,N}
-    return ArrayOfHaloArray(map(bc -> _make_field(FT, T, tile_size, halo, bc; dims=dims), boundary_conditions))
-end
-
-function ArrayOfHaloArray(::Type{ThreadedHaloArray}, tile_size::NTuple{N,<:Integer},
-        halo::Integer; dims::NTuple{N,<:Integer}, boundary_conditions::AbstractArray) where {N}
-    return ArrayOfHaloArray(ThreadedHaloArray, Float64, tile_size, halo;
-        dims=dims, boundary_conditions=boundary_conditions)
-end
-
-function ArrayOfHaloArray(FT::Type{ThreadedHaloArray}, ::Type{T},
-        field_shape::NTuple{F,<:Integer}, tile_size::NTuple{N,<:Integer},
-        halo::Integer;
-        dims::NTuple{N,<:Integer},
-        boundary_condition=:repeating,
-        boundary_conditions=nothing) where {T,F,N}
-    shape = ntuple(d -> Int(field_shape[d]), Val(F))
-    bcs = _arrayofhaloarray_boundary_conditions(shape, boundary_condition, boundary_conditions)
-    return ArrayOfHaloArray(map(bc -> _make_field(FT, T, tile_size, halo, bc; dims=dims), bcs))
-end
-
-function ArrayOfHaloArray(::Type{ThreadedHaloArray},
-        field_shape::NTuple{F,<:Integer}, tile_size::NTuple{N,<:Integer},
-        halo::Integer; kwargs...) where {F,N}
-    return ArrayOfHaloArray(ThreadedHaloArray, Float64, field_shape, tile_size, halo; kwargs...)
 end
 
 # eltype/ndims come from AbstractArray{T,D} via FieldCollection{T,D,S,C,L}.

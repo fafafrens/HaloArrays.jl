@@ -76,43 +76,30 @@ function build_haloarray_from_data(data::AbstractArray{T,N}, halo::Int,
         data, topology, comm_state, recv_bufs, send_bufs, bc)
 end
 
-function HaloArray(data::AbstractArray{T,N}, halo::Int,
+# Three forms, like the other single kinds: wrap existing storage, allocate on
+# a given topology, or allocate on a topology built over COMM_WORLD (periodic
+# where the boundary condition is). `Float64` when the element type is omitted.
+function HaloArray(data::AbstractArray{T,N}, halo::Integer,
         topology::CartesianTopology{N}, boundary_condition) where {T,N}
-    build_haloarray_from_data(data, halo, topology, boundary_condition)
+    build_haloarray_from_data(data, Int(halo), topology, boundary_condition)
 end
 
-function HaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int,
+function HaloArray(::Type{T}, owned_dims::NTuple{N,<:Integer}, halo::Integer,
         topology::CartesianTopology{N};
-        boundary_condition=ntuple(_ -> (Repeating(), Repeating()), Val(N))) where {T,N}
-    fullsize = ntuple(i -> owned_dims[i] + 2*halo, Val(N))
-    data = zeros(T, fullsize...)
-    build_haloarray_from_data(data, halo, topology, boundary_condition)
+        boundary_condition=:repeating, storage=zeros) where {T,N}
+    HaloArray(_padded_storage(storage, T, owned_dims, halo), halo, topology, boundary_condition)
 end
 
-function HaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int,
-        topology::CartesianTopology{N}, boundary_condition) where {T,N}
-    bc = normalize_boundary_condition(boundary_condition, N)
-    HaloArray(T, owned_dims, halo, topology; boundary_condition=bc)
-end
-
-function HaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int,
-        boundary_condition::NTuple{N,NTuple{2,AbstractBoundaryCondition}}) where {T,N}
+function HaloArray(::Type{T}, owned_dims::NTuple{N,<:Integer}, halo::Integer;
+        boundary_condition=:repeating, kwargs...) where {T,N}
     MPI.Initialized() || MPI.Init()
-    comm     = MPI.COMM_WORLD
-    periodic = infer_periodicity(normalize_boundary_condition(boundary_condition, N))
-    topology = CartesianTopology(comm, ntuple(_ -> 0, Val(N)); periodic=periodic)
-    HaloArray(T, owned_dims, halo, topology; boundary_condition=boundary_condition)
+    bc       = normalize_boundary_condition(boundary_condition, N)
+    topology = CartesianTopology(MPI.COMM_WORLD, ntuple(_ -> 0, Val(N)); periodic=infer_periodicity(bc))
+    HaloArray(T, owned_dims, halo, topology; boundary_condition=bc, kwargs...)
 end
 
-function HaloArray(::Type{T}, owned_dims::NTuple{N,Int}, halo::Int;
-        boundary_condition=ntuple(_ -> (Repeating(), Repeating()), Val(N))) where {T,N}
-    HaloArray(T, owned_dims, halo, normalize_boundary_condition(boundary_condition, N))
-end
-
-function HaloArray(owned_dims::NTuple{N,Int}, halo::Int;
-        boundary_condition=ntuple(_ -> (Repeating(), Repeating()), Val(N))) where {N}
-    HaloArray(Float64, owned_dims, halo, normalize_boundary_condition(boundary_condition, N))
-end
+HaloArray(owned_dims::NTuple{N,<:Integer}, halo::Integer, args...; kwargs...) where {N} =
+    HaloArray(Float64, owned_dims, halo, args...; kwargs...)
 
 function HaloArray{T,N,arraytype,Halo}(::UndefInitializer,
         boundary_condition) where {T,N,arraytype<:AbstractArray{T,N},Halo}

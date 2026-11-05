@@ -32,6 +32,7 @@ include_test(name) = include(joinpath(@__DIR__, name))
             @info "Skipping Aqua tests (Aqua not in this environment; run via Pkg.test)"
         end
         include_test("test_public_api.jl")
+        include_test("test_constructors.jl")
         include_test("test_haloarray_helpers.jl")
         include_test("test_boundary.jl")
         include_test("test_function_bc.jl")

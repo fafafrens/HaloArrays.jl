@@ -183,8 +183,9 @@ end
 #   Topo        topology type (CartesianTopology{N,C} when MPI is loaded)
 #   CS          comm-state type (HaloCommState)
 """
-    HaloArray(T, owned_dims, halo, topology; boundary_condition=:repeating)
-    HaloArray(T, owned_dims, halo; boundary_condition=:repeating)   # builds a topology
+    HaloArray(T, owned_dims, halo, topology; boundary_condition=:repeating, storage=zeros)
+    HaloArray(T, owned_dims, halo; boundary_condition=:repeating, storage=zeros)   # builds a topology
+    HaloArray(data::AbstractArray, halo, topology, boundary_condition)
 
 The MPI-distributed halo array. Each rank stores an `owned_dims` interior patch of the
 global grid surrounded by `halo` ghost cells; [`synchronize_halo!`](@ref)
@@ -203,6 +204,9 @@ and applies the boundary condition at the physical domain edges.
   `MPI.COMM_WORLD` with periodicity inferred from the boundary condition.
 - `boundary_condition`: applied at physical edges (see [`LocalHaloArray`](@ref)
   for the accepted forms).
+- `storage`: the allocator for this rank's padded block, `storage(T, sizes...)`;
+  `zeros` by default, `CUDA.zeros` for a device-resident array (the exchange
+  buffers follow the storage).
 
 See also [`LocalHaloArray`](@ref), [`ThreadedHaloArray`](@ref),
 [`halo_exchange!`](@ref); `gather_haloarray` to collect a global array on the root.

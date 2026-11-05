@@ -25,6 +25,21 @@ struct DirichletExt{T} <: HaloArrays.AbstractBoundaryCondition; value::T; end
         @test Array(parent(dev2)) == parent(ref)
     end
 
+    # `storage=` allocates on the device directly; the collection constructors pass it down
+    jlzeros(T, d...) = JLArray(zeros(T, d...))
+    g = LocalHaloArray(Float32, (5, 6), 1; boundary_condition=:periodic, storage=jlzeros)
+    @test parent(g) isa JLArray{Float32,2} && size(parent(g)) == (7, 8)
+    gref = LocalHaloArray(Float32, (5, 6), 1; boundary_condition=:periodic)
+    interior_view(g) .= 1.0f0
+    interior_view(gref) .= 1.0f0
+    synchronize_halo!(g)
+    synchronize_halo!(gref)
+    @test Array(parent(g)) == parent(gref)
+    gs = MultiHaloArray(LocalHaloArray, Float32, (5, 6), 1; fields=(:a, :b), boundary_condition=:periodic, storage=jlzeros)
+    @test parent(gs.b) isa JLArray{Float32,2}
+    gv = ArrayOfHaloArray(LocalHaloArray, Float32, (2,), (5, 6), 1; boundary_condition=:periodic, storage=jlzeros)
+    @test parent(gv[2]) isa JLArray{Float32,2}
+
     # mixed conditions: one fused launch over all rule faces
     x = rand(8, 9)
     bc = ((Periodic(), Periodic()), (Repeating(), Repeating()))

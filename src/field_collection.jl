@@ -27,8 +27,8 @@ struct FieldCollection{T,D,S,C,L} <: AbstractHaloCollection{T,D,S}
 end
 
 """
-    MultiHaloArray(Backend, T, dims, halo[, topology]; boundary_conditions)
-    MultiHaloArray(Backend, T, dims, halo[, topology]; fields, boundary_condition)
+    MultiHaloArray(Backend, T, dims, halo[, topology]; boundary_conditions, kwargs...)
+    MultiHaloArray(Backend, T, dims, halo[, topology]; fields, boundary_condition, kwargs...)
     MultiHaloArray(named_tuple_of_fields)
 
 A collection of several **named** halo-array fields sharing the same geometry
@@ -40,7 +40,9 @@ and broadcast/reduce over all fields at once (`state .*= 2`).
 (with `dims=` for the tile grid), or [`HaloArray`](@ref) (MPI, with a
 `topology`). `boundary_conditions` is a `NamedTuple` mapping each field name to
 its boundary condition, the field names being its keys; `fields=(:rho, :p)` with
-one `boundary_condition` for all of them is the shorthand. Or pass a `NamedTuple`
+one `boundary_condition` for all of them is the shorthand. Every other keyword
+(`dims`, `thread_backend`, `storage`, …) goes to the field constructor, so
+`storage=CUDA.zeros` places every field on the device. Or pass a `NamedTuple`
 of pre-built arrays, which must share geometry, halo width, backend, and (for
 threaded fields) tiling.
 
@@ -73,7 +75,8 @@ q = MultiHaloArray(ThreadedHaloArray, Float64, (32, 32), 1; dims=(2, 2),
 const MultiHaloArray{T,D,S,C<:NamedTuple,L} = FieldCollection{T,D,S,C,L}
 
 """
-    ArrayOfHaloArray(FieldType, T, field_shape, owned_dims, halo; boundary_condition, …)
+    ArrayOfHaloArray(FieldType, T, field_shape, dims, halo[, topology]; boundary_condition, kwargs...)
+    ArrayOfHaloArray(FieldType, T, dims, halo[, topology]; boundary_conditions, kwargs...)
     ArrayOfHaloArray(array_of_fields)
 
 A collection of halo-array fields stored in an `AbstractArray` and addressed by
@@ -84,8 +87,11 @@ share the same geometry and backend.
 Natural when the number of fields is decided at runtime, or when they form a
 grid/tensor layout: a conserved state vector `q = (ρ, ρu, E)` as a `(3,)` array,
 a velocity as `(2,)`, or a stress tensor as `(2, 2)`. `field_shape` is the shape
-of the field container; `FieldType` is [`LocalHaloArray`](@ref) or
-[`ThreadedHaloArray`](@ref) (MPI fields are built from a topology instead).
+of the field container, with one `boundary_condition` for every field or a
+`boundary_conditions` array of that shape; given the array alone, its size is
+the field shape. `FieldType` is [`LocalHaloArray`](@ref), [`ThreadedHaloArray`](@ref)
+(with `dims=`) or [`HaloArray`](@ref) (MPI, with a `topology`); the remaining
+keywords (`dims`, `thread_backend`, `storage`, …) go to the field constructor.
 
 Index fields with `arr[i]` / `arr[i, j]`; [`synchronize_halo!`](@ref) and
 broadcast act on every field at once.
@@ -182,21 +188,6 @@ end
 # _map_fields and similar).
 @inline _rebuild_collection(arrs::NamedTuple)    = MultiHaloArray(arrs)
 @inline _rebuild_collection(arrs::AbstractArray) = ArrayOfHaloArray(arrs)
-
-# Build one backing field of the requested type for a single boundary condition.
-# This is the per-field core shared by the MultiHaloArray (named) and
-# ArrayOfHaloArray (indexed) constructor families: `map`ping it over a bcs
-# container (a NamedTuple or an array) yields the fields in the matching
-# container, which the alias constructor then wraps. Adding a backend means
-# adding one `_make_field` method, not editing both constructor families.
-@inline _make_field(::Type{<:HaloArray}, ::Type{T}, owned_dims, halo, topology, bc) where {T} =
-    HaloArray(T, owned_dims, halo, topology; boundary_condition=bc)
-@inline _make_field(::Type{<:HaloArray}, ::Type{T}, owned_dims, halo, bc) where {T} =
-    HaloArray(T, owned_dims, halo; boundary_condition=bc)
-@inline _make_field(::Type{<:LocalHaloArray}, ::Type{T}, owned_dims, halo, bc) where {T} =
-    LocalHaloArray(T, owned_dims, halo; boundary_condition=bc)
-@inline _make_field(::Type{<:ThreadedHaloArray}, ::Type{T}, tile_size, halo, bc; dims) where {T} =
-    ThreadedHaloArray(T, tile_size, halo; dims=dims, boundary_condition=bc)
 
 # ---- container-generic methods ---------------------------------------------
 # `values` is the identity on AbstractArrays and the field tuple on NamedTuples,
