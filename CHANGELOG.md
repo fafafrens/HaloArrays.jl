@@ -7,6 +7,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Two manual pages: *Index spaces* (global, interior, storage, launch and
+  tile coordinates, which function takes which, the conversions, the accepted
+  and refused indexing forms) and *Good habits* (the conventions that keep one
+  code running on every backend). `interior_to_global_index` has a docstring
+  for every kind.
 - `storage=` on every constructor: `LocalHaloArray(Float32, dims, h;
   storage=CUDA.zeros)` allocates the padded block through
   `storage(T, sizes...)` (`zeros` by default), and the same keyword on

@@ -14,6 +14,8 @@ makedocs(
     pages = [
         "Home" => "index.md",
         "Guide" => "guide.md",
+        "Index spaces" => "indexing.md",
+        "Good habits" => "habits.md",
         "Linear & implicit solves" => "solvers.md",
         "Examples" => "examples.md",
         "API" => [
