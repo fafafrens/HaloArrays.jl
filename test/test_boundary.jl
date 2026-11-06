@@ -159,6 +159,30 @@ end
     @test @allocated(synchronize_halo!(u)) == 0
 end
 
+# Behind a function barrier: at top level the measurement itself can box.
+_sync_allocations(u) = (synchronize_halo!(u); @allocated synchronize_halo!(u))
+
+@testset "synchronize_halo! on a MultiHaloArray of many fields allocates nothing" begin
+    # Ten named 2-D fields with mixed axis parities and no condition along the
+    # first dimension (a type used nowhere else in the suite, so it is compiled
+    # here first). The per-field loop must not depend on how it was first
+    # compiled: with an unspecialised function argument it allocated 384 bytes
+    # per call once `synchronize_halo!` had first been compiled inside a
+    # two-argument `foreach` closure, which is what the first call below does.
+    names = Tuple(Symbol(:many_fields_, a) for a in 1:10)
+    bcs = NamedTuple{names}(Tuple((:noboundary, (Mirror(isodd(a) ? -1 : 1), :repeating)) for a in 1:10))
+    u = MultiHaloArray(LocalHaloArray, Float64, (3, 5), 1; boundary_conditions = bcs)
+    v = similar(u)
+    foreach((a, b) -> (synchronize_halo!(a); synchronize_halo!(b); nothing), (u, v), (v, u))
+    for a in 1:10
+        parent(getproperty(u, names[a]))[2:4, 2] .= a
+    end
+    synchronize_halo!(u)
+    @test [parent(getproperty(u, names[a]))[3, 1] for a in 1:10] == [isodd(a) ? -a : a for a in 1:10]
+    @test _sync_allocations(u) == 0
+    @test _sync_allocations(v) == 0
+end
+
 @testset "Extrapolation: polynomial of order p into the ghosts" begin
     function ghosts(bc, vals)
         u = LocalHaloArray(Int, (length(vals),), 2; boundary_condition = ((bc, bc),))
