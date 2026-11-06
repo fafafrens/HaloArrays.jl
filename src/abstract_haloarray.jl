@@ -629,10 +629,20 @@ end
 # One topology per collection: the communicator is any field's.
 @inline communicator(mha::AbstractHaloCollection) = communicator(first(_fields(mha)))
 
-function foreach_field!(f!, mha::AbstractHaloCollection)
-    foreach(f!, _fields(mha))
+# `f!` is only passed on, so Julia would not specialise on it without the explicit
+# `where {F}`. Unspecialised, whether the halo refresh allocates depended on how it was
+# first compiled: once inference had widened the call (e.g. after a first call from inside
+# a two-argument `foreach` closure), every `synchronize_halo!` went through a dynamic
+# `foreach(f!::Function, fields)` that boxed the collection and its field tuple (384 bytes
+# for ten fields). A field tuple is walked with `first`/`tail`, which unrolls into one
+# static call per field; field arrays (`ArrayOfHaloArray`) keep the plain loop.
+function foreach_field!(f!::F, mha::AbstractHaloCollection) where {F}
+    _foreach_unrolled(f!, _fields(mha))
     return nothing
 end
+@inline _foreach_unrolled(f!::F, fields::Tuple) where {F} = (f!(first(fields)); _foreach_unrolled(f!, Base.tail(fields)))
+@inline _foreach_unrolled(::F, ::Tuple{}) where {F} = nothing
+@inline _foreach_unrolled(f!::F, fields) where {F} = foreach(f!, fields)
 
 @inline function _check_global_scalar_indices(halo::AbstractHaloArray{T,N}, I::Tuple) where {T,N}
     # Fewer indices than dimensions is a LINEAR-indexing attempt (`u[3]` on a

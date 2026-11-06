@@ -6,6 +6,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.16.1] — 2026-11-06
+
+### Fixed
+- `synchronize_halo!`, `halo_exchange!` and `boundary_condition!` on a
+  collection could allocate on every call (384 bytes for a ten-field
+  `MultiHaloArray`), depending on how they were first compiled: the per-field
+  loop did not specialise on its function argument, so once inference had
+  widened it (for instance after a first call from inside a two-argument
+  `foreach` closure) every call went through a dynamic `foreach` that boxed the
+  collection and its field tuple. The loop is specialised and unrolled over the
+  field tuple now, allocation-free however it was first compiled.
+
 ## [0.16.0] — 2026-11-05
 
 ### Added
