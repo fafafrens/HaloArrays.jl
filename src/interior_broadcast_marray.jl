@@ -28,16 +28,51 @@ function _check_field_count(x::FieldCollection, n)
 end
 _check_field_count(x, n) = nothing
 
-# Run `op!(field, broadcast_for_that_field)` for every field of `dest`.
+# The broadcast for field `i`: every collection operand replaced by its field.
+@inline _field_broadcast(bc_flat::Broadcasted, i) =
+    _map_operands(x -> _field_leaf(x, i), bc_flat, MultiHaloArrayStyle)
+
+# Run `op!(field, broadcast_for_that_field)` for every field of `dest`; the
+# backend of the fields decides the order of the two loops.
 @inline function _each_field!(op!::F, dest::FieldCollection, bc::Broadcasted) where {F}
     bc_flat = Broadcast.flatten(bc)
+    _check_field_counts(dest, bc_flat)
+    _run_fields!(halo_backend(dest), op!, dest, bc_flat)
+    return dest
+end
+# Every level of a nested destination is checked before any cell is written.
+function _check_field_counts(dest::FieldCollection, bc_flat::Broadcasted)
     out = _fields(dest)
     foreach(x -> _check_field_count(x, length(out)), bc_flat.args)
     for i in eachindex(out)
-        op!(out[i], _map_operands(x -> _field_leaf(x, i), bc_flat, MultiHaloArrayStyle))
+        _check_field_counts(out[i], _field_broadcast(bc_flat, i))
     end
-    return dest
+    return nothing
 end
+_check_field_counts(dest, bc) = nothing
+
+# Single-block fields have one tile each: field by field.
+@inline function _run_fields!(::AbstractHaloBackend, op!::F, dest::FieldCollection, bc_flat::Broadcasted) where {F}
+    out = _fields(dest)
+    for i in eachindex(out)
+        op!(out[i], _field_broadcast(bc_flat, i))
+    end
+    return nothing
+end
+# Threaded fields: ONE tile sweep with the fields inside each tile, so a state
+# of n fields starts the thread backend once per broadcast instead of n times.
+@inline _run_fields!(::ThreadedHaloBackend, op!::F, dest::FieldCollection, bc_flat::Broadcasted) where {F} =
+    _foreach_tile(t -> _tile_fields!(op!, dest, bc_flat, t), dest)
+
+@inline function _tile_fields!(op!::F, dest::FieldCollection, bc_flat::Broadcasted, t) where {F}
+    out = _fields(dest)
+    for i in eachindex(out)
+        _tile_fields!(op!, out[i], _field_broadcast(bc_flat, i), t)
+    end
+    return nothing
+end
+@inline _tile_fields!(op!::F, dest::ThreadedHaloArray, bc_flat::Broadcasted, t) where {F} =
+    (op!(interior_view(dest, t), unpack_ha_tile(bc_flat, t, dest)); nothing)
 
 @inline Base.copyto!(dest::FieldCollection, bc::Broadcasted{<:MultiHaloArrayStyle}) =
     _each_field!(copyto!, dest, bc)

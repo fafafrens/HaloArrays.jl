@@ -6,6 +6,27 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- `tile_foreach(f, state)` and `tile_mapreduce(f, op, state)` accept a
+  collection (`MultiHaloArray`, `ArrayOfHaloArray`): the fields share one
+  decomposition, so the kernel runs once per tile on the collection's thread
+  backend and reads every field of the tile through `tile_parent(state, tile)`.
+  A multi-field kernel no longer has to name a threading package. The ideal
+  hydro example uses it instead of a hard-wired `OhMyThreads.tforeach`, so its
+  right-hand side follows `thread_backend=` (with `PolyesterBackend` the
+  128² run went from 354 ms, the two thread pools fighting, to 8.6 ms).
+
+### Changed
+- `fill!` and broadcast on a collection of threaded fields are **one tile
+  sweep** with the fields inside each tile, instead of one sweep per field: a
+  state of n fields starts the thread backend once per operation, not n times.
+  On a four-field 128² state in 2×2 tiles with the default `ThreadsBackend`
+  (8 threads, M4 Max): `fill!` 60 → 22 µs and 5.3 → 1.9 KB, `w .= u .+ a .* du`
+  59 → 19 µs; a six-step ideal-hydro run 15.1 → 11.0 ms. Single arrays and
+  collections of single-block fields are unchanged; results are identical.
+  A field-count mismatch in a nested collection broadcast is now reported
+  before any cell is written.
+
 ## [0.16.1] — 2026-11-06
 
 ### Fixed

@@ -106,9 +106,6 @@ synchronize_halo!(vel)
 """
 const ArrayOfHaloArray{T,D,S,C<:AbstractArray,L} = FieldCollection{T,D,S,C,L}
 
-# A field of a collection: a single halo array, or (nested) another collection.
-const HaloArrayField = Union{AbstractSingleHaloArray,AbstractHaloCollection}
-
 # ---- field-compatibility checks ------------------------------------------
 # Every field must match the first in spatial dimensionality, interior size,
 # halo width and backend. With `same_field_shape` (an ArrayOfHaloArray, whose

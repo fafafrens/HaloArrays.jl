@@ -177,3 +177,67 @@ end
         @test length(unique(rids)) == n
     end
 end
+
+# A backend that counts how often the tiles are started: one `tile_foreach` is
+# one sweep (on a task-based backend, one round of spawns).
+struct CountingBackend <: ThreadBackend end
+const SWEEPS = Ref(0)
+HaloArrays.tile_foreach(::CountingBackend, f, itr; scheduler=nothing) =
+    (SWEEPS[] += 1; foreach(f, itr); nothing)
+HaloArrays.tile_mapreduce(::CountingBackend, f, op, itr; scheduler=nothing) =
+    mapreduce(f, op, itr)
+sweeps(f) = (SWEEPS[] = 0; f(); SWEEPS[])
+
+@testset "Collections: one tile sweep per bulk write" begin
+    names = (:a, :b, :c)
+    threaded(b) = MultiHaloArray(ThreadedHaloArray, Float64, (4, 6), 1; fields=names,
+        boundary_condition=:periodic, dims=(2, 2), thread_backend=b)
+    local_() = MultiHaloArray(LocalHaloArray, Float64, (8, 12), 1; fields=names,
+        boundary_condition=:periodic)
+    init!(c, s) = (foreach(k -> fill_from_global_indices!(I -> s * (k + I[1] + 10 * I[2]), c[names[k]]), 1:3); c)
+    same(c, ref) = all(n -> gather_haloarray(c[n]) == gather_haloarray(ref[n]), names)
+    A = reshape(collect(1.0:96.0), 8, 12)      # a plain array: global interior coordinates
+
+    ul, vl, wl = init!(local_(), 1.0), init!(local_(), -0.5), local_()
+    @testset "$(nameof(typeof(b)))" for b in (ThreadsBackend(), OhMyThreadsBackend(),
+            SerialBackend(), PolyesterBackend(), CountingBackend())
+        u, v, w = init!(threaded(b), 1.0), init!(threaded(b), -0.5), threaded(b)
+        a = u[:b]                              # a single array applies to every field
+
+        @test same(fill!(w, 3.0), fill!(wl, 3.0))
+        @test same(w .= u .+ 2 .* v, wl .= ul .+ 2 .* vl)
+        @test same(w .= u .* 0.5, wl .= ul .* 0.5)
+        @test same(w .= u .* a, wl .= ul .* ul[:b])
+        @test same(w .= u .+ A, wl .= ul .+ A)
+        @test same(u .- v, ul .- vl)           # out of place
+        @test same(zero(u), zero(ul))
+
+        hits = zeros(Int, tile_count(u))
+        tile_foreach(u) do t
+            hits[t] += length(tile_parent(u, t))   # every field of this tile
+        end
+        @test hits == fill(3, tile_count(u))
+        @test tile_mapreduce(t -> 10 * t, +, u) == 10 * sum(1:tile_count(u))
+    end
+
+    # (other names than in the loop above: rebinding `u` would box it there)
+    cu, cv, cw = init!(threaded(CountingBackend()), 1.0), init!(threaded(CountingBackend()), 2.0), threaded(CountingBackend())
+    @test sweeps(() -> fill!(cw, 1.0)) == 1
+    @test sweeps(() -> (cw .= cu .+ 2 .* cv)) == 1
+    @test sweeps(() -> (cw .= cu .+ A)) == 1
+    @test sweeps(() -> tile_foreach(t -> nothing, cu)) == 1
+    @test sweeps(() -> fill!(cu[:a], 1.0)) == 1          # a single array: unchanged
+
+    # collections of collections: still one sweep, every leaf written
+    nested(b) = ArrayOfHaloArray([threaded(b), threaded(b)])
+    n, m = nested(CountingBackend()), nested(CountingBackend())
+    @test sweeps(() -> fill!(m, 2.0)) == 1
+    @test sweeps(() -> (n .= m .* 3)) == 1
+    @test all(c -> all(k -> all(==(6.0), gather_haloarray(c[k])), names), parent(n))
+
+    # a field-count mismatch is refused before any tile runs
+    two = MultiHaloArray(ThreadedHaloArray, Float64, (4, 6), 1; fields=(:a, :b),
+        boundary_condition=:periodic, dims=(2, 2))
+    three = threaded(ThreadsBackend())
+    @test_throws DimensionMismatch three .= two .+ 1
+end
