@@ -79,6 +79,21 @@ three backends (and a CPU-vs-GPU KernelAbstractions version).
 
 Every exported symbol has a docstring — in the REPL try `?synchronize_halo!`, `?ThreadedHaloArray`.
 
+## Performance
+
+Indicative numbers from one laptop (Apple M4 Max, Julia 1.13, v0.16.1), 2-D heat
+stencil with `synchronize_halo!` every step, Float64:
+
+| 2048² domain | Mcell/s |
+|---|---|
+| `LocalHaloArray` | 1540 |
+| `ThreadedHaloArray`, 4 tiles | 4860 |
+| `ThreadedHaloArray`, 8 tiles | 9290 |
+
+A blocking 3-D MPI halo exchange of a 64³ block (32 KiB faces) takes about 60 µs
+on 2 ranks and 75 µs on 4. See [`benchmark/`](benchmark/README.md) for the
+harnesses, the full tables and why laptop scaling numbers are only smoke tests.
+
 ## Tests
 
 ```julia

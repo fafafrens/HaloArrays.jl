@@ -44,3 +44,6 @@ deps/builds/
 # Documenter
 docs/build/
 docs/Manifest.toml
+
+# Claude Code: personal project notes
+CLAUDE.local.md
