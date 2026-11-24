@@ -1,6 +1,6 @@
 # HaloArrays.jl
 
-Julia package (v0.16.1, Julia ≥ 1.10, repo `fafafrens/HaloArrays.jl`): arrays with
+Julia package (Julia ≥ 1.10, repo `fafafrens/HaloArrays.jl`): arrays with
 ghost (halo) cells and one API for serial, threaded-tile and MPI stencil/PDE
 codes. A stencil written against `interior_view` / `synchronize_halo!` runs
 unchanged on every backend; only the constructor changes. Storage can be a GPU
@@ -44,8 +44,9 @@ examples/                    own Project.toml; heat, finite_volume, hydro, latti
 CHANGELOG.md                 Keep-a-Changelog; every user-visible change gets an entry
 ```
 
-`archive/old/` is ignored (`.ignore`). `LocalPreferences.toml` pins this machine's
-Homebrew OpenMPI and HDF5; do not commit changes to it for other machines.
+`archive/old/` is ignored (`.ignore`). `LocalPreferences.toml` and every
+`Manifest.toml` are gitignored: they hold one machine's MPI/HDF5 choice and
+resolved versions.
 
 ## Commands
 
@@ -87,61 +88,27 @@ The docs build fails if an exported symbol has no docstring (`checkdocs = :expor
 and `test_public_api.jl` checks the export list, so a new export needs a docstring,
 a place on a `docs/src/api/*.md` page, and a test.
 
-## Benchmark baseline
+## Benchmark notes
 
-Quick-start harnesses on this machine (Apple M4 Max, 12 P + 4 E cores, Julia
-1.13.3, v0.16.1, 2026-11-24; single runs, machine not idle). Full tables in
-`benchmark/README.md`; use these to spot a regression, not to claim scaling.
-
-- `stencil.jl` at 2048², Mcell/s: Local 1541; Threaded 1379 (1 tile), 2483 (2),
-  4861 (4), 9286 (8), 9149 (16). At 1024²: Local 1678, 8 tiles 8155.
-- `run_mpi.jl`, blocking exchange of a 64³ block: 58 µs (2 ranks), 74 µs (4),
-  135 µs (8); 128³: 185 / 288 / 529 µs. The split-exchange `hidden` gain is noise here.
-
-CLI micro-suite, same machine and date (medians; every case has a reference
-line in `benchmark/README.md`):
-
-- MPI, 4 ranks, 128²: blocking exchange 34 µs, split 38 µs; `synchronize_halo!`
-  36 to 38 µs, 0 B; `mapreduce` 51 µs. Gather 64²: 183 µs; HDF5 append 2.6 ms.
-- `synchronize_halo!` at 128², any boundary mode, 0 B: local 0.13 to 0.17 µs,
-  threaded 2×2 tiles 0.46 µs.
-- Thread backends (4 threads, 256²): task-based `threads`/`ohmythreads` cost a
-  fixed 13 to 15 µs and 1 to 3 KB per call; `serial` and `polyester` are 0.3 to
-  9 µs. Only `mapreduce` gains from tasks (serial 39 µs, polyester 11 µs).
-- Threaded halo sync vs serial: the spawn cost is now 15 to 20 µs (the README's
-  older table says 130 to 180), so threading wins from about 20 µs of exchange
-  work: 2048² halo 3 with 64 tiles 59 → 26 µs, 128³ halo 2 98 → 39 µs.
-- Full steps: ideal hydro 128² local 23 ms, threaded 11 ms (15 ms before the
-  one-sweep collection change below), MPI 4 ranks 10 ms;
-  relativistic 1024² serial 160 ms/step, 8 threads 6.8×, 8 ranks 6.0×;
-  cylindrical 5.8×; heat 512² local 1.56 ms, 2 tiles 1.12 ms, 2 ranks 0.89 ms.
-- Metal: `CellCheckerboard` compressed launch 1.3× (128²) to 3.4× (1024²) over
-  the naive launch; linear vs Cartesian full pass 1.4 to 1.5× in 3D/4D and a
-  noisy 1.4 to 2.0× in 2D (the older README table says up to 3.5×);
-  single-launch Jacobi gains 1.2 to 1.9× up to 512² (noisy) and nothing above.
-  CPU Jacobi vs checkerboard 1.9 to 2.8×. Run twice (scratch env, then
-  `--project=examples`): agreement within a few percent from 512² up, small
-  GPU sizes vary by tens of percent.
-
-Things that bite when running them:
-- `benchmarktools_times!` in `benchmark/common.jl` passes a finite `seconds=1.0e6`:
+Reference numbers and every command are in `benchmark/README.md`. Things that
+bite when running them:
+- `Pkg.develop(path=".")` under Julia 1.11+ appends a `[sources]` table to
+  `benchmark/Project.toml` (and `Pkg.update()` does the same to
+  `examples/Project.toml`, reordering it too); do not commit that
+  (`git checkout <env>/Project.toml`). `Pkg.status` then warns that the project
+  changed since the manifest was resolved; that is harmless.
+- The `benchmark` and `examples` manifests are gitignored and go stale; if a
+  script fails to load a package, `Pkg.update()` in that environment.
+- Launch MPI runs through `MPI.mpiexec()` of the same project, as `run_mpi.jl`
+  does. Without a `LocalPreferences.toml` an environment uses the MPI from
+  `MPICH_jll`, whatever the root project is pinned to.
+- `benchmarktools_times!` in `benchmark/common.jl` must pass a finite `seconds`:
   BenchmarkTools 1.8 converts `seconds / sample_time` to an `Int`, so `Inf`
-  throws `InexactError`. Keep it finite.
-- The `examples` environment was re-resolved on 2026-11-24 (Julia 1.13,
-  HaloArrays 0.16.1 at `..`, Metal 1.11, KernelAbstractions 0.9.48, LinearSolve 5,
-  OrdinaryDiffEq 7.8). Its `Manifest.toml` is gitignored; if it goes stale again,
-  `Pkg.update()` there, then `git checkout examples/Project.toml`, because Julia
-  1.13 reorders the file and appends `[sources]`. `Pkg.status` then warns that
-  the project changed since the manifest was resolved; that is harmless.
-- Launch MPI runs through `MPI.mpiexec()` of the same project, as `run_mpi.jl` does.
-- `Pkg.develop(path=".")` under Julia 1.13 appends a `[sources]` table to
-  `benchmark/Project.toml`; do not commit it (`git checkout benchmark/Project.toml`).
-- The benchmark environment has no `LocalPreferences.toml`, so it runs MPICH from
-  `MPICH_jll`, not the Homebrew OpenMPI the root project is pinned to.
+  throws `InexactError`.
 - `stencil.jl` tiles as `(1, nthreads)` and silently skips the threaded case when
-  the thread count does not divide the size (12 threads on 256/1024/2048).
-- Use at most 8 to 12 threads: beyond the 12 performance cores the efficiency
-  cores drag the result down (16 threads at 256²: 502 Mcell/s).
+  the thread count does not divide the size.
+- Results are single runs unless you repeat them; small GPU sizes vary by tens
+  of percent from run to run.
 
 ## API
 
@@ -297,85 +264,6 @@ Workflow:
   `git rebase --onto origin/main` dropping the squashed commits.
 - Before pushing: full `Pkg.test`, then MPI with 2 and 4 ranks, locally.
 - After pushing, confirm CI actually started (see above).
-- Force-pushes are Eduardo's to run (`git push --force-with-lease`). Merge
-  (`gh pr merge --squash`) only when CI is green and he has said to merge.
+- Merges are the maintainer's call: squash merge, once CI is green.
 - Every PR updates `CHANGELOG.md`; a release PR bumps `Project.toml` and dates the
   changelog section.
-
-## Current state (2026-11-24)
-
-`main` is at 0.16.1 (last merge #105, a CompatHelper bump). Three PRs are open,
-see below. Recent history:
-
-- #104 (0.16.1): halo refresh of collections is allocation-free however it was first compiled.
-- #100, #103: manual pages *Index spaces*, *Cell and face loops*, *Good habits*.
-- #99, #101 (0.16.0): consolidation. Dispatch holes closed, one communicator seam
-  for reductions, one request per face in the MPI exchange, BLAS-1 as one kernel,
-  one constructor per collection family with `storage=` everywhere, deprecated
-  spellings removed.
-- #98: boundary conditions as per-cell rules `bc(u, k)`. **Breaking:** `FunctionBC`
-  takes the rule, not the old slab function.
-- #97: KernelAbstractions extension; on GPU storage all rule faces of a block are
-  filled in one launch.
-- #93 to #96 (0.14, 0.15): `Mirror(sign)`, `Extrapolation(order)`, linear-index cell windows.
-- #85 to #92 (0.13): KrylovKit linsolve, right preconditioning, FGMRES,
-  `HaloArrays.Krylov` submodule, `dots!` + CGS2.
-
-Decisions that stand:
-- `synchronize_halo!` is the only place ghosts are filled; the split pair is the
-  exchange alone and needs `boundary_condition!` afterwards.
-- Positional boundary-condition constructor forms are gone; use `boundary_condition=`.
-- `dot`/`norm` on a multi-field state do one `Allreduce`, not one per field.
-- `lmul!(s, x)` multiplies on the left (matters for non-commutative cell types).
-- MPI `eachindex` is the owned global block.
-
-## Open PRs (opened 2026-11-24)
-
-Three branches off `main`, one concern each:
-
-1. `collection-tile-sweep`: one tile sweep per bulk write on a threaded
-   collection. `_foreach_tile`/`_mapreduce_tile` and the public
-   `tile_foreach`/`tile_mapreduce` accept a collection; `fill!` is one method on
-   `HaloArrayField` with a per-tile `_fill_tile!`; collection broadcast dispatches
-   on `halo_backend(dest)` (`_run_fields!`, `_tile_fields!` in
-   `src/interior_broadcast_marray.jl`); the hydro example uses `tile_foreach(u)`.
-   Tests in `test/test_thread_backend.jl` (a `CountingBackend` asserts one sweep).
-2. `benchmark-timer-fix`: finite `seconds` for the BenchmarkTools timer in
-   `benchmark/common.jl`.
-3. `benchmark-refs-claude-md`: this file, the reference numbers in
-   `benchmark/README.md`, the Performance section in `README.md`. Its hydro
-   numbers assume branch 1, so merge that one first.
-
-Decided on 2026-11-24, not to do for now:
-- A generic field walker (`_each_leaf`) porting every collection operation to
-  one sweep: judged too large and unproven. Port a single operation, with its
-  own measurement, only when a benchmark shows it matters.
-- A size threshold so small tiles skip the task spawn on `ThreadsBackend`:
-  measured (the task backends have a ~13 µs floor; `fill!`/broadcast cross over
-  between 256² and 1024² on 4 tiles, `mapreduce` between 64² and 256²) but left
-  unimplemented. `PolyesterBackend` has no such floor and is the answer for
-  small tiles today.
-
-Still per field on a threaded collection: the reductions (`_local_sum`,
-`_local_dot`, `mapreduce`, `any`/`all`), `copyto!` between collections,
-`swap!`/`rotate!`/`reflect!`. The other examples (`finite_volume`, `lattice`)
-still call `OhMyThreads.tforeach` directly.
-
-## Open tasks
-
-Carried from the notes of 2026-11-05 and not re-verified against 0.16.1; check
-each against the code before starting on it.
-
-Left over from the #99 review:
-- Tiled GPU `gather` still scalar-indexes.
-- Coupled boundary conditions as rules over a tuple of fields.
-- Known hole: collection `dot`/`dots!` field-count mismatch is not caught for a
-  1-field collection.
-
-Solver roadmap, in priority order:
-1. Chebyshev polynomial preconditioner (pairs with FGMRES).
-2. DCGS2 delayed reorthogonalisation.
-3. Fused threaded `dots!` sweep.
-4. One-sided `Pr` for CG.
-5. Preconditioned MINRES.
-6. `precs` hook for OrdinaryDiffEq.
