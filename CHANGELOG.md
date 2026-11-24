@@ -6,6 +6,33 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- `sitevector` and `siteview` accept the storage of one tile, as
+  `tile_parent(state, t)` returns it: a padded array, or a tuple or `NamedTuple`
+  of them, nested like the collection. A tile loop resolves the tile once,
+
+  ```julia
+  tile_foreach(u) do t
+      s, d = tile_parent(u, t), tile_parent(du, t)
+      @inbounds for IL in interior_faces(fr, dim)
+          IR = IL + e
+          F  = scale * flux(sitevector(s, IL), sitevector(s, IR))
+          siteview(d, IL) .-= F
+          siteview(d, IR) .+= F
+      end
+  end
+  ```
+
+  and runs as fast as hand-written per-field reads and stores. The
+  three-argument forms `sitevector(u, I, t)` / `siteview(du, I, t)` are
+  unchanged, but on a `ThreadedHaloArray` collection they look the tile up at
+  every access, which the compiler cannot hoist out of a loop that also writes.
+  2-D relativistic hydro step at 1024², 8 tiles (M4 Max, 8 threads): 63 ms with
+  the three-argument forms, 22.6 ms with the tile-storage forms, 23.5 ms with
+  the hand-written `accumulate_flux_divergence!` hooks; serial 163 / 154 /
+  160 ms. The tile storage of an `Array`-backed `ArrayOfHaloArray` (an array of
+  arrays, a runtime field count) is refused with an `ArgumentError`.
+
 ## [0.16.2] — 2026-11-24
 
 ### Added

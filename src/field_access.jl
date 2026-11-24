@@ -9,6 +9,7 @@ end
 
 """
     siteview(state, I::CartesianIndex[, tile])
+    siteview(tile_parent(state, tile), I::CartesianIndex)
 
 Return a lazy, writable array of all fields at local padded-storage index `I`,
 shaped like the collection's fields, without copying component values. An
@@ -52,6 +53,13 @@ Construction performs no validation. The caller must supply a single array or fl
 a storage index of the correct dimension and within bounds, and a valid tile
 (explicit for threaded storage). Ordinary scalar indexing remains bounds-checked;
 `@inbounds` may elide those checks. Alias detection remains enabled.
+
+In a tile loop that also writes, resolve the tile once and index its storage:
+`siteview(tile_parent(state, t), I)` accepts what [`tile_parent`](@ref) returns
+(a padded array, or a tuple or `NamedTuple` of them, nested like the
+collection) and gives a vector of the leaf fields in the same order. On
+threaded storage `siteview(state, I, t)` looks the tile up at every access,
+which the compiler cannot hoist out of a loop that stores into the fields.
 
 ```julia
 q = siteview(state, I)          # pass a final tile id for threaded storage
@@ -176,6 +184,7 @@ _n_leaf_type(::Type{S}) where {S<:FieldCollection} = throw(ArgumentError(
 
 """
     sitevector(state, I::CartesianIndex[, tile]) -> SVector{N}
+    sitevector(tile_parent(state, tile), I::CartesianIndex) -> SVector{N}
 
 The `N` leaf fields of `state` at local padded-storage index `I` as a **static
 vector**, in the order of [`siteview`](@ref). `N` is read off the type of
@@ -203,7 +212,95 @@ q = sitevector(u, I)           # SVector{4,Float64} for a four-field u
 F = flux(q)                    # static-array arithmetic, no allocation
 siteview(du, I) .-= F          # write back through the view
 ```
+
+The second form reads from the storage of one tile, resolved once with
+[`tile_parent`](@ref): the form for a tile loop that reads and writes, on every
+backend (see [`siteview`](@ref)).
+
+```julia
+tile_foreach(u) do t
+    s, d = tile_parent(u, t), tile_parent(du, t)       # the tile, looked up once
+    @inbounds for I in interior_cells(CellRanges(u, t))
+        siteview(d, I) .= rhs(sitevector(s, I))
+    end
+end
+```
 """
 Base.@propagate_inbounds sitevector(state::AbstractHaloArray, I::CartesianIndex,
         tile::Union{Nothing,Integer}=nothing) =
     SVector{_n_leaf_type(typeof(state))}(siteview(state, I, tile))
+
+# ─── Site access on the storage of one tile ──────────────────────────────────
+# `tile_parent(state, t)` resolves the tile once: a padded array for a single
+# field, a tuple or NamedTuple of them for a collection, nested like the
+# collection. The accessors below read and write a site of that storage, so a
+# tile loop looks the tile up once instead of at every access. On threaded
+# storage the lookup is a load from the tile vector, which the compiler cannot
+# hoist out of a loop that also stores into field arrays.
+const _TileFields = Union{Tuple,NamedTuple}
+const _TileStorage = Union{DenseArray,_TileFields}
+
+# Wrapper that marks resolved tile storage as the `state` of a SiteView.
+struct _TileSite{S<:_TileStorage}
+    storage::S
+end
+
+@inline _n_leaves(::DenseArray) = 1
+@inline _n_leaves(s::NamedTuple) = _n_leaves(Tuple(s))
+@inline _n_leaves(::Tuple{}) = 0
+@inline _n_leaves(s::Tuple) = _n_leaves(first(s)) + _n_leaves(Base.tail(s))
+
+@inline _leaf_eltype(a::DenseArray) = eltype(a)
+# The tile storage of an Array-backed ArrayOfHaloArray is an array of arrays: a
+# runtime field count, which the tuple walks below cannot unroll.
+_leaf_eltype(::DenseArray{<:DenseArray}) = _throw_array_of_storages()
+@noinline _throw_array_of_storages() = throw(ArgumentError(
+    "site access on tile storage needs a padded array or a tuple/NamedTuple of them; " *
+    "an array of arrays (the tile storage of an Array-backed ArrayOfHaloArray) has a " *
+    "runtime number of fields. Use `siteview(state, I, tile)` on the collection."))
+@inline _leaf_eltype(s::_TileFields) = promote_type(map(_leaf_eltype, Tuple(s))...)
+
+# The values of every leaf at `I`, as one flat tuple in declaration order.
+Base.@propagate_inbounds _site_values(a::DenseArray, I) = (a[I],)
+_site_values(::DenseArray{<:DenseArray}, I) = _throw_array_of_storages()
+Base.@propagate_inbounds _site_values(s::NamedTuple, I) = _site_values(Tuple(s), I)
+@inline _site_values(::Tuple{}, I) = ()
+Base.@propagate_inbounds _site_values(s::Tuple, I) =
+    (_site_values(first(s), I)..., _site_values(Base.tail(s), I)...)
+
+# Leaf `k` at `I`: the walk of `_concat_get`, on arrays instead of fields.
+Base.@propagate_inbounds _leaf_get(a::DenseArray, k::Int, I) = a[I]
+Base.@propagate_inbounds _leaf_get(s::NamedTuple, k::Int, I) = _leaf_get(Tuple(s), k, I)
+_leaf_get(::Tuple{}, k::Int, I) = throw(BoundsError((), k))
+Base.@propagate_inbounds function _leaf_get(s::Tuple, k::Int, I)
+    f = first(s); n = _n_leaves(f)
+    return k <= n ? _leaf_get(f, k, I) : _leaf_get(Base.tail(s), k - n, I)
+end
+Base.@propagate_inbounds _leaf_set!(a::DenseArray, v, k::Int, I) = (a[I] = v; nothing)
+Base.@propagate_inbounds _leaf_set!(s::NamedTuple, v, k::Int, I) = _leaf_set!(Tuple(s), v, k, I)
+_leaf_set!(::Tuple{}, v, k::Int, I) = throw(BoundsError((), k))
+Base.@propagate_inbounds function _leaf_set!(s::Tuple, v, k::Int, I)
+    f = first(s); n = _n_leaves(f)
+    return k <= n ? _leaf_set!(f, v, k, I) : _leaf_set!(Base.tail(s), v, k - n, I)
+end
+
+@inline _site_size(s::_TileSite) = (_n_leaves(s.storage),)
+Base.@propagate_inbounds _site_get(s::_TileSite, k::Int, ::Nothing, I) = _leaf_get(s.storage, k, I)
+Base.@propagate_inbounds _site_set!(s::_TileSite, v, k::Int, ::Nothing, I) = _leaf_set!(s.storage, v, k, I)
+Base.parent(q::SiteView{T,N,<:_TileSite}) where {T,N} = q.state.storage
+
+@inline _leaf_dataids(a::DenseArray) = Base.dataids(a)
+@inline _leaf_dataids(s::NamedTuple) = _leaf_dataids(Tuple(s))
+@inline _leaf_dataids(::Tuple{}) = ()
+@inline _leaf_dataids(s::Tuple) = (_leaf_dataids(first(s))..., _leaf_dataids(Base.tail(s))...)
+Base.dataids(q::SiteView{T,N,<:_TileSite}) where {T,N} = _leaf_dataids(q.state.storage)
+_leaf_mightalias(f::DenseArray, a) = Base.mightalias(f, a)
+_leaf_mightalias(s::_TileFields, a) = any(f -> _leaf_mightalias(f, a), Tuple(s))
+_storage_mightalias(s::_TileSite, ::Nothing, a) = _leaf_mightalias(s.storage, a)
+
+@inline siteview(storage::_TileStorage, I::CartesianIndex) =
+    SiteView{_leaf_eltype(storage),1,_TileSite{typeof(storage)},typeof(I),Nothing}(
+        _TileSite(storage), I, nothing)
+
+Base.@propagate_inbounds sitevector(storage::_TileStorage, I::CartesianIndex) =
+    SVector(_site_values(storage, I))

@@ -34,6 +34,18 @@ function kernel!(du, u, I)
     return nothing
 end
 
+# The tile-storage forms in a loop that reads and writes: the tile is resolved once.
+function tile_kernel!(du, u)
+    tile_foreach(u) do t
+        s, d = tile_parent(u, t), tile_parent(du, t)
+        @inbounds for I in interior_cells(CellRanges(u, t))
+            q = sitevector(s, I)
+            siteview(d, I) .-= 2 .* q
+        end
+    end
+    return nothing
+end
+
 # Minimum time of f(args...) over `reps` evaluations, in ns per site read (the
 # helpers read every interior cell). Stable to a few percent; the comparisons
 # below use generous factors so a loaded CI machine does not fail them.
@@ -130,5 +142,92 @@ end
         # And well under the cost of materialising a Vector from the view.
         @test static < min_ns_per_read(read_vector!, c)
         @info "sitevector timing" hand_ns = hand sitevector_ns = static
+    end
+
+    @testset "on tile storage: tile_parent(state, t)" begin
+        t = MultiHaloArray(ThreadedHaloArray, Float64, (6, 5), 1; dims=(2, 1),
+                           fields=(:a, :b, :c), boundary_condition=:periodic)
+        fill_from_global_indices!(J -> (J[1] + 10J[2]) .* (1.0, 2.0, 3.0), t)
+        It = first(interior_cells(CellRanges(t)))
+
+        # Same values as the three-argument forms, on every tile.
+        for tile in 1:tile_count(t)
+            s = tile_parent(t, tile)
+            q = @inferred sitevector(s, It)
+            @test q isa SVector{3,Float64}
+            @test q === sitevector(t, It, tile)
+            v = @inferred siteview(s, It)
+            @test v == siteview(t, It, tile)
+            @test size(v) == (3,) && eltype(v) == Float64
+            @test parent(v) === s
+        end
+
+        # Writes reach the fields; a tuple of arrays works like a NamedTuple.
+        s = tile_parent(t, 2)
+        siteview(s, It) .= SVector(1.0, 2.0, 3.0)
+        @test sitevector(t, It, 2) === SVector(1.0, 2.0, 3.0)
+        siteview(Tuple(s), It) .+= SVector(1.0, 1.0, 1.0)
+        @test sitevector(Tuple(s), It) === SVector(2.0, 3.0, 4.0)
+        siteview(s, It)[2] = -1.0
+        @test tile_parent(t.b, 2)[It] == -1.0
+        @test_throws BoundsError siteview(s, It)[4]
+
+        # One array: a one-element vector. Local and MPI blocks have one tile.
+        @test (@inferred sitevector(s.a, It)) === SVector(2.0)
+        siteview(s.a, It) .= 5.0
+        @test tile_parent(t.a, 2)[It] == 5.0
+        @test sitevector(tile_parent(c, 1), I) === sitevector(c, I)
+
+        # Nested like the collection, leaves in siteview order; mixed types promote.
+        u = MultiHaloArray((; c, w))
+        su = tile_parent(u, 1)
+        @test (@inferred sitevector(su, I)) === sitevector(u, I)
+        @test siteview(su, I) == siteview(u, I)
+        siteview(su, I)[5] = -10.0
+        @test parent(w.pixx)[I] == -10.0
+        parent(w.pixx)[I] = 10.0
+        f32 = LocalHaloArray(Float32, (6, 5), 1; boundary_condition=:periodic)
+        mixed = (parent(c.E), (parent(f32), parent(c.D)))
+        @test (@inferred sitevector(mixed, I)) isa SVector{3,Float64}
+        @test eltype(siteview(mixed, I)) == Float64
+        siteview(mixed, I)[2] = 0.5
+        @test parent(f32)[I] === 0.5f0
+
+        # Aliasing rules of siteview hold.
+        v = siteview(s, It)
+        @test_throws ArgumentError v .= view(v, 3:-1:1)
+        v .= copy(view(v, 3:-1:1))
+        @test v == [4.0, -1.0, 5.0]
+
+        # Halo arrays keep their own methods; an array of storages is refused.
+        @test_throws ArgumentError sitevector(t, It)
+        arr = ArrayOfHaloArray(LocalHaloArray, Float64, (4,), (6, 5), 1; boundary_condition=:periodic)
+        @test_throws ArgumentError siteview(tile_parent(arr, 1), I)
+        @test_throws ArgumentError sitevector(tile_parent(arr, 1), I)
+        @test_throws ArgumentError sitevector((; p = tile_parent(arr, 1)), I)
+
+        # A read-and-write tile loop: same result as the three-argument forms, no allocation.
+        for backend in (SerialBackend(), ThreadsBackend())
+            x  = MultiHaloArray(ThreadedHaloArray, Float64, (6, 5), 1; dims=(2, 2),
+                                fields=(:a, :b, :c), boundary_condition=:periodic,
+                                thread_backend=backend)
+            fill_from_global_indices!(J -> (J[1] - J[2]) .* (1.0, 2.0, 3.0), x)
+            dx = similar(x); fill!(dx, 0.0)
+            ref = similar(x); fill!(ref, 0.0)
+            tile_kernel!(dx, x)
+            for tile in 1:tile_count(x), J in interior_cells(CellRanges(x, tile))
+                siteview(ref, J, tile) .-= 2 .* sitevector(x, J, tile)
+            end
+            @test all(interior_view(dx.b, k) == interior_view(ref.b, k) for k in 1:tile_count(x))
+            @test gather_haloarray(dx.c) == gather_haloarray(ref.c)
+        end
+        xs = MultiHaloArray(ThreadedHaloArray, Float64, (6, 5), 1; dims=(2, 2),
+                            fields=(:a, :b, :c), boundary_condition=:periodic,
+                            thread_backend=SerialBackend())
+        dxs = similar(xs); fill!(dxs, 0.0)
+        dl = similar(c); fill!(dl, 0.0)
+        tile_kernel!(dxs, xs); tile_kernel!(dl, c)
+        @test @allocated(tile_kernel!(dxs, xs)) == 0
+        @test @allocated(tile_kernel!(dl, c)) == 0
     end
 end
