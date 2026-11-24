@@ -209,6 +209,12 @@ Keep separate arrays when the halo widths or layouts differ. Read and write
 all fields at one cell through [`siteview`](@ref) or [`sitevector`](@ref);
 iterate the fields with [`eachfield`](@ref).
 
+A kernel that couples the fields loops over the tiles of the collection
+itself: `tile_foreach(state) do t … end` runs once per tile on the state's
+thread backend, and `tile_parent(state, t)` hands it every field of that tile.
+Do not loop over the fields and thread each one: that starts the thread
+backend once per field.
+
 ## Instead of …
 
 | instead of | write |

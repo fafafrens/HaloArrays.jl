@@ -67,7 +67,7 @@ struct PolyesterBackend <: ThreadBackend end
 """
     tile_foreach(backend, f, itr; scheduler)
     tile_foreach(f, backend, itr; scheduler)
-    tile_foreach(f, u::AbstractSingleHaloArray)
+    tile_foreach(f, u)
 
 Apply `f` to every element of `itr` in parallel, according to `backend`. The
 `scheduler` hint (`:dynamic` by default) is honoured by
@@ -86,6 +86,10 @@ tile_foreach(u) do tile
 end
 ```
 
+`u` may be a collection ([`MultiHaloArray`](@ref), [`ArrayOfHaloArray`](@ref)):
+its fields share one decomposition, so the kernel runs once per tile and reads
+every field of that tile through `tile_parent(u, tile)`.
+
 For explicit scheduler control fall back to the backend form,
 `tile_foreach(thread_backend(u), f, 1:tile_count(u); scheduler=…)`.
 """
@@ -94,7 +98,7 @@ function tile_foreach end
 """
     tile_mapreduce(backend, f, op, itr; scheduler)
     tile_mapreduce(f, op, backend, itr; scheduler)
-    tile_mapreduce(f, op, u::AbstractSingleHaloArray)
+    tile_mapreduce(f, op, u)
 
 Parallel `mapreduce(f, op, itr)` according to `backend`. `itr` must be non-empty
 (in this package there is always at least one tile). The function-first forms
@@ -115,8 +119,8 @@ function tile_mapreduce end
 # Array-level forms: public face of the `_foreach_tile`/`_mapreduce_tile` tile
 # drivers (abstract_haloarray.jl), so user kernels get the same dispatch as the
 # package's own per-tile operations without naming the backend.
-@inline tile_foreach(f::Function, u::AbstractSingleHaloArray) = _foreach_tile(f, u)
-@inline tile_mapreduce(f::Function, op, u::AbstractSingleHaloArray) = _mapreduce_tile(f, op, u)
+@inline tile_foreach(f::Function, u::HaloArrayField) = _foreach_tile(f, u)
+@inline tile_mapreduce(f::Function, op, u::HaloArrayField) = _mapreduce_tile(f, op, u)
 
 # --- chunking shared by the task-based backends (Base here, Polyester ext) -----
 # At most one contiguous chunk of tiles per thread, every chunk non-empty.

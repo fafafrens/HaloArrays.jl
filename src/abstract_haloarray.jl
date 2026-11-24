@@ -74,6 +74,10 @@ an `AbstractArray`, accessed by index).
 """
 abstract type AbstractHaloCollection{T,N,S} <: AbstractHaloArray{T,N} end
 
+# A field of a collection: a single halo array, or (nested) another collection.
+# These are the kinds that have tiles.
+const HaloArrayField = Union{AbstractSingleHaloArray,AbstractHaloCollection}
+
 # Field layouts carried by FieldCollection's L parameter: stacked field axes,
 # or one leaf axis over all leaves.
 struct Stacked end
@@ -338,6 +342,11 @@ function is_root end
 # parent; ThreadedHaloArray overrides these to run its tiles in parallel.)
 @inline _foreach_tile(f::F, ::AbstractSingleHaloArray) where {F} = (f(1); nothing)
 @inline _mapreduce_tile(f::F, op, ::AbstractSingleHaloArray) where {F} = f(1)
+# A collection's fields share one decomposition and one thread backend, so its
+# tiles are any field's: the kernel `f(tile_id)` runs once per tile and visits
+# the fields itself.
+@inline _foreach_tile(f::F, c::AbstractHaloCollection) where {F} = _foreach_tile(f, _first_field(c))
+@inline _mapreduce_tile(f::F, op, c::AbstractHaloCollection) where {F} = _mapreduce_tile(f, op, _first_field(c))
 
 @inline halo_width(arr::AbstractArray{<:AbstractSingleHaloArray}) = halo_width(first(arr))
 @inline tile_count(arr::AbstractArray{<:AbstractSingleHaloArray}) = tile_count(first(arr))
@@ -395,10 +404,17 @@ interior-only semantics of broadcast and reductions. Ghosts are left untouched;
 call [`synchronize_halo!`](@ref) before a stencil reads them. Use
 `fill!(parent(u), value)` to overwrite the raw storage including ghosts.
 """
-function Base.fill!(halo::AbstractSingleHaloArray, value)
-    _foreach_tile(t -> fill!(interior_view(halo, t), value), halo)
+function Base.fill!(halo::HaloArrayField, value)
+    _foreach_tile(t -> _fill_tile!(halo, t, value), halo)
     return halo
 end
+# One tile of the fill: an array fills its interior, a collection each of its
+# fields (which may be collections). A collection is thus ONE tile sweep with
+# the fields inside it, not one sweep per field.
+@inline _fill_tile!(halo::AbstractSingleHaloArray, t, value) =
+    (fill!(interior_view(halo, t), value); nothing)
+@inline _fill_tile!(c::AbstractHaloCollection, t, value) =
+    _foreach_unrolled(field -> _fill_tile!(field, t, value), _fields(c))
 
 # One uniform geometry guard for every backend: global shape, decomposition
 # layout, and per-tile padded storage (storage_size covers tile size AND halo
@@ -597,11 +613,6 @@ function Base.zero(c::AbstractHaloCollection)
     z = similar(c)
     fill!(z, zero(eltype(c)))
     return z
-end
-
-function Base.fill!(c::AbstractHaloCollection, value)
-    foreach(f -> fill!(f, value), _fields(c))
-    return c
 end
 
 # Any pair of collections (a Float32 copy of a Float64 state included): with

@@ -1,7 +1,6 @@
 using HaloArrays
 using DiffEqBase: ODEProblem
 using MPI
-using OhMyThreads: tforeach
 using OrdinaryDiffEq
 using Printf
 using StaticArrays
@@ -89,7 +88,7 @@ end
 function _ideal_hydro_rhs!(::ThreadedHaloBackend, du, u, p)
     ranges = FaceRanges(u)
 
-    tforeach(1:tile_count(u); scheduler=:static) do tile_id
+    tile_foreach(u) do tile_id
         u_data = tile_parent(u, tile_id)
         du_data = tile_parent(du, tile_id)
         apply_hydro_fluxes!(du_data, u_data, ranges, 1, inv(p.dx), p.gamma)
@@ -146,7 +145,7 @@ function fill_pressure_bump!(::ThreadedHaloBackend, u; gamma=1.4)
     h = halo_width(u[:rho])
     tile_cells = tile_size(u[:rho])
 
-    tforeach(1:tile_count(u); scheduler=:static) do tile_id
+    tile_foreach(u) do tile_id
         data = tile_parent(u, tile_id)
         coord = tile_coordinates(u, tile_id)
 

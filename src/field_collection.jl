@@ -106,9 +106,6 @@ synchronize_halo!(vel)
 """
 const ArrayOfHaloArray{T,D,S,C<:AbstractArray,L} = FieldCollection{T,D,S,C,L}
 
-# A field of a collection: a single halo array, or (nested) another collection.
-const HaloArrayField = Union{AbstractSingleHaloArray,AbstractHaloCollection}
-
 # ---- field-compatibility checks ------------------------------------------
 # Every field must match the first in spatial dimensionality, interior size,
 # halo width and backend. With `same_field_shape` (an ArrayOfHaloArray, whose
@@ -141,15 +138,22 @@ function _check_fields_compatible(what::AbstractString, ref, labeled_fields; sam
     return nothing
 end
 
-# Threaded fields must also share the tiling: equal global sizes with different
-# tile sizes or tile grids would let tile-indexed operations (siteview with a
-# tile id, per-tile kernels) address different global cells in different fields.
-@inline _check_same_layout(what, label, a, ref) = nothing
-function _check_same_layout(what, label, a::ThreadedHaloArray, ref::ThreadedHaloArray)
+# Threaded fields must also share the tiling and the thread backend: equal
+# global sizes with different tile sizes or tile grids would let tile-indexed
+# operations (siteview with a tile id, per-tile kernels, the one tile sweep of
+# `fill!` and broadcast) address different global cells in different fields,
+# and one sweep runs on one backend. A nested collection is compared through
+# its geometry leaf: its own fields were checked against it when it was built.
+@inline _check_same_layout(what, label, a, ref) =
+    _check_same_tiling(what, label, _geometry_field(a), _geometry_field(ref))
+@inline _check_same_tiling(what, label, a, ref) = nothing
+function _check_same_tiling(what, label, a::ThreadedHaloArray, ref::ThreadedHaloArray)
     tile_size(a) == tile_size(ref) ||
         throw(DimensionMismatch("$what field `$label` has tile size $(tile_size(a)) != $(tile_size(ref))"))
     a.topology.dims == ref.topology.dims ||
         throw(DimensionMismatch("$what field `$label` has tile grid $(a.topology.dims) != $(ref.topology.dims)"))
+    thread_backend(a) === thread_backend(ref) ||
+        throw(ArgumentError("$what field `$label` has thread backend $(thread_backend(a)) != $(thread_backend(ref))"))
     return nothing
 end
 
