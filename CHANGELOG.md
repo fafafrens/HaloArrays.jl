@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.16.2] — 2026-11-24
+
 ### Added
 - `tile_foreach(f, state)` and `tile_mapreduce(f, op, state)` accept a
   collection (`MultiHaloArray`, `ArrayOfHaloArray`): the fields share one
