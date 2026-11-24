@@ -240,4 +240,37 @@ sweeps(f) = (SWEEPS[] = 0; f(); SWEEPS[])
         boundary_condition=:periodic, dims=(2, 2))
     three = threaded(ThreadsBackend())
     @test_throws DimensionMismatch three .= two .+ 1
+
+    # ... at every nesting level: the first inner state must stay untouched when
+    # the second one mismatches (the tiles run in tasks; nothing may be half written)
+    pair(q) = MultiHaloArray((; p = threaded(ThreadsBackend()), q))
+    dest, src = pair(threaded(ThreadsBackend())), pair(two)
+    fill!(dest, 7.0); fill!(src, 1.0)
+    @test_throws DimensionMismatch dest .= src .* 2
+    @test all(n -> all(==(7.0), gather_haloarray(dest[:p][n])), names)
+
+    # one sweep has one tiling and one thread backend: both are fixed at construction
+    one_tile = MultiHaloArray(ThreadedHaloArray, Float64, (8, 12), 1; fields=names,
+        boundary_condition=:periodic, dims=(1, 1))
+    @test_throws DimensionMismatch ArrayOfHaloArray([one_tile, three])      # nested, other tile grid
+    @test_throws DimensionMismatch ArrayOfHaloArray([three, one_tile])
+    @test_throws ArgumentError MultiHaloArray((; a = three[:a], b = threaded(SerialBackend())[:a]))
+    @test thread_backend(three) === ThreadsBackend()
+    @test thread_backend(ArrayOfHaloArray([three, three])) === ThreadsBackend()
+
+    # fields of different types (boundary conditions are type parameters) are
+    # walked statically: nothing allocates beyond the backend's own tasks
+    mixed(make; kw...) = MultiHaloArray((;
+        a = make(; boundary_condition=:periodic, kw...),
+        b = make(; boundary_condition=((Reflecting(), Repeating()), (Repeating(), Reflecting())), kw...)))
+    tmixed() = mixed((; kw...) -> ThreadedHaloArray(Float64, (4, 6), 1; dims=(2, 2), kw...); thread_backend=SerialBackend())
+    lmixed() = mixed((; kw...) -> LocalHaloArray(Float64, (8, 12), 1; kw...))
+    bcast!(w, u, v) = (w .= u .+ 2 .* v; nothing)
+    for make in (tmixed, lmixed)
+        mu, mv, mw = fill!(make(), 1.0), fill!(make(), 2.0), make()
+        bcast!(mw, mu, mv)
+        @test all(==(5.0), gather_haloarray(mw[:a])) && all(==(5.0), gather_haloarray(mw[:b]))
+        @test (@allocated bcast!(mw, mu, mv)) == 0
+        @test (@allocated fill!(mw, 0.0)) == 0
+    end
 end

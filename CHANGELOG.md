@@ -23,9 +23,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   On a four-field 128² state in 2×2 tiles with the default `ThreadsBackend`
   (8 threads, M4 Max): `fill!` 60 → 22 µs and 5.3 → 1.9 KB, `w .= u .+ a .* du`
   59 → 19 µs; a six-step ideal-hydro run 15.1 → 11.0 ms. Single arrays and
-  collections of single-block fields are unchanged; results are identical.
-  A field-count mismatch in a nested collection broadcast is now reported
+  collections of single-block fields give the same results as before. On
+  threaded fields a field-count mismatch at any nesting level is reported
   before any cell is written.
+- The fields of a collection must share their **thread backend**, and nested
+  collections their **tiling**: `MultiHaloArray((; a, b))` with `a` on
+  `ThreadsBackend` and `b` on `SerialBackend` is an `ArgumentError`, and an
+  `ArrayOfHaloArray` of two states with different tile grids a
+  `DimensionMismatch` (direct fields already had to share the tiling; nested
+  ones were not compared). One sweep has one tiling and runs on one backend.
+  `thread_backend(state)` returns it for a collection.
+
+### Fixed
+- Broadcast on a collection whose fields have different types (per-field
+  boundary conditions, for instance) allocated on every call, on every backend
+  (544 bytes for two `LocalHaloArray` fields): the field loop indexed the
+  field tuple at run time. The fields are walked statically now and the
+  broadcast is allocation-free.
 
 ## [0.16.1] — 2026-11-06
 

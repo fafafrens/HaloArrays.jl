@@ -124,11 +124,13 @@ end
     tile_mapreduce(thread_backend(x), f, op, 1:tile_count(x); scheduler=:static)
 
 """
-    thread_backend(u::ThreadedHaloArray) -> ThreadBackend
+    thread_backend(u) -> ThreadBackend
 
-The thread-execution backend that dispatches this array's per-tile work.
+The thread-execution backend that dispatches the per-tile work of a
+[`ThreadedHaloArray`](@ref), or of a collection of them (its fields share one).
 """
 @inline thread_backend(halo::ThreadedHaloArray) = halo.backend
+@inline thread_backend(c::AbstractHaloCollection) = thread_backend(_first_field(c))
 
 function ThreadedHaloArray(::Type{T}, tile_size::NTuple{N,<:Integer}, halo::Integer;
         dims::NTuple{N,<:Integer} = ntuple(d -> d == N ? Threads.nthreads() : 1, Val(N)),
