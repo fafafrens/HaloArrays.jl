@@ -106,8 +106,10 @@ function benchmarktools_times!(f, samples, warmups)
         f()
     end
 
+    # The sample count is the only budget. The time budget must still be finite:
+    # BenchmarkTools 1.8 converts `seconds / sample_time` to an `Int`.
     f_ref = Ref(f)
-    trial = @eval BenchmarkTools.@benchmark $(f_ref)[]() samples=$(samples) evals=1 seconds=Inf
+    trial = @eval BenchmarkTools.@benchmark $(f_ref)[]() samples=$(samples) evals=1 seconds=1.0e6
     return Float64.(trial.times) ./ 1.0e9
 end
 
