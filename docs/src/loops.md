@@ -167,11 +167,31 @@ accumulate_flux_divergence!(hll_flux, field_storages(dstate), field_storages(sta
     scatter! = (_, I, s, F) -> (siteview(dstate, I) .+= s .* F))
 ```
 
-On a `ThreadedHaloArray` collection pass the tile to both accessors, `sitevector(state,
-I, t)` and `siteview(dstate, I, t)`, inside the tile loop. `sitevector` needs a
-compile-time field count, so it serves a `MultiHaloArray` (nested or not) and a
-single array; an `ArrayOfHaloArray` backed by an `Array` has a runtime field
-count and uses `SVector{N}(siteview(state, I))` with `N` written out.
+On a `ThreadedHaloArray` collection the accessors need the tile. In a tile
+loop, resolve it once with [`tile_parent`](@ref) and index its storage; both
+accessors take what `tile_parent(state, t)` returns (a padded array, or a tuple
+or `NamedTuple` of them, nested like the collection):
+
+```julia
+tile_foreach(state) do t
+    s, d = tile_parent(state, t), tile_parent(dstate, t)   # the tile, looked up once
+    @inbounds for I in interior_cells(CellRanges(state, t))
+        siteview(d, I) .= rhs(sitevector(s, I))
+    end
+end
+```
+
+This loop is the same on every backend (a Local or MPI block has one tile).
+`sitevector(state, I, t)` and `siteview(dstate, I, t)` give the same values,
+but on threaded storage they look the tile up at every access, and the compiler
+cannot hoist that lookup out of a loop that also stores into the fields: a 2-D
+relativistic flux loop ran 2.7 times slower that way. Keep the three-argument
+forms for setup, diagnostics and read-only loops.
+
+`sitevector` needs a compile-time field count, so it serves a `MultiHaloArray`
+(nested or not) and a single array; an `ArrayOfHaloArray` backed by an `Array`
+has a runtime field count and uses `SVector{N}(siteview(state, I))` with `N`
+written out.
 
 ## Kernel windows
 

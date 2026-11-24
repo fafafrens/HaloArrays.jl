@@ -51,6 +51,8 @@ common API isn't buried among the advanced kernel and threading internals.
 - [`sitevector`](@ref) — the same fields as an `SVector{N}`, `N` from the
   type of the state; for static-array kernels that read a cell and write back
   through `siteview`
+  (in a tile loop, both also take the storage of one tile:
+  `sitevector(tile_parent(u, t), I)`)
 
 ## Distributed (MPI)
 
